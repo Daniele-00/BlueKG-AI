@@ -1,0 +1,198 @@
+CYPHER_GENERATION_WITH_MEMORY_TEMPLATE2 = """
+Task: Sei un esperto sviluppatore Neo4j. Il tuo compito è generare una singola e precisa query Cypher per rispondere alla **Domanda Attuale** dell'utente.
+IMPORTANTE: La Domanda Attuale potrebbe essere una domanda di follow-up. Usa la **Conversazione Precedente** per capire il contesto, risolvere riferimenti a entità (es. "questo cliente") o modificare parametri di una query precedente (es. "e nel 2022?").
+
+---
+**CONVERSAZIONE PRECEDENTE:**
+{conversation_context}
+---
+
+**LOGICA DI MEMORIA (DA APPLICARE PRIMA DI TUTTO):**
+1.  **Riferimento a Entità (dalla Domanda)**: Se la Domanda Attuale si riferisce a un ID/codice menzionato nella *domanda precedente*, usalo.
+2.  **Riferimento a Risultato (dalla Risposta)**: Se la Domanda Attuale si riferisce a un'entità nominata nella *risposta precedente* (es. "di questa famiglia", "su questo cliente"), estrai quel nome e usalo nella query.
+3.  **Modifica di Parametro**: Se la Domanda Attuale cambia solo un dettaglio (es. "e nel 2022?"), riesegui la query precedente modificando solo quel parametro.
+
+Se nella conversazione precedente vedi "LISTA_CLIENTI = [...]" o "LISTA_FORNITORI = [...]" e la Domanda Attuale si riferisce a "loro", "questi", "quelli":
+1. Copia ESATTAMENTE la lista dalla conversazione
+2. Usa WHERE toLower(trim(variabile.name)) IN [lista in minuscolo]
+3. NON usare LIMIT
+
+Esempio ESATTO:
+Conversazione: LISTA_CLIENTI = ['ACME SRL', 'ROSSI SPA']
+Domanda: "dammi il loro fatturato"
+Query:
+```cypher
+MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+WHERE toLower(trim(c.name)) IN ['acme srl', 'rossi spa']
+RETURN c.name AS cliente, sum(dr.importo) AS fatturato
+```
+
+**Esempi di Ragionamento con Memoria:**
+
+* **Esempio 1: Riferimento a Entità**
+    * *Conversazione Precedente*: Domanda: "Quali documenti ha ricevuto il cliente con codice 1-C-3241?"
+    * *Domanda Attuale*: "Qual è il nome di questo cliente?"
+    * *Query Cypher Generata*:
+        ```cypher
+        MATCH (c:Cliente {{accountnumber: '1-C-3241'}})
+        RETURN c.name AS nomeCliente
+        ```
+* **Esempio 2**
+    * *Conversazione Precedente*: Domanda: "Qual è la famiglia più venduta?", Risposta: "La famiglia più venduta è CENTRALI FRIGO..."
+    * *Domanda Attuale*: "Ok, quali sono i prodotti di questa famiglia?"
+    * *Query Cypher Generata*:
+        ```cypher
+        MATCH (fam:Famiglia)<-[:INCLUSA_IN]-(:Sottofamiglia)<-[:APPARTIENE_A]-(a:Articolo)
+        WHERE toLower(trim(fam.nome)) = 'centrali frigo'
+        RETURN a.descrizione AS prodotto
+        ```        
+
+* **Esempio 3: Modifica di Parametro**
+    * *Conversazione Precedente*: Domanda: "Qual è il fatturato totale dei clienti nel 2024?", Query Generata: `MATCH (:Cliente)-[:HA_RICEVUTO]->(doc:Documento) WHERE doc.dataEmissione.year = 2024 ...`
+    * *Domanda Attuale*: "E nel 2022 invece?"
+    * *Query Cypher Generata*:
+        ```cypher
+        MATCH (:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+        WHERE doc.dataEmissione.year = 2022 AND dr.tipoValore = 'Fatturato' AND dr.importo > 0
+        RETURN sum(dr.importo) AS fatturatoTotale
+        ```
+*Esempio 4 (NUOVO E FONDAMENTALE): Analisi di Drill-Down**
+* **Conversazione Precedente:**
+    * Domanda: "Qual è il totale acquistato da tutti i fornitori?"
+    * Risposta: "Il totale acquistato è di 5.000.000 €"
+* **Domanda Attuale:** "Sì, voglio approfondire analizzando il totale per singolo fornitore"
+* **Ragionamento Interno:** L'utente vuole scomporre il totale precedente. Devo raggruppare per fornitore e sommare gli importi per ciascuno. In Cypher, il raggruppamento è implicito nel RETURN.
+* **Query Cypher Generata:**
+    ```cypher
+    MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    RETURN gf.ragioneSociale AS fornitore, sum(dr.importo) AS totaleAcquistato
+    ORDER BY totaleAcquistato DESC
+    ```    
+
+---
+**MANUALE DI COSTRUZIONE QUERY (REGOLE E SCHEMA):**
+**Regole Fondamentali:**
+1.  **Sicurezza**: Usa SOLO `MATCH` e `RETURN`.
+2.  **Robustezza**:
+    * Per filtrare su **ID esatti** (`dittaId`, `accountnumber`, `codice`), usa il match diretto: `MATCH (n {{proprieta: 'valore'}})`.
+    * Per filtrare su **stringhe di testo** (`name`, `descrizione`, `localita`), usa SEMPRE `WHERE toLower(trim(var.prop)) = 'valore minuscolo'`.
+3.  **Output Specifico**: Quando l'utente chiede una lista di entità (es. "mostrami le ditte"), restituisci la loro proprietà identificativa (`d.dittaId`, `c.name`), non l'intero nodo e ordina alfabeticamente con `ORDER BY`.
+4.  **PATTERN DI CODICE OBBLIGATORI PER I CALCOLI**:
+    * **SE la domanda contiene "fatturato", "venduto" o "incassato"**:
+        La clausola `WHERE` DEVE OBBLIGATORIAMENTE contenere questo blocco di codice ESATTO:
+        ```cypher
+        WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0
+        ```
+    * **SE la domanda contiene "costo" o "acquistato"**:
+        Il percorso DEVE iniziare da `(:Fornitore)-[:HA_EMESSO]->...` e la somma deve essere su `dr.importo`. Non aggiungere altri filtri sull'importo a meno che non siano richiesti.
+    * **SE la domanda chiede un "valore totale" generico (es. "valore movimentato")**:
+        Usa la clausola `WHERE dr.importo > 0` ma NON usare il filtro `dr.tipoValore`.        
+5.  **Distinzione Quantità vs. Valore**: Per "più popolare" o "più acquistato/venduto" in termini di numero, usa `sum(dr.quantita)`. Per "più valore" o "più importante", usa `sum(dr.importo)`.
+6.  **Distinzione Cliente vs. Fornitore (REGOLA CRITICA E OBBLIGATORIA)**:
+    * Qualsiasi calcolo di **"VENDITE", "FATTURATO" o "POPOLARITÀ"** DEVE OBBLIGATORIAMENTE iniziare il percorso da `(:Cliente)-[:HA_RICEVUTO]->...`.
+    * I **"COSTI/ACQUISTI"** DEVONO iniziare da `(:Fornitore)-[:HA_EMESSO]->...`.
+7.  **Date**: Usa `.year`, `.month`, `.day` sulla proprietà `dataEmissione`.
+8.  **STRUTTURA DELLA QUERY: `MATCH` vs. `WITH` (REGOLA FONDAMENTALE)**
+    * **Priorità 1 (Caso Standard):** La tua priorità assoluta è usare un **singolo `MATCH`** per descrivere un percorso logico e continuo.
+    * **Priorità 2 (Casi Speciali):** Usa `WITH` **UNICAMENTE** in questi due scenari:
+        * **A) Per Analisi a Cascata**: Quando devi passare una **lista di risultati** da una fase di analisi alla successiva.
+        * **B) Per Filtrare su un'Aggregazione**: Quando devi filtrare i risultati **dopo** aver calcolato una somma o un conteggio.
+9.  **CLASSIFICHE "TOP N"**: Per domande che cercano "il migliore", raggruppa sempre per la **proprietà testuale** (`c.name`, `gf.ragioneSociale`), non per il nodo intero, e usa `RETURN ... ORDER BY ... LIMIT N`.
+10. **Ordinamento Risultati (NUOVA REGOLA)**: Quando calcoli aggregazioni (somme, conteggi), ordina sempre i risultati in modo decrescente per il valore calcolato, a meno che la domanda non chieda diversamente.
+11. **LISTE UNICHE**: Usa SEMPRE `DISTINCT` quando elenchi entità per evitare duplicati.
+12. **QUERY NEGATIVE**: Per domande che cercano "nessuno", "mai", "non ha", usa metodo corretto (`OPTIONAL MATCH ... WHERE ... IS NULL`).
+14. **DICHIARAZIONE DELLE VARIABILI (ERRORE COMUNE DA EVITARE)**:
+    Ogni variabile usata in `WHERE` o `RETURN` DEVE essere definita nel `MATCH` con un alias. Presta la massima attenzione a questo punto, è un errore grave.
+    * **ESEMPIO ERRATO**: `MATCH (:Documento)-... WHERE doc.dataEmissione.year = 2024` (ERRORE: `doc` non è definito).
+    * **ESEMPIO CORRETTO**: `MATCH (doc:Documento)-... WHERE doc.dataEmissione.year = 2024` (CORRETTO: `doc` è definito).
+15. **PROPRIETÀ NODO DITTA**: Usa `d.dittaId` per identificare una ditta, MAI `d.name` o `d.nome` o `d.ragioneSociale`.
+16. **Output**: SOLO la query Cypher, senza spiegazioni.
+(Questa sezione contiene le stesse regole e lo stesso schema del prompt principale. Assicurati che siano identiche)
+
+**Schema del Grafo (UFFICIALE E CORRETTO):**
+* Nodi: `(:Ditta)`, `(:Cliente)`, `(:GruppoFornitore)`, `(:Fornitore)`, `(:Articolo)`, `(:Documento)`, `(:RigaDocumento)`, `(:Luogo)`, `(:DocType)`, `(:Famiglia)`, `(:Sottofamiglia)`.
+* Relazioni:
+  * (:Fornitore)-[:RAGGRUPPATO_SOTTO]->(:GruppoFornitore)
+  * (:Fornitore)-[:APPARTIENE_A]->(:Ditta)
+  * (:Fornitore)-[:SI_TROVA_A]->(:Luogo)
+  * (:Fornitore)-[:HA_EMESSO]->(:Documento)
+  * (:Cliente)-[:APPARTIENE_A]->(:Ditta)
+  * (:Cliente)-[:HAS_ADDRESS]->(:Luogo)
+  * (:Cliente)-[:HA_RICEVUTO]->(:Documento)
+  * (:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)
+  * (:Sottofamiglia)-[:INCLUSA_IN]->(:Famiglia)
+  * (:Documento)-[:IS_TYPE]->(:DocType)
+  * (:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)
+  * (:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)
+
+// --- ESEMPI DI CALCOLO E AGGREGAZIONE ---
+
+* **Domanda**: "Dimmi il fatturato di ogni ditta."
+* **Query**:
+  ```cypher
+  MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+  WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 
+  RETURN d.dittaId AS ditta, sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC
+    ```
+
+* **Domanda**: "Qual è il fatturato totale del cliente BARONE DI FERRANTE EZIO?"
+* **Query**:
+  ```cypher
+  MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+  WHERE toLower(trim(c.name)) = 'barone di ferrante ezio' AND dr.tipoValore = 'Fatturato' AND dr.importo > 0
+  RETURN sum(dr.importo) AS fatturatoTotale
+    ```
+// --- ESEMPI DI FILTRAGGIO E LISTE ---
+
+* **Domanda**: "Elenca i clienti della ditta '3' che sono in Toscana"
+* **Query**:
+    ```cypher
+    MATCH (d:Ditta {{dittaId: '3'}})<-[:APPARTIENE_A]-(c:Cliente)-[:HAS_ADDRESS]->(l:Luogo)
+    WHERE toLower(trim(l.localita)) = 'PERUGIA'
+    RETURN DISTINCT c.name AS cliente
+    ORDER BY cliente
+    ```
+
+* **Domanda**: "Mostrami i 5 prodotti più popolari in termini di quantità venduta"
+* **Query**:
+  ```cypher
+  MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+  RETURN a.descrizione AS prodotto, sum(dr.quantita) AS quantitaTotale
+  ORDER BY quantitaTotale DESC
+  LIMIT 5
+  ```    
+
+* **Domanda**: "Quali fornitori si trovano nella stessa localita dei nostri 3 clienti con più fatturato?""    
+* **Query**:
+    ```cypher
+    MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0
+    WITH c, sum(dr.importo) AS fatturatoTotale
+    ORDER BY fatturatoTotale DESC
+    LIMIT 3
+    WITH collect(c) AS clientiTop
+    MATCH (cliente)-[:HAS_ADDRESS]->(l:Luogo)
+    WHERE cliente IN clientiTop
+    WITH collect(DISTINCT l.localita) AS localitaTop
+    MATCH (f:Fornitore)-[:SI_TROVA_A]->(l:Luogo)
+    WHERE l.localita IN localitaTop
+    MATCH (f)-[:RAGGRUPPATO_SOTTO]->(gf:GruppoFornitore)
+    RETURN DISTINCT gf.ragioneSociale as fornitore, l.localita as localita
+    ORDER BY fornitore
+    ```
+    
+* **Domanda**: "Quale tipologia di documento è presente maggiormente nel sistema?"
+* **Query**:
+    ```cypher
+    MATCH (doc:Documento)
+    RETURN doc.tipoOriginale AS tipoDocumento, count(doc) AS conteggio
+    ORDER BY conteggio DESC
+    LIMIT 1
+    ```    
+
+---
+**Domanda Utente:**
+{question}
+
+**Query Cypher:**
+"""

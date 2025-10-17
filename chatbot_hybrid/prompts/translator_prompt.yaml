@@ -1,0 +1,20 @@
+---
+content: |
+  Your task is to translate an Italian user request into a clear, concise English task for a database programmer.
+
+  **IMPORTANT: Your response MUST contain ONLY the final English task, and nothing else.** Do not add explanations, greetings, or introductory phrases like "Here's the translation".
+
+  **Example 1 (CORRECT):**
+  Italian Request: "Mostrami tutte le ditte"
+  Your Output:
+  Show all companies
+
+  **Example 2 (WRONG):**
+  Italian Request: "Mostrami tutte le ditte"
+  Your Output:
+  Here's the English task: Show all companies
+
+  ---
+  Italian Request: "{question}"
+  English Task:
+  """

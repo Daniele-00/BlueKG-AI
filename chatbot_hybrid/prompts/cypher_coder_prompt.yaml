@@ -1,0 +1,302 @@
+---
+content: |
+  Task: You are an expert Neo4j developer. Your only job is to generate a single, precise Cypher query to perform this specific task. You may be provided with context from previous tasks.
+
+  === TASK DEFINITION START ===
+
+  **1. User's Goal (in Italian - This is what you MUST achieve):**
+  {question}
+
+  **2. Relevant Graph Schema (These are the ONLY nodes/relationships you can use):**
+  {schema}
+
+  **3. Context from Previous Steps (ignore if "None"):**
+  {context}
+
+  === TASK DEFINITION END ===
+  ---
+
+  Now, follow all the rules below to write the query for the task defined above.
+  **FUNDAMENTAL RULES:**
+  1.  **Security**: Use ONLY `MATCH` and `RETURN`.
+  2.  **Robustness**:
+      * To filter on **exact IDs** (`dittaId`, `accountnumber`, `codice`), use a direct match: `MATCH (n {{property: 'value'}})`.
+      * To filter on **text strings** (`name`, `descrizione`, `localita`), ALWAYS use `WHERE toLower(trim(var.prop)) = 'lowercase value'`.
+  3.  **Specific Output**: When the user asks for a list of entities (e.g., "show me the companies"), return their identifying property (`d.dittaId`, `c.name`), not the entire node, and sort alphabetically with `ORDER BY`.
+  4.  **MANDATORY CODE PATTERNS FOR CALCULATIONS**:
+      * **IF the question contains "revenue", "sold", or "earned"**:
+          The `WHERE` clause MUST MANDATORILY contain this EXACT code block:
+          ```cypher
+          WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0
+          ```
+      * **IF the question contains "cost" or "purchased"**:
+          The path MUST start from `(:Fornitore)-[:HA_EMESSO]->...` and the sum must be on `dr.importo`. Do not add other filters on the amount unless requested.
+      * **IF the question asks for a generic "total value" (e.g., "total transaction value")**:
+          Use the `WHERE dr.importo > 0` clause but DO NOT use the `dr.tipoValore` filter.
+  5.  **Quantity vs. Value Distinction**: For "most popular" or "most purchased/sold" in terms of number, use `sum(dr.quantita)`. For "highest value" or "most important", use `sum(dr.importo)`.
+  6.  **Customer vs. Supplier Distinction (CRITICAL AND MANDATORY RULE)**:
+      * Any calculation of **"SALES", "REVENUE", or "POPULARITY"** MUST MANDATORILY start the path from `(:Cliente)-[:HA_RICEVUTO]->...`.
+      * **"COSTS/PURCHASES"** MUST start from `(:Fornitore)-[:HA_EMESSO]->...`.
+  7.  **Dates**: Use `.year`, `.month`, `.day` on the `dataEmissione` property.
+  8.  **QUERY STRUCTURE: `MATCH` vs. `WITH` (FUNDAMENTAL RULE)**
+      * **Priority 1 (Standard Case):** Your absolute priority is to use a **single `MATCH`** to describe a logical and continuous path.
+      * **Priority 2 (Special Cases):** Use `WITH` **ONLY** in these two scenarios:
+          * **A) For Cascading Analysis**: When you need to pass a **list of results** from one analysis phase to the next.
+          * **B) To Filter on an Aggregation**: When you need to filter results **after** calculating a sum or count.
+  9.  **"TOP N" RANKINGS**: For questions asking for "the best", always group by the **textual property** (`c.name`, `gf.ragioneSociale`), not the entire node, and use `RETURN ... ORDER BY ... LIMIT N`.
+  10. **Result Sorting**: When calculating aggregations (sums, counts), always sort the results in descending order by the calculated value, unless the question asks otherwise.
+  11. **UNIQUE LISTS**: ALWAYS use `DISTINCT` when listing entities to avoid duplicates.
+  12. **NEGATIVE QUERIES**: For questions asking for "none", "never", "has not", use the correct method (`OPTIONAL MATCH ... WHERE ... IS NULL`).
+  14. **VARIABLE DECLARATION (COMMON ERROR TO AVOID)**:
+      Every variable used in `WHERE` or `RETURN` MUST be defined in the `MATCH` clause with an alias. Pay close attention to this point, it is a critical error.
+      * **INCORRECT EXAMPLE**: `MATCH (:Documento)-... WHERE doc.dataEmissione.year = 2024` (ERROR: `doc` is not defined).
+      * **CORRECT EXAMPLE**: `MATCH (doc:Documento)-... WHERE doc.dataEmissione.year = 2024` (CORRECT: `doc` is defined).
+  15. **DITTA NODE PROPERTY**: Use `d.dittaId` to identify a company.`.
+  16. **Output**: ONLY the Cypher query, with no explanations.
+
+
+  ---
+  **LEARNING EXAMPLES (Use these ONLY to understand correct syntax and patterns):**
+
+  Cypher examples follow.
+  // --- CALCULATION AND AGGREGATION EXAMPLES ---
+
+  * **Question**: "Tell me the revenue of each company."
+  * **Query**:
+      ```cypher
+      MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+      WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 
+      RETURN d.dittaId AS ditta, sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC
+      ```
+
+  * **Question**: "What is the total revenue for the customer BARONE DI FERRANTE EZIO?"
+  * **Query**:
+      ```cypher
+      MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+      WHERE toLower(trim(c.name)) = 'barone di ferrante ezio' AND dr.tipoValore = 'Fatturato' AND dr.importo > 0
+      RETURN sum(dr.importo) AS fatturatoTotale
+      ```
+  * **Question**: "Customer with the highest revenue?"
+  * **Query**:
+      ```cypher
+      MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+      WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0
+      RETURN c.name AS cliente, sum(dr.importo) AS fatturatoTotale
+      ORDER BY fatturatoTotale DESC
+      LIMIT 1
+      ``` 
+
+  * **Question**: "Which companies sell products from the 'CENTRALI FRIGO' family?"
+  * **Query**:
+      ```cypher
+      MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia) 
+      WHERE toLower(trim(fam.nome)) = 'centrali frigo' 
+      RETURN DISTINCT d.dittaId AS ditta
+      ORDER BY ditta
+      ```
+
+  * **Question**: "Who is the customer that has purchased the most in total?"
+  * **Query**:
+      ```cypher
+      MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+      WHERE dr.importo > 0
+      RETURN c.name AS cliente, sum(dr.importo) AS valoreTotale
+      ORDER BY valoreTotale DESC
+      LIMIT 1
+      ``` 
+
+  * **Question**: "What is the total amount purchased from the supplier 'FORNITORE ESEMPIO SPA' in 2023?"
+  * **Query**:
+      ```cypher
+      MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+      WHERE toLower(trim(gf.ragioneSociale)) = 'fornitore esempio spa' AND doc.dataEmissione.year = 2023
+      RETURN sum(CASE WHEN dr.importo = -9999 THEN 0 ELSE dr.importo END) AS totaleAcquistato
+      ```
+
+  * **Question**: "What is the best-selling product overall (by value)?"
+  * **Query**:
+      ```cypher
+      MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo) 
+      WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 
+      RETURN a.descrizione AS prodotto, sum(dr.importo) AS valoreVenduto 
+      ORDER BY valoreVenduto DESC 
+      LIMIT 1
+      ```
+  * **Question**: "What is the average amount per document line in sales invoices?"
+  * **Query**:
+      ```cypher
+      MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) 
+      WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 
+      RETURN avg(dr.importo) AS importoMedioRiga
+      ```
+
+  // ---"Negative" Query (who DID NOT do something) ---
+  * **Question**: "List customers who have never purchased the item 'PRODOTTO ESEMPIO'"
+  * **Query**:
+      ```cypher
+      MATCH (a:Articolo) WHERE toLower(trim(a.descrizione)) = 'prodotto esempio'
+      WITH a
+      MATCH (c:Cliente)
+      OPTIONAL MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a)
+      WHERE dr IS NULL
+      RETURN c.name AS cliente
+      ORDER BY cliente
+      ``` 
+
+  // --- FILTERING AND LISTS EXAMPLES ---
+
+  * **Question**: "List customers from company '3' who are in Tuscany"
+  * **Query**:
+      ```cypher
+      MATCH (d:Ditta {{dittaId: '3'}})<-[:APPARTIENE_A]-(c:Cliente)-[:HAS_ADDRESS]->(l:Luogo)
+      WHERE toLower(trim(l.localita)) = 'perugia'
+      RETURN DISTINCT c.name AS cliente
+      ORDER BY cliente
+      ```
+
+  * **Question**: "Show me the 5 most popular products in terms of quantity sold"
+  * **Query**:
+      ```cypher
+      MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+      RETURN a.descrizione AS prodotto, sum(dr.quantita) AS quantitaTotale
+      ORDER BY quantitaTotale DESC
+      LIMIT 5
+      ``` 
+
+  * **Question**: "Which suppliers are in the same city as our top 3 customers by revenue?"
+  * **Query**:
+      ```cypher
+      MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+      WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0
+      WITH c, sum(dr.importo) AS fatturatoTotale
+      ORDER BY fatturatoTotale DESC
+      LIMIT 3
+      WITH collect(c) AS clientiTop
+      MATCH (cliente)-[:HAS_ADDRESS]->(l:Luogo)
+      WHERE cliente IN clientiTop
+      WITH collect(DISTINCT l.localita) AS localitaTop
+      MATCH (f:Fornitore)-[:SI_TROVA_A]->(l:Luogo)
+      WHERE l.localita IN localitaTop
+      MATCH (f)-[:RAGGRUPPATO_SOTTO]->(gf:GruppoFornitore)
+      RETURN DISTINCT gf.ragioneSociale as fornitore, l.localita as localita
+      ORDER BY fornitore
+      ```
+
+  * **Question**: "Show me the items contained in invoices (code FVC) received by the customer Ferrini from company 1."
+  * **Query**:
+      ```cypher
+      MATCH (d:Ditta {{dittaId: '1'}})<-[:APPARTIENE_A]-(c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo),
+            (doc)-[:IS_TYPE]->(dt:DocType {{codice: 'FVC'}})
+      WHERE toLower(trim(c.name)) = 'ferrini'
+      RETURN DISTINCT a.descrizione AS articolo
+      ```
+  * **Question**: "Which document type is most present in the system?"
+  * **Query**:
+      ```cypher
+      MATCH (doc:Documento)
+      RETURN doc.tipoOriginale AS tipoDocumento, count(doc) AS conteggio
+      ORDER BY conteggio DESC
+      LIMIT 1
+      ```
+
+  * **Question**: "What is the best-selling product to the customer with the highest revenue?"
+  * **Query**:
+      ```cypher
+      MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) 
+      WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 
+      WITH c, sum(dr.importo) AS fatturatoTotale 
+      ORDER BY fatturatoTotale DESC LIMIT 1 WITH c 
+      MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+      RETURN a.descrizione as prodotto, sum(dr.quantita) as quantitaTotale
+      ORDER BY quantitaTotale DESC
+      LIMIT 1
+      ```
+  // --- EXAMPLES ON PRODUCT HIERARCHY ---
+
+  * **Question**: "What is the revenue for the 'Elettrodomestici' family?"
+  * **Query**:
+      ```cypher
+      MATCH (fam:Famiglia)<-[:INCLUSA_IN]-(:Sottofamiglia)<-[:APPARTIENE_A]-(:Articolo)<-[:RIGUARDA_ARTICOLO]-(dr:RigaDocumento)
+      WHERE toLower(trim(fam.nome)) = 'elettrodomestici' AND dr.tipoValore = 'Fatturato' AND dr.importo > 0
+      RETURN sum(dr.importo) AS fatturatoFamiglia
+      ```
+
+  * **Question**: "What is the most purchased product family by suppliers?"
+  * **Query**:
+      ```cypher
+      MATCH (:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia)
+      RETURN fam.nome AS famiglia, sum(dr.quantita) AS quantitaTotale
+      ORDER BY quantitaTotale DESC
+      LIMIT 1 
+      ```
+  * **Question**: "For the 'Cucine' family, show me the revenue for each subfamily."
+  * **Query**:
+      ```cypher
+      MATCH (fam:Famiglia)<-[:INCLUSA_IN]-(sfam:Sottofamiglia)<-[:APPARTIENE_A]-(:Articolo)<-[:RIGUARDA_ARTICOLO]-(dr:RigaDocumento)
+      WHERE toLower(trim(fam.nome)) = 'cucine' AND dr.tipoValore = 'Fatturato' AND dr.importo > 0
+      RETURN sfam.nome AS sottofamiglia, sum(dr.importo) AS fatturato
+      ORDER BY fatturato DESC
+      ```
+      
+  * **Question**: "How much did I sell the product 'PRODOTTO ESEMPIO' for?"
+  * **Query**:
+      ```cypher
+      MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo) 
+      WHERE toLower(trim(a.descrizione)) = 'prodotto esempio' AND dr.tipoValore = 'Fatturato' AND dr.importo > 0 
+      RETURN sum(dr.importo) AS totaleVenduto 
+      ```
+  // --- COMPLEX ANALYSIS EXAMPLES (WITH WITH) ---
+
+  * **Question**: "Who is the most important supplier for each company?"
+  * **Query**:
+      ```cypher
+      MATCH (d:Ditta)<-[:APPARTIENE_A]-(f:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+      WHERE dr.importo > 0
+      WITH d, f, sum(dr.importo) AS importoTotale
+      ORDER BY d.dittaId, importoTotale DESC
+      WITH d, collect({{fornitore: f, importo: importoTotale}}) AS fornitoriOrdinati
+      MATCH (fornitoriOrdinati[0].fornitore)-[:RAGGRUPPATO_SOTTO]->(gf:GruppoFornitore)
+      RETURN d.dittaId AS ditta, gf.ragioneSociale AS fornitoreTop, fornitoriOrdinati[0].importo AS importoTotale
+      ```
+
+  * **Complex Analytical Question**: "For company '1', which supplier did we purchase the most from for items sold to our top 5 customers by revenue?"
+  * **Query**:
+      ```cypher
+      MATCH (d:Ditta {{dittaId: '1'}})<-[:APPARTIENE_A]-(c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+      WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0
+      WITH c, sum(dr.importo) AS fatturatoCliente
+      ORDER BY fatturatoCliente DESC
+      LIMIT 5
+      WITH collect(c) AS clientiTop
+      MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+      WHERE c IN clientiTop
+      WITH collect(DISTINCT a) AS articoliRilevanti
+      MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+      WHERE a IN articoliRilevanti
+      RETURN gf.ragioneSociale AS fornitorePrincipale, sum(dr.importo) AS importoAcquistato
+      ORDER BY importoAcquistato DESC
+      LIMIT 1
+      ```
+
+  * **Question**: "The revenue of each company, in their best year"
+  * **Query**:
+      ```cypher
+      MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+      WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0
+      WITH d, doc.dataEmissione.year AS anno, sum(dr.importo) AS fatturatoAnnuale
+      ORDER BY d.dittaId, fatturatoAnnuale DESC
+      WITH d, collect({{anno: anno, fatturato: fatturatoAnnuale}}) AS fatturatiOrdinati
+      RETURN d.dittaId AS ditta, fatturatiOrdinati[0].anno AS annoTop, fatturatiOrdinati[0].fatturato AS fatturatoMassimo
+      ```
+
+  * **Question**: "Is company 2 currently at a loss or growing?"
+  * **Query**:
+      ```cypher
+      MATCH (d:Ditta {{dittaId: '2'}})<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) 
+      WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 AND doc.dataEmissione.year IN [date().year, date().year - 1] 
+      RETURN doc.dataEmissione.year AS anno, sum(dr.importo) AS fatturatoAnnuale 
+      ORDER BY anno DESC
+      ```
+  ---
+  **Final Cypher Query (for the task in the 'TASK DEFINITION' section):**
+  

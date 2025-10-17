@@ -1,0 +1,35 @@
+# =============================================================================
+# CONFIGURAZIONE DATABASE NEO4J
+# =============================================================================
+
+neo4j:
+  url: "bolt://localhost:7687"
+  username: "neo4j"
+  password_env: "NEO4J_PASSWORD"  # Nome variabile in .env
+  
+  # Connection pool settings
+  max_connection_lifetime: 3600
+  max_connection_pool_size: 50
+  connection_acquisition_timeout: 60
+
+# Indici full-text per fuzzy matching
+fulltext_indexes:
+  - name: "clienti_fuzzy"
+    label: "Cliente"
+    property: "name"
+  
+  - name: "fornitori_fuzzy"
+    label: "GruppoFornitore"
+    property: "ragioneSociale"
+  
+  - name: "articoli_fuzzy"
+    label: "Articolo"
+    property: "descrizione"
+  
+  - name: "doctype_fuzzy"
+    label: "DocType"
+    property: "name"
+  
+  - name: "luoghi_fuzzy"
+    label: "Luogo"
+    property: "localita"

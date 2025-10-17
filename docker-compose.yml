@@ -1,0 +1,110 @@
+services:
+  # --- Servizio Modello di Linguaggio Locale ---
+  ollama:
+    image: ollama/ollama
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ./ollama:/root/.ollama
+    tty: true
+  
+  # --- Servizio Database a Grafo ---
+  neo4j:
+    image: neo4j:5-community
+    container_name: neo4j_db
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neo4j_data:/data
+      - ./plugins:/plugins
+    environment:
+     - NEO4J_AUTH=neo4j/Blue2018
+     - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+     - NEO4J_dbms_security_procedures_allowlist=apoc.*
+     - NEO4J_apoc_export_file_enabled=true
+     - NEO4J_apoc_import_file_enabled=true
+     - NEO4J_apoc_import_file_use__neo4j__config=true
+    networks:
+      - bluekb-network
+   
+  # --- SQL SERVER LOCALE per CDC ---
+  sql-server:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: sql_server_local
+    hostname: sql-server-local
+    user: root
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=Blue2018
+      - MSSQL_PID=Developer
+      - MSSQL_AGENT_ENABLED=true
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+      - ./sqlserver-backups:/var/opt/mssql/backup
+    networks:
+      - bluekb-network
+    restart: unless-stopped
+  
+  # --- Servizi per la Piattaforma KAFKA ---
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - bluekb-network
+  
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+    networks:
+      - bluekb-network
+  
+  connect:
+    image: debezium/connect:2.5
+    container_name: kafka_connect
+    depends_on:
+      - kafka
+      - sql-server
+    ports:
+      - "8083:8083"
+    environment:
+      BOOTSTRAP_SERVERS: 'kafka:29092'
+      GROUP_ID: 1
+      CONFIG_STORAGE_TOPIC: my_connect_configs
+      OFFSET_STORAGE_TOPIC: my_connect_offsets
+      STATUS_STORAGE_TOPIC: my_connect_statuses
+      CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      STATUS_STORAGE_REPLICATION_FACTOR: 1
+    volumes:
+      - ./connectors:/kafka/connect
+    networks:
+      - bluekb-network
+
+networks:
+  bluekb-network:
+    driver: bridge
+
+volumes:
+  sqlserver-data:
+    driver: local
+  neo4j_data:
+    driver: local

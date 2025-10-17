@@ -1,0 +1,50 @@
+# =============================================================================
+# CONFIGURAZIONE FUZZY MATCHING
+# =============================================================================
+
+fuzzy_matching:
+  enabled: false
+  
+  # Parametri ricerca
+  min_word_length: 4          # Parole più corte ignorate
+  edit_distance: 2            # Tolleranza errori (~1 = strict, ~2 = normal)
+  min_score: 0.7              # Score minimo match (0-1)
+  min_similarity: 0.6         # Similarità minima caratteri (0-1)
+  
+  # Blacklist parole comuni (non correggere mai)
+  blacklist:
+    - "mostra"
+    - "dammi"
+    - "elenca"
+    - "trova"
+    - "cerca"
+    - "qual"
+    - "quale"
+    - "quali"
+    - "tutti"
+    - "tutte"
+    - "tutto"
+    - "ogni"
+    - "totale"
+    - "somma"
+    - "conta"
+    - "quanti"
+    - "clienti"
+    - "cliente"
+    - "fornitori"
+    - "fornitore"
+    - "articoli"
+    - "articolo"
+    - "ditte"
+    - "ditta"
+    - "fatture"
+    - "fattura"
+    - "documenti"
+    - "documento"
+    - "anno"
+    - "mese"
+    - "giorno"
+    - "data"
+    - "importo"
+    - "fatturato"
+    - "costo"

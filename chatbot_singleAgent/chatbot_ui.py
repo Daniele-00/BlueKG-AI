@@ -1,0 +1,1303 @@
+import streamlit as st
+import requests
+import json
+import logging
+import base64
+from pathlib import Path
+from datetime import datetime
+import io
+
+
+# --- FUNZIONE PER CODIFICARE L'IMMAGINE IN BASE64 ---
+def img_to_base64(image_path):
+    """Codifica un'immagine in Base64 per l'uso in HTML."""
+    path = Path(image_path)
+    if not path.is_file():
+        return None
+    with path.open("rb") as img_file:
+        return base64.b64encode(img_file.read()).decode()
+
+
+# Configurazione logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# --- Configurazione dell'App Streamlit ---
+st.set_page_config(
+    page_title="BlueAI - Blues System", layout="wide", initial_sidebar_state="expanded"
+)
+
+# --- CSS PERSONALIZZATO ULTRA FUTURISTICO ---
+st.markdown(
+    """
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+    
+    /* Reset */
+    * {
+        font-family: 'Inter', sans-serif;
+    }
+    
+    /* Sfondo animato con particelle */
+    .stApp {
+        background: linear-gradient(-45deg, #0a0e27, #1a1f4d, #2a3f7f, #1e40af);
+        background-size: 400% 400%;
+        animation: gradientFlow 20s ease infinite;
+        min-height: 100vh;
+        position: relative;
+        overflow-x: hidden;
+    }
+    
+    @keyframes gradientFlow {
+        0% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
+    }
+    
+    /* Effetto particelle di sfondo */
+    .stApp::before {
+        content: '';
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-image: 
+            radial-gradient(2px 2px at 20% 30%, rgba(59, 130, 246, 0.4), transparent),
+            radial-gradient(2px 2px at 60% 70%, rgba(147, 197, 253, 0.3), transparent),
+            radial-gradient(1px 1px at 50% 50%, rgba(191, 219, 254, 0.2), transparent),
+            radial-gradient(1px 1px at 80% 10%, rgba(59, 130, 246, 0.3), transparent);
+        background-size: 200% 200%;
+        animation: particleFloat 15s ease infinite;
+        pointer-events: none;
+        z-index: 0;
+    }
+    
+    @keyframes particleFloat {
+        0%, 100% { transform: translate(0, 0); }
+        33% { transform: translate(30px, -30px); }
+        66% { transform: translate(-20px, 20px); }
+    }
+    
+    /* Container principale con effetto vetro */
+    .main .block-container {
+        background: rgba(15, 23, 42, 0.75);
+        border-radius: 28px;
+        padding: 2.5rem;
+        margin-top: 1rem;
+        box-shadow: 
+            0 25px 60px rgba(0, 0, 0, 0.5),
+            inset 0 1px 0 rgba(255, 255, 255, 0.1),
+            0 0 100px rgba(59, 130, 246, 0.1);
+        backdrop-filter: blur(30px) saturate(180%);
+        border: 1px solid rgba(59, 130, 246, 0.25);
+        position: relative;
+        z-index: 1;
+    }
+    
+    /* Header epico con mega glow */
+    .custom-header {
+        text-align: center;
+        padding: 2rem 0 1rem 0;
+        color: #ffffff;
+        font-size: 4rem;
+        font-weight: 900;
+        margin-bottom: 0.5rem;
+        letter-spacing: -3px;
+        text-shadow: 
+            0 0 20px rgba(59, 130, 246, 1),
+            0 0 40px rgba(59, 130, 246, 0.8),
+            0 0 60px rgba(59, 130, 246, 0.6),
+            0 0 80px rgba(59, 130, 246, 0.4),
+            4px 4px 8px rgba(0, 0, 0, 0.8);
+        animation: megaGlow 3s ease-in-out infinite alternate;
+        position: relative;
+    }
+    
+    @keyframes megaGlow {
+        0% { 
+            text-shadow: 
+                0 0 20px rgba(59, 130, 246, 1),
+                0 0 40px rgba(59, 130, 246, 0.8),
+                0 0 60px rgba(59, 130, 246, 0.6);
+        }
+        100% { 
+            text-shadow: 
+                0 0 30px rgba(59, 130, 246, 1),
+                0 0 60px rgba(59, 130, 246, 1),
+                0 0 90px rgba(59, 130, 246, 0.8),
+                0 0 120px rgba(59, 130, 246, 0.6);
+        }
+    }
+    
+    .custom-subtitle {
+        text-align: center;
+        color: #cbd5e1;
+        font-size: 1.3rem;
+        margin-bottom: 2rem;
+        font-weight: 600;
+        text-shadow: 
+            0 0 10px rgba(59, 130, 246, 0.5),
+            2px 2px 4px rgba(0, 0, 0, 0.5);
+        letter-spacing: 1px;
+        animation: subtitlePulse 4s ease-in-out infinite;
+    }
+    
+    @keyframes subtitlePulse {
+        0%, 100% { opacity: 0.9; }
+        50% { opacity: 1; }
+    }
+    
+    .main h1 { display: none; }
+    
+    /* Chat Messages ultra smooth */
+    .stChatMessage {
+        margin-bottom: 1.8rem;
+        border-radius: 24px;
+        border: none;
+        animation: messageSlide 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+        transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    
+    @keyframes messageSlide {
+        from {
+            opacity: 0;
+            transform: translateY(40px) scale(0.9) rotateX(10deg);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0) scale(1) rotateX(0deg);
+        }
+    }
+    
+    .stChatMessage:hover {
+        transform: translateY(-4px) scale(1.01);
+        box-shadow: 0 15px 40px rgba(59, 130, 246, 0.3);
+    }
+    
+    /* Messaggio utente futuristico */
+    div[data-testid="chat-message-user"] {
+        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 50%, #1d4ed8 100%);
+        color: white;
+        border-radius: 24px 24px 6px 24px;
+        padding: 1.4rem 2rem;
+        margin-left: 12%;
+        box-shadow: 
+            0 10px 30px rgba(59, 130, 246, 0.5),
+            inset 0 1px 0 rgba(255, 255, 255, 0.25),
+            0 0 60px rgba(59, 130, 246, 0.2);
+        position: relative;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+    
+    div[data-testid="chat-message-user"]::before {
+        content: '';
+        position: absolute;
+        top: -50%;
+        left: -50%;
+        width: 200%;
+        height: 200%;
+        background: linear-gradient(45deg, transparent, rgba(255, 255, 255, 0.15), transparent);
+        transform: rotate(45deg);
+        animation: megaShine 4s infinite;
+    }
+    
+    @keyframes megaShine {
+        0% { transform: translateX(-100%) translateY(-100%) rotate(45deg); }
+        100% { transform: translateX(100%) translateY(100%) rotate(45deg); }
+    }
+    
+    div[data-testid="chat-message-user"] p {
+        color: white;
+        font-weight: 600;
+        font-size: 1.08rem;
+        margin: 0;
+        position: relative;
+        z-index: 1;
+        line-height: 1.6;
+    }
+    
+    /* Messaggio assistente high-tech */
+    div[data-testid="chat-message-assistant"] {
+        background: linear-gradient(135deg, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 0.98) 100%);
+        border-radius: 24px 24px 24px 6px;
+        padding: 1.4rem 2rem;
+        margin-right: 12%;
+        border-left: 5px solid #3b82f6;
+        box-shadow: 
+            0 10px 30px rgba(0, 0, 0, 0.4),
+            inset 0 1px 0 rgba(59, 130, 246, 0.15),
+            0 0 40px rgba(59, 130, 246, 0.1);
+        position: relative;
+        border-top: 1px solid rgba(59, 130, 246, 0.2);
+        border-right: 1px solid rgba(59, 130, 246, 0.1);
+    }
+    
+    div[data-testid="chat-message-assistant"]::after {
+        content: '';
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        height: 2px;
+        background: linear-gradient(90deg, transparent, #3b82f6, transparent);
+        opacity: 0.6;
+        animation: borderGlow 3s ease-in-out infinite;
+    }
+    
+    @keyframes borderGlow {
+        0%, 100% { opacity: 0.4; }
+        50% { opacity: 0.8; }
+    }
+    
+    div[data-testid="chat-message-assistant"] p {
+        color: #e2e8f0;
+        font-weight: 500;
+        font-size: 1.08rem;
+        margin: 0;
+        line-height: 1.8;
+    }
+    
+    /* Avatar con mega pulse */
+    div[data-testid="chat-message-user"] img,
+    div[data-testid="chat-message-assistant"] img {
+        border-radius: 50%;
+        padding: 0.5rem;
+        box-shadow: 0 0 30px rgba(59, 130, 246, 0.8);
+        animation: avatarPulse 2.5s ease-in-out infinite;
+    }
+    
+    @keyframes avatarPulse {
+        0%, 100% { 
+            box-shadow: 0 0 20px rgba(59, 130, 246, 0.6);
+            transform: scale(1);
+        }
+        50% { 
+            box-shadow: 0 0 40px rgba(59, 130, 246, 1);
+            transform: scale(1.05);
+        }
+    }
+    
+    div[data-testid="chat-message-user"] img {
+        background: linear-gradient(135deg, #1e40af, #3b82f6);
+    }
+    
+    div[data-testid="chat-message-assistant"] img {
+        background: linear-gradient(135deg, #3b82f6, #06b6d4);
+    }
+    
+    /* Input area spaziale */
+    .stChatInputContainer {
+        background: rgba(20, 30, 50, 0.98);
+        border-radius: 35px;
+        padding: 0.85rem;
+        box-shadow: 
+            0 20px 50px rgba(0, 0, 0, 0.5),
+            inset 0 1px 0 rgba(255, 255, 255, 0.1),
+            0 0 80px rgba(59, 130, 246, 0.3);
+        border: 2px solid rgba(59, 130, 246, 0.7);
+        backdrop-filter: blur(25px);
+        transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+        position: relative;
+    }
+    
+    .stChatInputContainer::before {
+        content: '';
+        position: absolute;
+        top: -2px;
+        left: -2px;
+        right: -2px;
+        bottom: -2px;
+        background: linear-gradient(45deg, #3b82f6, #06b6d4, #3b82f6);
+        border-radius: 35px;
+        opacity: 0;
+        transition: opacity 0.3s;
+        z-index: -1;
+        animation: borderRotate 3s linear infinite;
+    }
+    
+    @keyframes borderRotate {
+        100% { transform: rotate(360deg); }
+    }
+    
+    .stChatInputContainer:focus-within {
+        border-color: #3b82f6;
+        box-shadow: 
+            0 20px 60px rgba(59, 130, 246, 0.6),
+            inset 0 1px 0 rgba(255, 255, 255, 0.15),
+            0 0 100px rgba(59, 130, 246, 0.4);
+        transform: translateY(-2px);
+    }
+    
+    .stChatInputContainer:focus-within::before {
+        opacity: 0.5;
+    }
+    
+    .stChatInputContainer textarea {
+        background: transparent;
+        border: none;
+        color: #ffffff;
+        font-size: 1.1rem;
+        font-weight: 500;
+        padding: 1.1rem 1.6rem;
+        border-radius: 30px;
+        resize: none;
+    }
+    
+    .stChatInputContainer textarea:focus {
+        outline: none;
+        box-shadow: none;
+    }
+    
+    .stChatInputContainer textarea::placeholder {
+        color: #94a3b8;
+        font-style: italic;
+        font-weight: 400;
+    }
+    
+    /* Pulsante invio MEGA futuristico */
+    .stChatInputContainer button {
+        background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+        color: white;
+        border: none;
+        border-radius: 50%;
+        width: 60px;
+        height: 60px;
+        box-shadow: 
+            0 10px 25px rgba(59, 130, 246, 0.6),
+            0 0 40px rgba(59, 130, 246, 0.4);
+        transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .stChatInputContainer button::before {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 0;
+        height: 0;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.4);
+        transform: translate(-50%, -50%);
+        transition: width 0.6s, height 0.6s;
+    }
+    
+    .stChatInputContainer button:hover::before {
+        width: 400px;
+        height: 400px;
+    }
+    
+    .stChatInputContainer button:hover {
+        transform: translateY(-4px) rotate(90deg) scale(1.1);
+        box-shadow: 
+            0 15px 40px rgba(59, 130, 246, 0.8),
+            0 0 60px rgba(59, 130, 246, 0.6);
+    }
+    
+    .stChatInputContainer button:active {
+        transform: translateY(-2px) rotate(90deg) scale(1.05);
+    }
+    
+    /* Code blocks sci-fi */
+    .stCodeBlock {
+        background: linear-gradient(135deg, #0a0e1f, #1a1f3a);
+        border: 1px solid #334155;
+        border-radius: 18px;
+        margin: 1.8rem 0;
+        overflow: hidden;
+        box-shadow: 
+            0 10px 30px rgba(0, 0, 0, 0.5),
+            inset 0 1px 0 rgba(59, 130, 246, 0.3),
+            0 0 40px rgba(59, 130, 246, 0.1);
+        position: relative;
+    }
+    
+    .stCodeBlock::before {
+        content: '▸ CYPHER QUERY';
+        position: absolute;
+        top: 10px;
+        right: 15px;
+        font-size: 0.7rem;
+        font-weight: 800;
+        color: #3b82f6;
+        letter-spacing: 1.5px;
+        opacity: 0.8;
+        text-shadow: 0 0 10px rgba(59, 130, 246, 0.8);
+    }
+    
+    .stCodeBlock code {
+        color: #06b6d4;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 1rem;
+        line-height: 1.7;
+        text-shadow: 0 0 15px rgba(6, 182, 212, 0.4);
+        font-weight: 500;
+    }
+    
+    /* Spinner ultra tech */
+    .stSpinner > div {
+        border-color: #3b82f6 transparent #06b6d4 transparent;
+        border-width: 5px;
+        animation: spinTech 1.2s cubic-bezier(0.68, -0.55, 0.265, 1.55) infinite;
+    }
+    
+    @keyframes spinTech {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+    
+    /* Alerts futuristici */
+    .stAlert {
+        border-radius: 18px;
+        border: none;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        backdrop-filter: blur(15px);
+        animation: alertSlide 0.5s ease-out;
+        border-left: 5px solid;
+    }
+    
+    @keyframes alertSlide {
+        from { 
+            opacity: 0;
+            transform: translateX(-30px);
+        }
+        to { 
+            opacity: 1;
+            transform: translateX(0);
+        }
+    }
+    
+    .stError {
+        background: linear-gradient(135deg, rgba(254, 242, 242, 0.95), rgba(254, 226, 226, 0.95));
+        color: #dc2626;
+        border-left-color: #dc2626;
+    }
+    
+    .stSuccess {
+        background: linear-gradient(135deg, rgba(240, 253, 244, 0.95), rgba(220, 252, 231, 0.95));
+        color: #16a34a;
+        border-left-color: #16a34a;
+    }
+    
+    .stWarning {
+        background: linear-gradient(135deg, rgba(254, 252, 232, 0.95), rgba(254, 249, 195, 0.95));
+        color: #ca8a04;
+        border-left-color: #ca8a04;
+    }
+    
+    .stInfo {
+        background: linear-gradient(135deg, rgba(239, 246, 255, 0.95), rgba(219, 234, 254, 0.95));
+        color: #2563eb;
+        border-left-color: #2563eb;
+    }
+    
+    /* Sidebar mega moderna */
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, rgba(10, 15, 30, 0.98), rgba(20, 30, 50, 0.98));
+        backdrop-filter: blur(25px);
+        border-right: 1px solid rgba(59, 130, 246, 0.3);
+        box-shadow: 5px 0 30px rgba(59, 130, 246, 0.1);
+    }
+    
+    [data-testid="stSidebar"] h1, 
+    [data-testid="stSidebar"] h2, 
+    [data-testid="stSidebar"] h3 {
+        color: #ffffff;
+        text-shadow: 0 0 15px rgba(59, 130, 246, 0.6);
+        font-weight: 700;
+    }
+    
+    [data-testid="stSidebar"] .stButton button {
+        width: 100%;
+        background: linear-gradient(135deg, rgba(59, 130, 246, 0.25), rgba(29, 78, 216, 0.25));
+        color: #ffffff;
+        border: 1px solid rgba(59, 130, 246, 0.5);
+        border-radius: 14px;
+        padding: 0.85rem 1.2rem;
+        font-weight: 700;
+        font-size: 0.95rem;
+        transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+        margin: 0.6rem 0;
+        box-shadow: 0 4px 15px rgba(59, 130, 246, 0.2);
+        position: relative;
+        overflow: hidden;
+    }
+    
+    [data-testid="stSidebar"] .stButton button::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+        transition: left 0.5s;
+    }
+    
+    [data-testid="stSidebar"] .stButton button:hover::before {
+        left: 100%;
+    }
+    
+    [data-testid="stSidebar"] .stButton button:hover {
+        background: linear-gradient(135deg, rgba(59, 130, 246, 0.45), rgba(29, 78, 216, 0.45));
+        transform: translateX(8px) scale(1.02);
+        box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
+        border-color: #3b82f6;
+    }
+    
+    /* Expander futuristico */
+    .streamlit-expanderHeader {
+        background: rgba(30, 41, 59, 0.6);
+        border-radius: 14px;
+        border: 1px solid rgba(59, 130, 246, 0.4);
+        color: #cbd5e1;
+        font-weight: 700;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+    }
+    
+    .streamlit-expanderHeader:hover {
+        background: rgba(30, 41, 59, 0.9);
+        border-color: rgba(59, 130, 246, 0.7);
+        box-shadow: 0 6px 20px rgba(59, 130, 246, 0.3);
+    }
+    
+    /* Scrollbar cyber */
+    ::-webkit-scrollbar {
+        width: 12px;
+        height: 12px;
+    }
+    
+    ::-webkit-scrollbar-track {
+        background: rgba(15, 23, 42, 0.6);
+        border-radius: 6px;
+    }
+    
+    ::-webkit-scrollbar-thumb {
+        background: linear-gradient(180deg, #3b82f6, #1d4ed8);
+        border-radius: 6px;
+        box-shadow: 0 0 15px rgba(59, 130, 246, 0.6);
+        border: 2px solid rgba(15, 23, 42, 0.6);
+    }
+    
+    ::-webkit-scrollbar-thumb:hover {
+        background: linear-gradient(180deg, #2563eb, #1e40af);
+        box-shadow: 0 0 25px rgba(59, 130, 246, 0.9);
+    }
+    
+    /* Badge stile futuristico */
+    .status-badge {
+        display: inline-block;
+        padding: 0.4rem 1rem;
+        border-radius: 20px;
+        font-weight: 700;
+        font-size: 0.85rem;
+        letter-spacing: 0.5px;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        animation: badgePulse 2s ease-in-out infinite;
+    }
+    
+    @keyframes badgePulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.8; }
+    }
+    
+    .status-online {
+        background: linear-gradient(135deg, #10b981, #059669);
+        color: white;
+        box-shadow: 0 0 20px rgba(16, 185, 129, 0.5);
+    }
+    
+    .status-offline {
+        background: linear-gradient(135deg, #ef4444, #dc2626);
+        color: white;
+        box-shadow: 0 0 20px rgba(239, 68, 68, 0.5);
+    }
+    
+    /* Footer sticky futuristico */
+    .footer-sticky {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background: rgba(10, 15, 30, 0.95);
+        backdrop-filter: blur(20px);
+        padding: 1rem 0;
+        border-top: 1px solid rgba(59, 130, 246, 0.3);
+        box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.5);
+        z-index: 999;
+        text-align: center;
+        color: #94a3b8;
+        font-size: 0.9rem;
+    }
+    
+    .footer-sticky strong {
+        color: #cbd5e1;
+        font-weight: 700;
+    }
+    
+    /* Animazione icona */
+    @keyframes floatIcon {
+        0%, 100% { transform: translateY(0) rotate(0deg); }
+        25% { transform: translateY(-8px) rotate(5deg); }
+        75% { transform: translateY(-4px) rotate(-5deg); }
+    }
+    
+    .float-icon {
+        animation: floatIcon 4s ease-in-out infinite;
+        display: inline-block;
+    }
+    
+    /* Metric cards futuristiche */
+    .metric-card {
+        background: linear-gradient(135deg, rgba(30, 41, 59, 0.8), rgba(15, 23, 42, 0.8));
+        border-radius: 16px;
+        padding: 1.5rem;
+        border: 1px solid rgba(59, 130, 246, 0.3);
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+        transition: all 0.3s ease;
+    }
+    
+    .metric-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 12px 35px rgba(59, 130, 246, 0.3);
+        border-color: rgba(59, 130, 246, 0.6);
+    }
+    
+    /* Tab styling */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        background: rgba(30, 41, 59, 0.5);
+        border-radius: 14px;
+        padding: 0.5rem;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        background: transparent;
+        border-radius: 10px;
+        color: #94a3b8;
+        font-weight: 600;
+        padding: 0.75rem 1.5rem;
+        transition: all 0.3s ease;
+    }
+    
+    .stTabs [data-baseweb="tab"]:hover {
+        background: rgba(59, 130, 246, 0.2);
+        color: #ffffff;
+    }
+    
+    .stTabs [aria-selected="true"] {
+        background: linear-gradient(135deg, #3b82f6, #2563eb);
+        color: #ffffff;
+        box-shadow: 0 4px 15px rgba(59, 130, 246, 0.5);
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# --- HEADER CON LOGO ---
+LOGO_PATH = "logo/logo.png"
+logo_base64 = img_to_base64(LOGO_PATH)
+
+if logo_base64:
+    logo_html = f'<img src="data:image/png;base64,{logo_base64}" alt="Logo" style="width: 80px; vertical-align: middle; margin-right: 20px; filter: drop-shadow(0 0 30px rgba(59, 130, 246, 1));">'
+else:
+    logo_html = '<span style="font-size: 4rem; filter: drop-shadow(0 0 20px rgba(59, 130, 246, 0.8));">🤖</span>'
+
+st.markdown(
+    f"""
+    <div class="custom-header">
+        {logo_html}BlueAI
+    </div>
+    <div class="custom-subtitle">
+         Sistema AI Avanzato per Knowledge Graph • Neo4j Powered
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+# URL del backend
+API_URL = "http://localhost:8000/ask"
+HEALTH_URL = "http://localhost:8000/health"
+CACHE_URL = "http://localhost:8000/cache"
+
+# --- INIZIALIZZAZIONE STATO SESSIONE ---
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+if "api_status" not in st.session_state:
+    st.session_state.api_status = "unknown"
+
+if "favorite_queries" not in st.session_state:
+    st.session_state.favorite_queries = []
+
+if "conversation_stats" not in st.session_state:
+    st.session_state.conversation_stats = {
+        "total_queries": 0,
+        "successful_queries": 0,
+        "start_time": datetime.now().isoformat(),
+    }
+
+
+# --- FUNZIONI UTILITY ---
+def check_api_health():
+    """Verifica lo stato dell'API e aggiorna lo stato della sessione."""
+    try:
+        response = requests.get(HEALTH_URL, timeout=5)
+        if response.status_code == 200:
+            st.session_state.api_status = "online"
+            return True
+        else:
+            st.session_state.api_status = "error"
+            return False
+    except:
+        st.session_state.api_status = "offline"
+        return False
+
+
+def export_conversation_json():
+    """Esporta la conversazione in formato JSON."""
+    data = {
+        "export_date": datetime.now().isoformat(),
+        "stats": st.session_state.conversation_stats,
+        "messages": st.session_state.messages,
+    }
+    return json.dumps(data, indent=2, ensure_ascii=False)
+
+
+def export_conversation_txt():
+    """Esporta la conversazione in formato testo."""
+    lines = [
+        "=" * 60,
+        "CONVERSAZIONE BLUEAI",
+        f"Esportata: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}",
+        "=" * 60,
+        "",
+    ]
+
+    for msg in st.session_state.messages:
+        role = "UTENTE" if msg["role"] == "user" else "BLUEAI"
+        timestamp = msg.get("timestamp", "N/A")
+        lines.append(f"\n[{role}] - {timestamp}")
+        lines.append("-" * 60)
+        lines.append(msg["content"])
+
+        if msg["role"] == "assistant" and msg.get("query"):
+            lines.append("\nQuery Cypher:")
+            lines.append(msg["query"])
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def clear_conversation():
+    """Cancella la conversazione corrente."""
+    st.session_state.messages = []
+    st.session_state.conversation_stats = {
+        "total_queries": 0,
+        "successful_queries": 0,
+        "start_time": datetime.now().isoformat(),
+    }
+
+
+def add_to_favorites(query):
+    """Aggiunge una query ai preferiti."""
+    if query not in st.session_state.favorite_queries:
+        st.session_state.favorite_queries.append(query)
+        return True
+    return False
+
+
+def suggest_related_queries(last_response):
+    """Suggerisce query correlate basate sull'ultima risposta."""
+    suggestions = []
+
+    if "cliente" in last_response.lower() or "clienti" in last_response.lower():
+        suggestions = [
+            "Mostra il fatturato di questo cliente",
+            "Quali sono gli altri clienti?",
+            "Analizza i dettagli del cliente",
+        ]
+    elif "fatturato" in last_response.lower():
+        suggestions = [
+            "Confronta con il fatturato totale",
+            "Mostra i clienti con fatturato simile",
+            "Analisi trend fatturato",
+        ]
+    elif "ditta" in last_response.lower() or "ditte" in last_response.lower():
+        suggestions = [
+            "Quanti clienti ha ogni ditta?",
+            "Confronta le ditte per fatturato",
+            "Dettagli sulla ditta principale",
+        ]
+    else:
+        suggestions = [
+            "Mostra tutti i clienti",
+            "Qual è il fatturato totale?",
+            "Lista delle ditte",
+        ]
+
+    return suggestions[:3]
+
+
+# --- FUNZIONE PRINCIPALE PER PROCESSARE QUERY ---
+def process_query(prompt):
+    """Processa una query e gestisce la risposta dall'API."""
+
+    # Aggiorna statistiche
+    st.session_state.conversation_stats["total_queries"] += 1
+
+    # Aggiungi il messaggio utente
+    user_message = {
+        "role": "user",
+        "content": prompt,
+        "timestamp": datetime.now().isoformat(),
+    }
+    st.session_state.messages.append(user_message)
+
+    # Mostra il messaggio utente
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    # Prepara il messaggio assistente
+    with st.chat_message("assistant"):
+        message_placeholder = st.empty()
+        status_placeholder = st.empty()
+
+        try:
+            # Mostra stato caricamento
+            with status_placeholder:
+                st.info(" BlueAI sta elaborando la tua richiesta...")
+
+            logger.info(f" Query: {prompt}")
+
+            # Chiamata API
+            response = requests.post(API_URL, json={"question": prompt}, timeout=300)
+
+            status_placeholder.empty()
+
+            if response.status_code == 200:
+                data = response.json()
+                logger.info(f" Risposta ricevuta")
+
+                # Estrai i dati
+                risposta_ai = data.get(
+                    "risposta", "Non ho ricevuto una risposta valida."
+                )
+                query_generata = data.get("query_generata", "")
+                context = data.get("context", [])
+                success = data.get("success", False)
+
+                # Aggiorna statistiche
+                if success:
+                    st.session_state.conversation_stats["successful_queries"] += 1
+
+                # Mostra la risposta
+                message_placeholder.markdown(risposta_ai)
+
+                # Crea il messaggio da salvare
+                assistant_message = {
+                    "role": "assistant",
+                    "content": risposta_ai,
+                    "query": (
+                        query_generata
+                        if query_generata and query_generata != "N/D"
+                        else None
+                    ),
+                    "context": context if context else None,
+                    "success": success,
+                    "timestamp": datetime.now().isoformat(),
+                }
+
+                # Mostra query Cypher se presente e richiesto
+                if (
+                    show_query
+                    and query_generata
+                    and query_generata not in ["N/D", "Errore", ""]
+                ):
+                    st.code(query_generata, language="cypher")
+
+                # Mostra debug info se richiesto
+                if debug_mode:
+                    debug_info = {
+                        "success": success,
+                        "query_presente": bool(
+                            query_generata
+                            and query_generata not in ["N/D", "Errore", ""]
+                        ),
+                        "context_items": len(context) if context else 0,
+                        "timestamp": assistant_message["timestamp"],
+                    }
+                    with st.expander(" Debug Info"):
+                        st.json(debug_info)
+
+                # Mostra context se richiesto e presente
+                if show_context and context:
+                    with st.expander(" Dati Raw dal Grafo"):
+                        st.json(context)
+
+                # Suggerimenti intelligenti
+                if show_suggestions and success:
+                    suggestions = suggest_related_queries(risposta_ai)
+                    if suggestions:
+                        st.markdown("** Domande correlate:**")
+                        cols = st.columns(len(suggestions))
+                        for idx, suggestion in enumerate(suggestions):
+                            if cols[idx].button(
+                                suggestion,
+                                key=f"suggest_{datetime.now().timestamp()}_{idx}",
+                            ):
+                                st.session_state.pending_query = suggestion
+                                st.rerun()
+
+                # Warning se nessun dato
+                if not success or "Non ho trovato" in risposta_ai:
+                    st.warning(" Nessun dato trovato. Prova a riformulare la domanda.")
+
+                # Salva il messaggio
+                st.session_state.messages.append(assistant_message)
+
+            else:
+                error_msg = f" Errore API ({response.status_code})"
+                message_placeholder.error(error_msg)
+                st.session_state.messages.append(
+                    {
+                        "role": "assistant",
+                        "content": error_msg,
+                        "success": False,
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                )
+
+        except requests.exceptions.Timeout:
+            error_msg = " Timeout: L'API ha impiegato troppo tempo. Riprova."
+            message_placeholder.error(error_msg)
+            status_placeholder.empty()
+            st.session_state.messages.append(
+                {
+                    "role": "assistant",
+                    "content": error_msg,
+                    "success": False,
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
+
+        except requests.exceptions.ConnectionError:
+            error_msg = " Errore di connessione: Verifica che l'API sia attiva su http://localhost:8000"
+            message_placeholder.error(error_msg)
+            status_placeholder.empty()
+            st.session_state.messages.append(
+                {
+                    "role": "assistant",
+                    "content": error_msg,
+                    "success": False,
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
+
+        except Exception as e:
+            error_msg = f" Errore imprevisto: {str(e)}"
+            message_placeholder.error(error_msg)
+            status_placeholder.empty()
+            logger.error(f"Errore: {e}", exc_info=True)
+            st.session_state.messages.append(
+                {
+                    "role": "assistant",
+                    "content": error_msg,
+                    "success": False,
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
+        finally:
+            if "status_placeholder" in locals():
+                status_placeholder.empty()
+
+
+# --- SIDEBAR ULTRA AVANZATA ---
+with st.sidebar:
+    st.markdown("### Centro di Controllo")
+
+    # Test connessione con badge status
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        if st.button(" Verifica API", use_container_width=True, key="test_api"):
+            with st.spinner("Connessione..."):
+                if check_api_health():
+                    st.success("✅ Online!")
+                    st.balloons()
+                else:
+                    st.error(" Offline")
+
+    # with col2:
+    # if st.session_state.api_status == "online":
+    # st.markdown('<span class="status-badge status-online">●</span>', unsafe_allow_html=True)
+    # else:
+    # st.markdown('<span class="status-badge status-offline">●</span>', unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # Tabs per organizzare funzionalità
+    tab1, tab2, tab3 = st.tabs(["Impostazioni", " Preferiti", " Stats"])
+
+    with tab1:
+        st.markdown("#### Visualizzazione")
+        debug_mode = st.checkbox(" Debug Mode", help="Mostra dettagli tecnici")
+        show_context = st.checkbox(" Dati Raw", help="Visualizza dati dal grafo")
+        show_query = st.checkbox(
+            " Query Cypher", value=False, help="Mostra query generate"
+        )
+        show_suggestions = st.checkbox(
+            " Suggerimenti Smart", value=True, help="Suggerimenti automatici"
+        )
+
+        st.markdown("---")
+        st.markdown("#### Azioni Rapide")
+
+        if st.button("Cancella Chat", use_container_width=True, type="secondary"):
+            if st.session_state.messages:
+                clear_conversation()
+                st.success("Chat cancellata!")
+                st.rerun()
+            else:
+                st.info("Chat già vuota")
+
+        # Aggiorna il testo di aiuto per spiegare che il reset è completo
+        if st.button(
+            "Reset Completo del Chatbot",
+            use_container_width=True,
+            type="primary",
+            help="Resetta completamente il chatbot, cancellando sia la cache delle risposte che la memoria delle conversazioni.",
+        ):
+            with st.spinner("Reset del server in corso..."):
+                try:
+                    # La chiamata API rimane la stessa
+                    response = requests.delete(CACHE_URL, timeout=10)
+                    if response.status_code == 200:
+                        data = response.json()
+
+                        # Pulisci la conversazione locale
+                        # Estrai i due nuovi valori dalla risposta JSON
+                        risposte_rimosse = data.get("risposte_rimosse", 0)
+                        sessioni_rimosse = data.get("sessioni_rimosse", 0)
+
+                        # Mostra un messaggio di successo più dettagliato
+                        st.success(
+                            f"Reset completato! Rimosse {risposte_rimosse} risposte e {sessioni_rimosse} sessioni di memoria."
+                        )
+
+                    else:
+                        st.error(f"Errore API ({response.status_code})")
+                except Exception as e:
+                    st.error(f"Errore di connessione: {e}")
+
+        if st.button("Esporta JSON", use_container_width=True):
+            if st.session_state.messages:
+                json_data = export_conversation_json()
+                st.download_button(
+                    "Download JSON",
+                    json_data,
+                    file_name=f"blueai_chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                    mime="application/json",
+                    use_container_width=True,
+                )
+            else:
+                st.info("Nessuna conversazione da esportare")
+
+        if st.button("Esporta TXT", use_container_width=True):
+            if st.session_state.messages:
+                txt_data = export_conversation_txt()
+                st.download_button(
+                    "Download TXT",
+                    txt_data,
+                    file_name=f"blueai_chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                    mime="text/plain",
+                    use_container_width=True,
+                )
+            else:
+                st.info("Nessuna conversazione da esportare")
+
+    with tab2:
+        st.markdown("#### Query Preferite")
+
+        # Aggiungi query predefinite se la lista è vuota
+        if not st.session_state.favorite_queries:
+            st.session_state.favorite_queries = [
+                "Mostrami tutti i clienti",
+                "Qual è il fatturato totale?",
+                "Lista delle ditte",
+            ]
+
+        for idx, fav_query in enumerate(st.session_state.favorite_queries):
+            col1, col2 = st.columns([4, 1])
+            with col1:
+                if st.button(
+                    f"{fav_query}", key=f"fav_{idx}", use_container_width=True
+                ):
+                    st.session_state.pending_query = fav_query
+                    st.rerun()
+            with col2:
+                if st.button("🗑️", key=f"del_fav_{idx}"):
+                    st.session_state.favorite_queries.pop(idx)
+                    st.rerun()
+
+        # Aggiungi nuova query preferita
+        with st.expander("Aggiungi Preferito"):
+            new_fav = st.text_input("Nuova query", key="new_favorite")
+            if st.button("Salva", key="save_fav"):
+                if new_fav and add_to_favorites(new_fav):
+                    st.success(" Aggiunto!")
+                    st.rerun()
+                elif new_fav:
+                    st.warning("Già presente")
+
+    with tab3:
+        st.markdown("#### Statistiche Sessione")
+
+        total = st.session_state.conversation_stats["total_queries"]
+        successful = st.session_state.conversation_stats["successful_queries"]
+        success_rate = (successful / total * 100) if total > 0 else 0
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Query Totali", total)
+        with col2:
+            st.metric("Successo", f"{success_rate:.0f}%")
+
+        st.metric("Messaggi", len(st.session_state.messages))
+
+        start_time = datetime.fromisoformat(
+            st.session_state.conversation_stats["start_time"]
+        )
+        duration = datetime.now() - start_time
+        minutes = int(duration.total_seconds() / 60)
+        st.caption(f"⏱️ Sessione: {minutes} minuti")
+
+    st.markdown("---")
+
+    # Query rapide
+    st.markdown("### 🚀 Query Veloci")
+
+    quick_queries = [
+        ("Lista Clienti", "Mostrami tutti i clienti"),
+        ("Fatturato Totale", "Qual è il fatturato totale?"),
+        ("Lista Ditte", "Mostra tutte le ditte"),
+        ("Top Cliente", "Chi è il cliente con più fatturato?"),
+        ("Statistiche", "Dammi delle statistiche generali"),
+        ("Analisi Rapida", "Fai un'analisi generale dei dati"),
+    ]
+
+    for icon_label, query in quick_queries:
+        if st.button(icon_label, use_container_width=True, key=f"quick_{query}"):
+            st.session_state.pending_query = query
+            st.rerun()
+
+    st.markdown("---")
+
+    # Tips
+    with st.expander("💡 Tips & Tricks"):
+        st.markdown(
+            """
+        **Performance:**
+        - Domande chiare = risposte veloci
+        - Cache attiva per query ripetute
+        - Esempi: *"clienti ditta X"*, *"fatturato Y"*
+        
+        **Funzionalità:**
+        - Salva query preferite
+        - Esporta conversazioni
+        - Suggerimenti automatici
+        - Statistiche in tempo reale
+        
+        **Shortcut:**
+        - Query veloci nella sidebar
+        - Click su suggerimenti correlati
+        - Export JSON/TXT disponibile
+        """
+        )
+
+# --- AREA PRINCIPALE CHAT ---
+
+# Messaggio di benvenuto se chat vuota
+if not st.session_state.messages:
+    st.markdown(
+        """
+    <div style='text-align: center; padding: 3rem 2rem; background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(147, 197, 253, 0.1)); border-radius: 20px; border: 1px solid rgba(59, 130, 246, 0.3); margin: 2rem 0;'>
+        <h2 style='color: #3b82f6; margin-bottom: 1rem;'> Benvenuto in BlueAI</h2>
+        <p style='color: #cbd5e1; font-size: 1.1rem; margin-bottom: 2rem;'>
+            Il tuo assistente AI per interrogare il Knowledge Graph Neo4j.<br>
+            Fai una domanda per iniziare!
+        </p>
+        <div style='display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;'>
+            <span style='background: rgba(59, 130, 246, 0.2); padding: 0.5rem 1rem; border-radius: 20px; color: #93c5fd;'>
+                 Linguaggio naturale
+            </span>
+            <span style='background: rgba(59, 130, 246, 0.2); padding: 0.5rem 1rem; border-radius: 20px; color: #93c5fd;'>
+                 Query Cypher automatiche
+            </span>
+            <span style='background: rgba(59, 130, 246, 0.2); padding: 0.5rem 1rem; border-radius: 20px; color: #93c5fd;'>
+                Analisi intelligenti
+            </span>
+        </div>
+    </div>
+    """,
+        unsafe_allow_html=True,
+    )
+
+# Mostra messaggi precedenti
+for i, message in enumerate(st.session_state.messages):
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+        # Mostra query Cypher solo se presente e richiesto
+        if (
+            message["role"] == "assistant"
+            and show_query
+            and message.get("query")
+            and message["query"] not in ["N/D", "Errore", ""]
+        ):
+            st.code(message["query"], language="cypher")
+
+        # Mostra debug se richiesto
+        if debug_mode and message["role"] == "assistant":
+            debug_data = {
+                "success": message.get("success", False),
+                "has_query": bool(message.get("query")),
+                "has_context": bool(message.get("context")),
+                "timestamp": message.get("timestamp", "N/A"),
+            }
+            with st.expander("🔍 Debug Info"):
+                st.json(debug_data)
+
+        # Mostra context se richiesto e presente
+        if show_context and message["role"] == "assistant" and message.get("context"):
+            with st.expander("Dati Raw dal Grafo"):
+                st.json(message["context"])
+
+# Gestione query pendenti (da bottoni)
+if "pending_query" in st.session_state:
+    query = st.session_state.pending_query
+    del st.session_state.pending_query
+    process_query(query)
+    st.rerun()
+
+# Input chat
+if prompt := st.chat_input("Chiedi qualsiasi cosa sul tuo Knowledge Graph..."):
+    process_query(prompt)
+    st.rerun()
+
+# Footer fisso in basso
+st.markdown(
+    """
+    <div class="footer-sticky">
+        <span class="float-icon">💡</span> <strong>Tip:</strong> 
+        Usa le query veloci o salva le tue preferite | 
+        <strong>Powered by</strong> BlueSystem × BlueAI 
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
