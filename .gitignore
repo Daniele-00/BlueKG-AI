@@ -16,3 +16,4 @@
 /.svn
 /llama3_cypher_expert/llama3_finetuned
 llama3_cypher_expert/llama3_finetuned/adapter_model.safetensors
+/Prompt_Engineering_with_Llama_3.ipynb
