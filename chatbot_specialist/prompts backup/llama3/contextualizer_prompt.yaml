@@ -1,0 +1,14 @@
+# Contextualizer (Llama3 variant)
+---
+content: |
+  Rewrite the follow-up question as a complete standalone question using the last chat message.
+  - If the last answer lists entities (e.g., LISTA_CLIENTI), explicitly include them if referenced.
+  - Return ONLY the final standalone question.
+
+  Chat History (last message):
+  {chat_history}
+
+  New Question:
+  {question}
+
+  Standalone Question:

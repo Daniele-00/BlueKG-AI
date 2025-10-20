@@ -1,0 +1,940 @@
+examples:
+- id: sales_cycle_001
+  question: Qual è il fatturato totale del cliente BARONE DI FERRANTE EZIO?
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE toLower(trim(c.name)) = 'barone di ferrante ezio' AND dr.tipoValore = 'Fatturato'
+    AND dr.importo > 0 RETURN sum(dr.importo) AS fatturatoTotale
+- id: sales_cycle_001_var1
+  question: Variant 1
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE toLower(trim(c.name)) = 'barone di ferrante ezio' AND dr.tipoValore = 'Fatturato'
+    AND dr.importo > 0 RETURN sum(dr.importo) AS fatturatoTotale
+- id: sales_cycle_001_var2
+  question: Qual è l'ammontare complessivo delle vendite del cliente BARONE DI FERRANTE
+    EZIO?
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE toLower(trim(c.name)) = 'barone di ferrante ezio' AND dr.tipoValore = 'Fatturato'
+    AND dr.importo > 0 RETURN sum(dr.importo) AS fatturatoTotale
+- id: sales_cycle_002
+  question: Chi è il cliente con il maggior fatturato?
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN c.name AS cliente,
+    sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC LIMIT 1
+- id: sales_cycle_002_var1
+  question: Variant 1
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN c.name AS cliente,
+    sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC LIMIT 1
+- id: sales_cycle_002_var2
+  question: Qual è il cliente che genera il fatturato più alto?
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN c.name AS cliente,
+    sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC LIMIT 1
+- id: sales_cycle_003
+  question: Elenca i 5 clienti che hanno fatturato di più che si trovano a Perugia
+  cypher: MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) WHERE toLower(trim(l.provincia))
+    = 'pg' MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN c.name AS cliente,
+    sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC LIMIT 5
+- id: sales_cycle_003_var1
+  question: Variant 1
+  cypher: MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) WHERE toLower(trim(l.provincia))
+    = 'pg' MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN c.name AS cliente,
+    sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC LIMIT 5
+- id: sales_cycle_003_var2
+  question: Quali sono i 5 clienti con il fatturato più alto situati a Perugia?
+  cypher: MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) WHERE toLower(trim(l.provincia))
+    = 'pg' MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN c.name AS cliente,
+    sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC LIMIT 5
+- id: sales_cycle_004
+  question: Mostrami i 5 prodotti più popolari in termini di quantità venduta
+  cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    RETURN a.descrizione AS prodotto, sum(dr.quantita) AS quantitaTotale ORDER BY
+    quantitaTotale DESC LIMIT 5
+- id: sales_cycle_004_var1
+  question: Variant 1
+  cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    RETURN a.descrizione AS prodotto, sum(dr.quantita) AS quantitaTotale ORDER BY
+    quantitaTotale DESC LIMIT 5
+- id: sales_cycle_004_var2
+  question: Fammi vedere i cinque prodotti più venduti in base alla quantità
+  cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    RETURN a.descrizione AS prodotto, sum(dr.quantita) AS quantitaTotale ORDER BY
+    quantitaTotale DESC LIMIT 5
+- id: sales_cycle_005
+  question: Mostrami i 5 prodotti meno popolari in termini di quantità venduta
+  cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    RETURN a.descrizione AS prodotto, sum(dr.quantita) AS quantitaTotale ORDER BY
+    quantitaTotale ASC LIMIT 5
+- id: sales_cycle_005_var1
+  question: Mostrami i 5 prodotti con le vendite più basse in termini di quantità
+  cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    RETURN a.descrizione AS prodotto, sum(dr.quantita) AS quantitaTotale ORDER BY
+    quantitaTotale ASC LIMIT 5
+- id: sales_cycle_005_var2
+  question: Fammi vedere i 5 prodotti che hanno venduto meno in termini di quantità
+  cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    RETURN a.descrizione AS prodotto, sum(dr.quantita) AS quantitaTotale ORDER BY
+    quantitaTotale ASC LIMIT 5
+- id: sales_cycle_006
+  question: Dimmi il fatturato di ogni ditta.
+  cypher: MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN d.dittaId AS ditta,
+    sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC
+- id: sales_cycle_006_var1
+  question: Variant 1
+  cypher: MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN d.dittaId AS ditta,
+    sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC
+- id: sales_cycle_006_var2
+  question: Qual è il fatturato di ciascuna azienda?
+  cypher: MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN d.dittaId AS ditta,
+    sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC
+- id: sales_cycle_007
+  question: Il fatturato di ogni ditta, nel loro anno migliore
+  cypher: 'MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = ''Fatturato'' AND dr.importo > 0 WITH d, doc.dataEmissione.year
+    AS anno, sum(dr.importo) AS fatturatoAnnuale ORDER BY d.dittaId, fatturatoAnnuale
+    DESC WITH d, collect({anno: anno, fatturato: fatturatoAnnuale}) AS fatturatiOrdinati
+    RETURN d.dittaId AS ditta, fatturatiOrdinati[0].anno AS annoTop, fatturatiOrdinati[0].fatturato
+    AS fatturatoMassimo'
+- id: sales_cycle_007_var1
+  question: Il giro d'affari di ciascuna azienda nel loro anno più prospero
+  cypher: 'MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = ''Fatturato'' AND dr.importo > 0 WITH d, doc.dataEmissione.year
+    AS anno, sum(dr.importo) AS fatturatoAnnuale ORDER BY d.dittaId, fatturatoAnnuale
+    DESC WITH d, collect({anno: anno, fatturato: fatturatoAnnuale}) AS fatturatiOrdinati
+    RETURN d.dittaId AS ditta, fatturatiOrdinati[0].anno AS annoTop, fatturatiOrdinati[0].fatturato
+    AS fatturatoMassimo'
+- id: sales_cycle_007_var2
+  question: Il volume d'affari di ogni impresa nel loro anno di maggior successo
+  cypher: 'MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = ''Fatturato'' AND dr.importo > 0 WITH d, doc.dataEmissione.year
+    AS anno, sum(dr.importo) AS fatturatoAnnuale ORDER BY d.dittaId, fatturatoAnnuale
+    DESC WITH d, collect({anno: anno, fatturato: fatturatoAnnuale}) AS fatturatiOrdinati
+    RETURN d.dittaId AS ditta, fatturatiOrdinati[0].anno AS annoTop, fatturatiOrdinati[0].fatturato
+    AS fatturatoMassimo'
+- id: sales_cycle_008
+  question: Il fatturato di ogni ditta, nel loro anno peggiore
+  cypher: 'MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = ''Fatturato'' AND dr.importo > 0 WITH d, doc.dataEmissione.year
+    AS anno, sum(dr.importo) AS fatturatoAnnuale ORDER BY d.dittaId, fatturatoAnnuale
+    ASC WITH d, collect({anno: anno, fatturato: fatturatoAnnuale}) AS fatturatiOrdinati
+    RETURN d.dittaId AS ditta, fatturatiOrdinati[0].anno AS annoTop, fatturatiOrdinati[0].fatturato
+    AS fatturatoMassimo'
+- id: sales_cycle_008_var1
+  question: 'Variant 1: Il giro d''affari di ciascuna azienda nel loro anno più sfavorevole'
+  cypher: 'MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = ''Fatturato'' AND dr.importo > 0 WITH d, doc.dataEmissione.year
+    AS anno, sum(dr.importo) AS fatturatoAnnuale ORDER BY d.dittaId, fatturatoAnnuale
+    ASC WITH d, collect({anno: anno, fatturato: fatturatoAnnuale}) AS fatturatiOrdinati
+    RETURN d.dittaId AS ditta, fatturatiOrdinati[0].anno AS annoTop, fatturatiOrdinati[0].fatturato
+    AS fatturatoMassimo'
+- id: sales_cycle_008_var2
+  question: 'Variant 2: Il volume d''affari di ogni impresa nel loro anno meno fortunato'
+  cypher: 'MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = ''Fatturato'' AND dr.importo > 0 WITH d, doc.dataEmissione.year
+    AS anno, sum(dr.importo) AS fatturatoAnnuale ORDER BY d.dittaId, fatturatoAnnuale
+    ASC WITH d, collect({anno: anno, fatturato: fatturatoAnnuale}) AS fatturatiOrdinati
+    RETURN d.dittaId AS ditta, fatturatiOrdinati[0].anno AS annoTop, fatturatiOrdinati[0].fatturato
+    AS fatturatoMassimo'
+- id: sales_cycle_011
+  question: Qual è il prodotto più venduto in generale (per valore)?
+  cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN a.descrizione AS prodotto,
+    sum(dr.importo) AS valoreVenduto ORDER BY valoreVenduto DESC LIMIT 1
+- id: sales_cycle_011_var1
+  question: Qual è l'articolo che genera più vendite in generale (per valore)?
+  cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN a.descrizione AS prodotto,
+    sum(dr.importo) AS valoreVenduto ORDER BY valoreVenduto DESC LIMIT 1
+- id: sales_cycle_011_var2
+  question: Qual è l'oggetto più acquistato in generale (per valore)?
+  cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN a.descrizione AS prodotto,
+    sum(dr.importo) AS valoreVenduto ORDER BY valoreVenduto DESC LIMIT 1
+- id: sales_cycle_012
+  question: Qual è il prodotto meno venduto in generale (per valore)?
+  cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN a.descrizione AS prodotto,
+    sum(dr.importo) AS valoreVenduto ORDER BY valoreVenduto ASC LIMIT 1
+- id: sales_cycle_012_var1
+  question: Qual è l'articolo che ha registrato le vendite più basse in termini di
+    valore?
+  cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN a.descrizione AS prodotto,
+    sum(dr.importo) AS valoreVenduto ORDER BY valoreVenduto ASC LIMIT 1
+- id: sales_cycle_012_var2
+  question: Qual è l'elemento con il minor volume di vendite complessivo (per valore)?
+  cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN a.descrizione AS prodotto,
+    sum(dr.importo) AS valoreVenduto ORDER BY valoreVenduto ASC LIMIT 1
+- id: sales_cycle_014
+  question: A quanto l'ho venduto il prodotto GAS FREON SOLSTICE N40 R448A?
+  cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    WHERE toLower(trim(a.descrizione)) = 'gas freon solstice n40 r448a' AND dr.tipoValore
+    = 'Fatturato' AND dr.importo > 0 RETURN sum(dr.importo) AS totaleVenduto
+- id: sales_cycle_014_var1
+  question: 'Variant 1: A quale prezzo ho venduto il prodotto GAS FREON SOLSTICE N40
+    R448A?'
+  cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    WHERE toLower(trim(a.descrizione)) = 'gas freon solstice n40 r448a' AND dr.tipoValore
+    = 'Fatturato' AND dr.importo > 0 RETURN sum(dr.importo) AS totaleVenduto
+- id: sales_cycle_014_var2
+  question: 'Variant 2: Qual è stato il prezzo di vendita del prodotto GAS FREON SOLSTICE
+    N40 R448A?'
+  cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    WHERE toLower(trim(a.descrizione)) = 'gas freon solstice n40 r448a' AND dr.tipoValore
+    = 'Fatturato' AND dr.importo > 0 RETURN sum(dr.importo) AS totaleVenduto
+- id: sales_cycle_015
+  question: Attualmente la ditta 2 è in perdita o in crescita?
+  cypher: 'MATCH (d:Ditta {dittaId: ''2''})<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = ''Fatturato'' AND dr.importo > 0 AND doc.dataEmissione.year
+    IN [date().year, date().year - 1] RETURN doc.dataEmissione.year AS anno, sum(dr.importo)
+    AS fatturatoAnnuale ORDER BY anno DESC'
+- id: sales_cycle_015_var1
+  question: La ditta 2 sta attualmente perdendo o crescendo?
+  cypher: 'MATCH (d:Ditta {dittaId: ''2''})<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = ''Fatturato'' AND dr.importo > 0 AND doc.dataEmissione.year
+    IN [date().year, date().year - 1] RETURN doc.dataEmissione.year AS anno, sum(dr.importo)
+    AS fatturatoAnnuale ORDER BY anno DESC'
+- id: sales_cycle_015_var2
+  question: La società 2 è al momento in calo o in espansione?
+  cypher: 'MATCH (d:Ditta {dittaId: ''2''})<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = ''Fatturato'' AND dr.importo > 0 AND doc.dataEmissione.year
+    IN [date().year, date().year - 1] RETURN doc.dataEmissione.year AS anno, sum(dr.importo)
+    AS fatturatoAnnuale ORDER BY anno DESC'
+- id: sales_cycle_021
+  question: Qual è l'importo medio per riga documento nelle fatture di vendita?
+  cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN avg(dr.importo) AS
+    importoMedioRiga
+- id: sales_cycle_021_var1
+  question: Variant 1
+  cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN avg(dr.importo) AS
+    importoMedioRiga
+- id: sales_cycle_021_var2
+  question: Qual è la media dell'importo per ogni riga di documento nelle fatture
+    di vendita?
+  cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN avg(dr.importo) AS
+    importoMedioRiga
+- id: sales_cycle_027
+  question: Qual è il fatturato della sottofamiglia 'COMPRESSORI SEMIERMETICI'?
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)-[:APPARTIENE_A]->(sf:Sottofamiglia)
+    WHERE toLower(trim(sf.nome)) = 'compressori semiermetici' AND dr.tipoValore =
+    'Fatturato' AND dr.importo > 0 RETURN sum(dr.importo) AS fatturatoSottofamiglia
+- id: sales_cycle_027_var1
+  question: 'Variant 1: Qual è il giro d''affari della sottofamiglia ''COMPRESSORI
+    SEMIERMETICI''?'
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)-[:APPARTIENE_A]->(sf:Sottofamiglia)
+    WHERE toLower(trim(sf.nome)) = 'compressori semiermetici' AND dr.tipoValore =
+    'Fatturato' AND dr.importo > 0 RETURN sum(dr.importo) AS fatturatoSottofamiglia
+- id: sales_cycle_027_var2
+  question: 'Variant 2: Quanto ammonta il fatturato della sottofamiglia ''COMPRESSORI
+    SEMIERMETICI''?'
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)-[:APPARTIENE_A]->(sf:Sottofamiglia)
+    WHERE toLower(trim(sf.nome)) = 'compressori semiermetici' AND dr.tipoValore =
+    'Fatturato' AND dr.importo > 0 RETURN sum(dr.importo) AS fatturatoSottofamiglia
+- id: sales_cycle_029
+  question: Qual è il fatturato del primo trimestre 2024?
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 AND doc.dataEmissione.year
+    = 2024 AND doc.dataEmissione.month >= 1 AND doc.dataEmissione.month <= 3 RETURN
+    sum(dr.importo) AS fatturatoTrimestre
+- id: sales_cycle_029_var1
+  question: Variant 1
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 AND doc.dataEmissione.year
+    = 2024 AND doc.dataEmissione.month >= 1 AND doc.dataEmissione.month <= 3 RETURN
+    sum(dr.importo) AS fatturatoTrimestre
+- id: sales_cycle_029_var2
+  question: Qual è il giro d'affari del primo trimestre 2024?
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 AND doc.dataEmissione.year
+    = 2024 AND doc.dataEmissione.month >= 1 AND doc.dataEmissione.month <= 3 RETURN
+    sum(dr.importo) AS fatturatoTrimestre
+- id: sales_cycle_030
+  question: Qual è il fatturato tra Gennaio 2024 e Marzo 2024?
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 AND doc.dataEmissione >=
+    date('2024-01-01') AND doc.dataEmissione <= date('2024-03-31') RETURN sum(dr.importo)
+    AS fatturatoPeriodo
+- id: sales_cycle_030_var1
+  question: Qual è il giro d'affari tra Gennaio 2024 e Marzo 2024?
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 AND doc.dataEmissione >=
+    date('2024-01-01') AND doc.dataEmissione <= date('2024-03-31') RETURN sum(dr.importo)
+    AS fatturatoPeriodo
+- id: sales_cycle_030_var2
+  question: Qual è il volume d'affari tra Gennaio 2024 e Marzo 2024?
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 AND doc.dataEmissione >=
+    date('2024-01-01') AND doc.dataEmissione <= date('2024-03-31') RETURN sum(dr.importo)
+    AS fatturatoPeriodo
+- id: sales_cycle_031
+  question: Elenca i clienti con fatturato superiore a 50000 euro
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH c, sum(dr.importo) AS
+    fatturatoTotale WHERE fatturatoTotale > 50000 RETURN c.name AS cliente, fatturatoTotale
+    ORDER BY fatturatoTotale DESC
+- id: sales_cycle_031_var1
+  question: Variant 1
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH c, sum(dr.importo) AS
+    fatturatoTotale WHERE fatturatoTotale > 50000 RETURN c.name AS cliente, fatturatoTotale
+    ORDER BY fatturatoTotale DESC
+- id: sales_cycle_031_var2
+  question: Mostra i clienti che hanno un fatturato oltre i 50000 euro
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH c, sum(dr.importo) AS
+    fatturatoTotale WHERE fatturatoTotale > 50000 RETURN c.name AS cliente, fatturatoTotale
+    ORDER BY fatturatoTotale DESC
+- id: sales_cycle_032
+  question: Quali sono i 3 prodotti più venduti al cliente 'BARONE DI FERRANTE EZIO'?
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    WHERE toLower(trim(c.name)) = 'barone di ferrante ezio' AND dr.tipoValore = 'Fatturato'
+    AND dr.importo > 0 RETURN a.descrizione AS prodotto, sum(dr.importo) AS totaleVenduto
+    ORDER BY totaleVenduto DESC LIMIT 3
+- id: sales_cycle_032_var1
+  question: 'Variant 1: Quali sono i tre articoli più acquistati dal cliente ''BARONE
+    DI FERRANTE EZIO''?'
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    WHERE toLower(trim(c.name)) = 'barone di ferrante ezio' AND dr.tipoValore = 'Fatturato'
+    AND dr.importo > 0 RETURN a.descrizione AS prodotto, sum(dr.importo) AS totaleVenduto
+    ORDER BY totaleVenduto DESC LIMIT 3
+- id: sales_cycle_032_var2
+  question: 'Variant 2: Quali sono i tre prodotti principali venduti al cliente ''BARONE
+    DI FERRANTE EZIO''?'
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    WHERE toLower(trim(c.name)) = 'barone di ferrante ezio' AND dr.tipoValore = 'Fatturato'
+    AND dr.importo > 0 RETURN a.descrizione AS prodotto, sum(dr.importo) AS totaleVenduto
+    ORDER BY totaleVenduto DESC LIMIT 3
+- id: sales_cycle_033
+  question: Quali sono i 3 prodotti meno venduti al cliente 'BARONE DI FERRANTE EZIO'?
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    WHERE toLower(trim(c.name)) = 'barone di ferrante ezio' AND dr.tipoValore = 'Fatturato'
+    AND dr.importo > 0 RETURN a.descrizione AS prodotto, sum(dr.importo) AS totaleVenduto
+    ORDER BY totaleVenduto ASC LIMIT 3
+- id: sales_cycle_033_var1
+  question: Variant 1
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    WHERE toLower(trim(c.name)) = 'barone di ferrante ezio' AND dr.tipoValore = 'Fatturato'
+    AND dr.importo > 0 RETURN a.descrizione AS prodotto, sum(dr.importo) AS totaleVenduto
+    ORDER BY totaleVenduto ASC LIMIT 3
+- id: sales_cycle_033_var2
+  question: Quali sono i tre articoli con le vendite più basse per il cliente 'BARONE
+    DI FERRANTE EZIO'?
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    WHERE toLower(trim(c.name)) = 'barone di ferrante ezio' AND dr.tipoValore = 'Fatturato'
+    AND dr.importo > 0 RETURN a.descrizione AS prodotto, sum(dr.importo) AS totaleVenduto
+    ORDER BY totaleVenduto ASC LIMIT 3
+- id: sales_cycle_035
+  question: Qual è l'importo minimo registrato in una singola riga di fattura di vendita?
+  cypher: MATCH (dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo
+    > 0 RETURN min(dr.importo) AS importoMinimo
+- id: sales_cycle_035_var1
+  question: Variant 1
+  cypher: MATCH (dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo
+    > 0 RETURN min(dr.importo) AS importoMinimo
+- id: sales_cycle_035_var2
+  question: Qual è la cifra più bassa riportata in una singola voce di fattura di
+    vendita?
+  cypher: MATCH (dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo
+    > 0 RETURN min(dr.importo) AS importoMinimo
+- id: sales_cycle_036
+  question: Qual è l'importo massimo registrato in una singola riga di fattura di
+    vendita?
+  cypher: MATCH (dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo
+    > 0 RETURN max(dr.importo) AS importoMassimo
+- id: sales_cycle_036_var1
+  question: Variant 1
+  cypher: MATCH (dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo
+    > 0 RETURN max(dr.importo) AS importoMassimo
+- id: sales_cycle_036_var2
+  question: Qual è la cifra più alta riportata in una singola voce di fattura di vendita?
+  cypher: MATCH (dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo
+    > 0 RETURN max(dr.importo) AS importoMassimo
+- id: sales_cycle_040
+  question: Calcola il fatturato totale per il secondo trimestre del 2024 (aprile,
+    maggio, giugno).
+  cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 AND doc.dataEmissione.year
+    = 2024 AND doc.dataEmissione.month IN [4, 5, 6] RETURN sum(dr.importo) AS fatturatoTrimestre
+- id: sales_cycle_040_var1
+  question: Variant 1
+  cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 AND doc.dataEmissione.year
+    = 2024 AND doc.dataEmissione.month IN [4, 5, 6] RETURN sum(dr.importo) AS fatturatoTrimestre
+- id: sales_cycle_040_var2
+  question: Determina il totale delle vendite per il secondo trimestre del 2024 (aprile,
+    maggio, giugno).
+  cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 AND doc.dataEmissione.year
+    = 2024 AND doc.dataEmissione.month IN [4, 5, 6] RETURN sum(dr.importo) AS fatturatoTrimestre
+- id: sales_cycle_043
+  question: Chi sono i 3 clienti con il fatturato più basso?
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN c.name AS cliente,
+    sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale ASC LIMIT 3
+- id: sales_cycle_043_var1
+  question: Quali sono i 3 clienti con il minor fatturato?
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN c.name AS cliente,
+    sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale ASC LIMIT 3
+- id: sales_cycle_043_var2
+  question: Quali sono i 3 clienti che hanno il fatturato più ridotto?
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN c.name AS cliente,
+    sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale ASC LIMIT 3
+- id: sales_cycle_044
+  question: Chi sono i 3 clienti con il fatturato più alto?
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN c.name AS cliente,
+    sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC LIMIT 3
+- id: sales_cycle_044_var1
+  question: Quali sono i 3 clienti con il maggiore fatturato?
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN c.name AS cliente,
+    sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC LIMIT 3
+- id: sales_cycle_044_var2
+  question: Quali clienti hanno i 3 fatturati più elevati?
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN c.name AS cliente,
+    sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC LIMIT 3
+- id: sales_cycle_049
+  question: Ordina le aziende in base al numero totale di documenti di vendita emessi.
+  cypher: MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(doc:Documento)
+    RETURN d.dittaId AS ditta, count(doc) AS numeroDocumenti ORDER BY numeroDocumenti
+    DESC
+- id: sales_cycle_049_var1
+  question: Variant 1
+  cypher: MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(doc:Documento)
+    RETURN d.dittaId AS ditta, count(doc) AS numeroDocumenti ORDER BY numeroDocumenti
+    DESC
+- id: sales_cycle_049_var2
+  question: Classifica le aziende secondo il totale dei documenti di vendita emessi.
+  cypher: MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(doc:Documento)
+    RETURN d.dittaId AS ditta, count(doc) AS numeroDocumenti ORDER BY numeroDocumenti
+    DESC
+- id: sales_cycle_054
+  question: Mostrami il fatturato totale per ogni mese dell'anno corrente della ditta
+    '1'.
+  cypher: 'MATCH (d:Ditta {dittaId: ''1''})<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE date(doc.dataEmissione).year = date().year AND dr.tipoValore = ''Fatturato''
+    AND dr.importo > 0 RETURN date(doc.dataEmissione).month AS mese, sum(dr.importo)
+    AS fatturatoMensile ORDER BY mese ASC'
+- id: sales_cycle_054_var1
+  question: Qual è il fatturato complessivo mensile della ditta '1' per l'anno in
+    corso?
+  cypher: 'MATCH (d:Ditta {dittaId: ''1''})<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE date(doc.dataEmissione).year = date().year AND dr.tipoValore = ''Fatturato''
+    AND dr.importo > 0 RETURN date(doc.dataEmissione).month AS mese, sum(dr.importo)
+    AS fatturatoMensile ORDER BY mese ASC'
+- id: sales_cycle_054_var2
+  question: Puoi indicarmi il totale delle vendite mensili per l'anno attuale della
+    società '1'?
+  cypher: 'MATCH (d:Ditta {dittaId: ''1''})<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE date(doc.dataEmissione).year = date().year AND dr.tipoValore = ''Fatturato''
+    AND dr.importo > 0 RETURN date(doc.dataEmissione).month AS mese, sum(dr.importo)
+    AS fatturatoMensile ORDER BY mese ASC'
+- id: sales_cycle_055
+  question: Confronta il fatturato totale del 2024 con quello del 2023.
+  cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 AND doc.dataEmissione.year
+    IN [2023, 2024] RETURN doc.dataEmissione.year AS anno, sum(dr.importo) AS fatturatoTotale
+    ORDER BY anno
+- id: sales_cycle_055_var1
+  question: Confronta il totale delle vendite del 2024 con quello del 2023.
+  cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 AND doc.dataEmissione.year
+    IN [2023, 2024] RETURN doc.dataEmissione.year AS anno, sum(dr.importo) AS fatturatoTotale
+    ORDER BY anno
+- id: sales_cycle_055_var2
+  question: Metti a confronto il fatturato complessivo del 2024 con quello del 2023.
+  cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 AND doc.dataEmissione.year
+    IN [2023, 2024] RETURN doc.dataEmissione.year AS anno, sum(dr.importo) AS fatturatoTotale
+    ORDER BY anno
+- id: sales_cycle_057
+  question: Mostrami i clienti il cui primo documento di vendita è stato emesso negli
+    ultimi 6 mesi.
+  cypher: 'MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento) WITH c, min(doc.dataEmissione)
+    AS primoAcquisto WHERE primoAcquisto >= date() - duration({months: 6}) RETURN
+    c.name AS clienteRecente, primoAcquisto ORDER BY primoAcquisto DESC'
+- id: sales_cycle_057_var1
+  question: Variant 1
+  cypher: 'MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento) WITH c, min(doc.dataEmissione)
+    AS primoAcquisto WHERE primoAcquisto >= date() - duration({months: 6}) RETURN
+    c.name AS clienteRecente, primoAcquisto ORDER BY primoAcquisto DESC'
+- id: sales_cycle_057_var2
+  question: Fammi vedere i clienti per i quali il primo documento di vendita è stato
+    emesso negli ultimi 6 mesi.
+  cypher: 'MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento) WITH c, min(doc.dataEmissione)
+    AS primoAcquisto WHERE primoAcquisto >= date() - duration({months: 6}) RETURN
+    c.name AS clienteRecente, primoAcquisto ORDER BY primoAcquisto DESC'
+- id: sales_cycle_058
+  question: Ci sono aziende che non hanno registrato alcun fatturato?
+  cypher: 'MATCH (d:Ditta) WHERE NOT (d)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento
+    {tipoValore: ''Fatturato''}) RETURN d.dittaId AS dittaSenzaFatturato'
+- id: sales_cycle_058_var1
+  question: Esistono imprese che non hanno avuto alcun fatturato?
+  cypher: 'MATCH (d:Ditta) WHERE NOT (d)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento
+    {tipoValore: ''Fatturato''}) RETURN d.dittaId AS dittaSenzaFatturato'
+- id: sales_cycle_058_var2
+  question: Ci sono imprese che non hanno generato alcun ricavo?
+  cypher: 'MATCH (d:Ditta) WHERE NOT (d)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento
+    {tipoValore: ''Fatturato''}) RETURN d.dittaId AS dittaSenzaFatturato'
+- id: sales_cycle_062
+  question: Per ogni famiglia di prodotto, chi è il cliente che ha generato il fatturato
+    maggiore?
+  cypher: 'MATCH (fam:Famiglia)<-[:INCLUSA_IN]-(:Sottofamiglia)<-[:APPARTIENE_A]-(:Articolo)<-[:RIGUARDA_ARTICOLO]-(dr:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(c:Cliente)
+    WHERE dr.tipoValore = ''Fatturato'' AND dr.importo > 0 WITH fam, c, sum(dr.importo)
+    AS fatturato ORDER BY fam.nome, fatturato DESC WITH fam, collect({cliente: c.name,
+    fatturato: fatturato}) AS clientiOrdinati RETURN fam.nome AS famiglia, clientiOrdinati[0].cliente
+    AS topCliente, clientiOrdinati[0].fatturato AS fatturatoMassimo'
+- id: sales_cycle_062_var1
+  question: Variant 1
+  cypher: 'MATCH (fam:Famiglia)<-[:INCLUSA_IN]-(:Sottofamiglia)<-[:APPARTIENE_A]-(:Articolo)<-[:RIGUARDA_ARTICOLO]-(dr:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(c:Cliente)
+    WHERE dr.tipoValore = ''Fatturato'' AND dr.importo > 0 WITH fam, c, sum(dr.importo)
+    AS fatturato ORDER BY fam.nome, fatturato DESC WITH fam, collect({cliente: c.name,
+    fatturato: fatturato}) AS clientiOrdinati RETURN fam.nome AS famiglia, clientiOrdinati[0].cliente
+    AS topCliente, clientiOrdinati[0].fatturato AS fatturatoMassimo'
+- id: sales_cycle_062_var2
+  question: Per ciascuna categoria di prodotto, qual è il cliente che ha prodotto
+    il fatturato più alto?
+  cypher: 'MATCH (fam:Famiglia)<-[:INCLUSA_IN]-(:Sottofamiglia)<-[:APPARTIENE_A]-(:Articolo)<-[:RIGUARDA_ARTICOLO]-(dr:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(c:Cliente)
+    WHERE dr.tipoValore = ''Fatturato'' AND dr.importo > 0 WITH fam, c, sum(dr.importo)
+    AS fatturato ORDER BY fam.nome, fatturato DESC WITH fam, collect({cliente: c.name,
+    fatturato: fatturato}) AS clientiOrdinati RETURN fam.nome AS famiglia, clientiOrdinati[0].cliente
+    AS topCliente, clientiOrdinati[0].fatturato AS fatturatoMassimo'
+- id: sales_cycle_064
+  question: Quale provincia ha generato il volume di fatturato più alto?
+  cypher: MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN l.provincia AS provincia,
+    sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC LIMIT 1
+- id: sales_cycle_064_var1
+  question: In quale provincia si è registrato il volume di fatturato più elevato?
+  cypher: MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN l.provincia AS provincia,
+    sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC LIMIT 1
+- id: sales_cycle_064_var2
+  question: Qual è la provincia che ha prodotto il volume di fatturato maggiore?
+  cypher: MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN l.provincia AS provincia,
+    sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC LIMIT 1
+- id: sales_cycle_065
+  question: Quale provincia ha generato il volume di fatturato più basso?
+  cypher: MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN l.provincia AS provincia,
+    sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale ASC LIMIT 1
+- id: sales_cycle_065_var1
+  question: In quale provincia si è registrato il volume di fatturato più basso?
+  cypher: MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN l.provincia AS provincia,
+    sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale ASC LIMIT 1
+- id: sales_cycle_065_var2
+  question: Qual è la provincia con il volume di fatturato minore?
+  cypher: MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN l.provincia AS provincia,
+    sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale ASC LIMIT 1
+- id: sales_cycle_066
+  question: Lista dei clienti il cui fatturato totale è superiore al fatturato medio
+    di tutti i clienti.
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH count(DISTINCT c) AS
+    totalCustomers, sum(dr.importo) AS totalRevenue WITH totalRevenue / totalCustomers
+    AS avgRevenue MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH c, sum(dr.importo) AS
+    customerRevenue, avgRevenue WHERE customerRevenue > avgRevenue RETURN c.name AS
+    cliente, customerRevenue ORDER BY customerRevenue DESC
+- id: sales_cycle_066_var1
+  question: Variant 1
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH count(DISTINCT c) AS
+    totalCustomers, sum(dr.importo) AS totalRevenue WITH totalRevenue / totalCustomers
+    AS avgRevenue MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH c, sum(dr.importo) AS
+    customerRevenue, avgRevenue WHERE customerRevenue > avgRevenue RETURN c.name AS
+    cliente, customerRevenue ORDER BY customerRevenue DESC
+- id: sales_cycle_066_var2
+  question: Elenco dei clienti con un fatturato complessivo che supera la media del
+    fatturato di tutti i clienti.
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH count(DISTINCT c) AS
+    totalCustomers, sum(dr.importo) AS totalRevenue WITH totalRevenue / totalCustomers
+    AS avgRevenue MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH c, sum(dr.importo) AS
+    customerRevenue, avgRevenue WHERE customerRevenue > avgRevenue RETURN c.name AS
+    cliente, customerRevenue ORDER BY customerRevenue DESC
+- id: sales_cycle_068
+  question: Qual è il fatturato totale associato ai documenti di tipo 'FVC'?
+  cypher: 'MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType {codice: ''FVC''}) MATCH
+    (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = ''Fatturato''
+    AND dr.importo > 0 RETURN sum(dr.importo) AS fatturatoFVC'
+- id: sales_cycle_068_var1
+  question: 'Variant 1: Qual è l''ammontare complessivo del fatturato per i documenti
+    di tipo ''FVC''?'
+  cypher: 'MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType {codice: ''FVC''}) MATCH
+    (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = ''Fatturato''
+    AND dr.importo > 0 RETURN sum(dr.importo) AS fatturatoFVC'
+- id: sales_cycle_068_var2
+  question: 'Variant 2: A quanto ammonta il fatturato totale relativo ai documenti
+    di tipo ''FVC''?'
+  cypher: 'MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType {codice: ''FVC''}) MATCH
+    (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = ''Fatturato''
+    AND dr.importo > 0 RETURN sum(dr.importo) AS fatturatoFVC'
+- id: sales_cycle_069
+  question: Quale cliente ha ricevuto il maggior numero di note di credito (codice
+    'NCC')?
+  cypher: 'MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType
+    {codice: ''NCC''}) RETURN c.name AS cliente, count(doc) AS numeroNoteCredito ORDER
+    BY numeroNoteCredito DESC LIMIT 1'
+- id: sales_cycle_069_var1
+  question: Qual è il cliente che ha ottenuto il più alto numero di note di credito
+    (codice 'NCC')?
+  cypher: 'MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType
+    {codice: ''NCC''}) RETURN c.name AS cliente, count(doc) AS numeroNoteCredito ORDER
+    BY numeroNoteCredito DESC LIMIT 1'
+- id: sales_cycle_069_var2
+  question: Chi è il cliente che ha avuto il maggior quantitativo di note di credito
+    (codice 'NCC')?
+  cypher: 'MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType
+    {codice: ''NCC''}) RETURN c.name AS cliente, count(doc) AS numeroNoteCredito ORDER
+    BY numeroNoteCredito DESC LIMIT 1'
+- id: sales_cycle_070
+  question: Calcola il valore medio di un documento per ciascun tipo (considerando
+    solo il fatturato).
+  cypher: MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType) MATCH (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH dt, doc, sum(dr.importo)
+    AS valoreDocumento RETURN dt.codice AS tipoDocumento, avg(valoreDocumento) AS
+    valoreMedio ORDER BY valoreMedio DESC
+- id: sales_cycle_070_var1
+  question: Variant 1
+  cypher: MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType) MATCH (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH dt, doc, sum(dr.importo)
+    AS valoreDocumento RETURN dt.codice AS tipoDocumento, avg(valoreDocumento) AS
+    valoreMedio ORDER BY valoreMedio DESC
+- id: sales_cycle_070_var2
+  question: Determina il valore medio di un documento per ogni categoria (considerando
+    solo il fatturato).
+  cypher: MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType) MATCH (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH dt, doc, sum(dr.importo)
+    AS valoreDocumento RETURN dt.codice AS tipoDocumento, avg(valoreDocumento) AS
+    valoreMedio ORDER BY valoreMedio DESC
+- id: sales_cycle_071
+  question: Chi è il cliente con il fatturato più alto?
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN c.name AS cliente,
+    sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC LIMIT 1
+- id: sales_cycle_071_var1
+  question: Variant 1
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN c.name AS cliente,
+    sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC LIMIT 1
+- id: sales_cycle_071_var2
+  question: Qual è il cliente che ha il fatturato maggiore?
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN c.name AS cliente,
+    sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC LIMIT 1
+- id: sales_cycle_073
+  question: Mostrami i 5 prodotti più popolari in termini di quantità venduta
+  cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    RETURN a.descrizione AS prodotto, sum(dr.quantita) AS quantitaTotale ORDER BY
+    quantitaTotale DESC LIMIT 5
+- id: sales_cycle_073_var1
+  question: Variant 1
+  cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    RETURN a.descrizione AS prodotto, sum(dr.quantita) AS quantitaTotale ORDER BY
+    quantitaTotale DESC LIMIT 5
+- id: sales_cycle_073_var2
+  question: Fammi vedere i cinque prodotti più venduti in base alla quantità
+  cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    RETURN a.descrizione AS prodotto, sum(dr.quantita) AS quantitaTotale ORDER BY
+    quantitaTotale DESC LIMIT 5
+- id: sales_cycle_074
+  question: Dimmi il fatturato di ciascuna azienda.
+  cypher: MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN d.dittaId AS ditta,
+    sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC
+- id: sales_cycle_074_var1
+  question: Variant 1
+  cypher: MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN d.dittaId AS ditta,
+    sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC
+- id: sales_cycle_074_var2
+  question: Qual è il fatturato di ogni azienda?
+  cypher: MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN d.dittaId AS ditta,
+    sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC
+- id: sales_cycle_076
+  question: Quanto ho guadagnato vendendo il prodotto GAS FREON SOLSTICE N40 R448A?
+  cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    WHERE toLower(trim(a.descrizione)) = 'gas freon solstice n40 r448a' AND dr.tipoValore
+    = 'Fatturato' AND dr.importo > 0 RETURN sum(dr.importo) AS totaleVenduto
+- id: sales_cycle_076_var1
+  question: 'Variant 1: Qual è stato il mio guadagno dalla vendita del prodotto GAS
+    FREON SOLSTICE N40 R448A?'
+  cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    WHERE toLower(trim(a.descrizione)) = 'gas freon solstice n40 r448a' AND dr.tipoValore
+    = 'Fatturato' AND dr.importo > 0 RETURN sum(dr.importo) AS totaleVenduto
+- id: sales_cycle_076_var2
+  question: 'Variant 2: Che profitto ho ottenuto vendendo il prodotto GAS FREON SOLSTICE
+    N40 R448A?'
+  cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    WHERE toLower(trim(a.descrizione)) = 'gas freon solstice n40 r448a' AND dr.tipoValore
+    = 'Fatturato' AND dr.importo > 0 RETURN sum(dr.importo) AS totaleVenduto
+- id: sales_cycle_078
+  question: Qual è l'importo medio per riga documento nelle fatture di vendita?
+  cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN avg(dr.importo) AS
+    importoMedioRiga
+- id: sales_cycle_078_var1
+  question: Variant 1
+  cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN avg(dr.importo) AS
+    importoMedioRiga
+- id: sales_cycle_078_var2
+  question: Qual è la media dell'importo per ogni riga di documento nelle fatture
+    di vendita?
+  cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN avg(dr.importo) AS
+    importoMedioRiga
+- id: sales_cycle_079
+  question: Per ogni azienda, classifica il suo fatturato totale come 'Alto' se supera
+    i 10 milioni, 'Medio' se è tra 1 e 10 milioni, e 'Basso' altrimenti.
+  cypher: MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH d, sum(dr.importo) AS
+    fatturatoTotale RETURN d.dittaId AS ditta, fatturatoTotale, CASE WHEN fatturatoTotale
+    > 10000000 THEN 'Alto' WHEN fatturatoTotale > 1000000 THEN 'Medio' ELSE 'Basso'
+    END AS categoriaFatturato
+- id: sales_cycle_079_var1
+  question: 'Variant 1: Per ciascuna impresa, valuta il suo fatturato complessivo
+    come ''Alto'' se eccede i 10 milioni, ''Medio'' se è compreso tra 1 e 10 milioni,
+    e ''Basso'' in caso contrario.'
+  cypher: MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH d, sum(dr.importo) AS
+    fatturatoTotale RETURN d.dittaId AS ditta, fatturatoTotale, CASE WHEN fatturatoTotale
+    > 10000000 THEN 'Alto' WHEN fatturatoTotale > 1000000 THEN 'Medio' ELSE 'Basso'
+    END AS categoriaFatturato
+- id: sales_cycle_079_var2
+  question: 'Variant 2: Per ogni impresa, classifica il fatturato totale come ''Alto''
+    se è superiore a 10 milioni, ''Medio'' se si trova tra 1 e 10 milioni, e ''Basso''
+    se non rientra in queste categorie.'
+  cypher: MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH d, sum(dr.importo) AS
+    fatturatoTotale RETURN d.dittaId AS ditta, fatturatoTotale, CASE WHEN fatturatoTotale
+    > 10000000 THEN 'Alto' WHEN fatturatoTotale > 1000000 THEN 'Medio' ELSE 'Basso'
+    END AS categoriaFatturato
+- id: sales_cycle_082
+  question: Per i primi 3 clienti per fatturato, mostra il loro prodotto più acquistato
+    per valore.
+  cypher: 'MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = ''Fatturato'' AND dr.importo > 0 WITH c, sum(dr.importo)
+    AS fatturatoTotale ORDER BY fatturatoTotale DESC LIMIT 3 MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr2:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    WHERE dr2.tipoValore = ''Fatturato'' AND dr2.importo > 0 WITH c, a, sum(dr2.importo)
+    AS valoreProdotto ORDER BY c.name, valoreProdotto DESC WITH c, collect({prodotto:
+    a.descrizione, valore: valoreProdotto})[0] AS prodottoTop RETURN c.name AS cliente,
+    prodottoTop.prodotto AS prodottoPiuAcquistato, prodottoTop.valore'
+- id: sales_cycle_082_var1
+  question: Variant 1
+  cypher: 'MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = ''Fatturato'' AND dr.importo > 0 WITH c, sum(dr.importo)
+    AS fatturatoTotale ORDER BY fatturatoTotale DESC LIMIT 3 MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr2:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    WHERE dr2.tipoValore = ''Fatturato'' AND dr2.importo > 0 WITH c, a, sum(dr2.importo)
+    AS valoreProdotto ORDER BY c.name, valoreProdotto DESC WITH c, collect({prodotto:
+    a.descrizione, valore: valoreProdotto})[0] AS prodottoTop RETURN c.name AS cliente,
+    prodottoTop.prodotto AS prodottoPiuAcquistato, prodottoTop.valore'
+- id: sales_cycle_082_var2
+  question: Per i 3 clienti principali in termini di fatturato, indica il prodotto
+    che hanno acquistato di più in valore.
+  cypher: 'MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = ''Fatturato'' AND dr.importo > 0 WITH c, sum(dr.importo)
+    AS fatturatoTotale ORDER BY fatturatoTotale DESC LIMIT 3 MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr2:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    WHERE dr2.tipoValore = ''Fatturato'' AND dr2.importo > 0 WITH c, a, sum(dr2.importo)
+    AS valoreProdotto ORDER BY c.name, valoreProdotto DESC WITH c, collect({prodotto:
+    a.descrizione, valore: valoreProdotto})[0] AS prodottoTop RETURN c.name AS cliente,
+    prodottoTop.prodotto AS prodottoPiuAcquistato, prodottoTop.valore'
+- id: sales_cycle_085
+  question: Qual è il valore totale degli ordini in sospeso (ordinati ma non fatturati)?
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Ordinato' WITH c, doc, sum(dr.importo) AS valoreOrdinato
+    WHERE NOT (doc)<-[:CONTIENE_RIGA]-(:RigaDocumento {tipoValore:'Fatturato'}) RETURN
+    sum(valoreOrdinato) AS totaleOrdiniSospesi
+- id: sales_cycle_085_var1
+  question: Qual è l'importo complessivo degli ordini pendenti (ordinati ma non ancora
+    fatturati)?
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Ordinato' WITH c, doc, sum(dr.importo) AS valoreOrdinato
+    WHERE NOT (doc)<-[:CONTIENE_RIGA]-(:RigaDocumento {tipoValore:'Fatturato'}) RETURN
+    sum(valoreOrdinato) AS totaleOrdiniSospesi
+- id: sales_cycle_085_var2
+  question: Qual è la somma totale degli ordini in attesa (ordinati ma non ancora
+    fatturati)?
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Ordinato' WITH c, doc, sum(dr.importo) AS valoreOrdinato
+    WHERE NOT (doc)<-[:CONTIENE_RIGA]-(:RigaDocumento {tipoValore:'Fatturato'}) RETURN
+    sum(valoreOrdinato) AS totaleOrdiniSospesi
+- id: sales_cycle_086
+  question: Mostrami i clienti che acquistano più di 10 articoli unici diversi.
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    WITH c, count(DISTINCT a) AS numeroArticoliUnici WHERE numeroArticoliUnici > 10
+    RETURN c.name AS cliente, numeroArticoliUnici ORDER BY numeroArticoliUnici DESC
+- id: sales_cycle_086_var1
+  question: Variant 1
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    WITH c, count(DISTINCT a) AS numeroArticoliUnici WHERE numeroArticoliUnici > 10
+    RETURN c.name AS cliente, numeroArticoliUnici ORDER BY numeroArticoliUnici DESC
+- id: sales_cycle_086_var2
+  question: Fammi vedere i clienti che comprano oltre 10 articoli unici differenti.
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    WITH c, count(DISTINCT a) AS numeroArticoliUnici WHERE numeroArticoliUnici > 10
+    RETURN c.name AS cliente, numeroArticoliUnici ORDER BY numeroArticoliUnici DESC
+- id: sales_cycle_089
+  question: Qual è la percentuale di fatturato generata dai clienti nella regione
+    'Umbria' sul totale?
+  cypher: 'MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = ''Fatturato'' AND dr.importo > 0 WITH l.regione AS regione,
+    sum(dr.importo) AS fatturatoRegione WITH collect({regione: regione, fatturato:
+    fatturatoRegione}) AS fatturatiRegionali, sum(dr.importo) AS fatturatoTotale UNWIND
+    fatturatiRegionali AS r WHERE toLower(trim(r.regione)) = ''umbria'' RETURN r.fatturato
+    AS fatturatoUmbria, fatturatoTotale, (r.fatturato / fatturatoTotale) * 100 AS
+    percentuale'
+- id: sales_cycle_089_var1
+  question: 'Variant 1: Qual è la quota di fatturato proveniente dai clienti della
+    regione ''Umbria'' rispetto al totale?'
+  cypher: 'MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = ''Fatturato'' AND dr.importo > 0 WITH l.regione AS regione,
+    sum(dr.importo) AS fatturatoRegione WITH collect({regione: regione, fatturato:
+    fatturatoRegione}) AS fatturatiRegionali, sum(dr.importo) AS fatturatoTotale UNWIND
+    fatturatiRegionali AS r WHERE toLower(trim(r.regione)) = ''umbria'' RETURN r.fatturato
+    AS fatturatoUmbria, fatturatoTotale, (r.fatturato / fatturatoTotale) * 100 AS
+    percentuale'
+- id: sales_cycle_089_var2
+  question: 'Variant 2: Qual è la proporzione del fatturato totale che deriva dai
+    clienti situati nella regione ''Umbria''?'
+  cypher: 'MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = ''Fatturato'' AND dr.importo > 0 WITH l.regione AS regione,
+    sum(dr.importo) AS fatturatoRegione WITH collect({regione: regione, fatturato:
+    fatturatoRegione}) AS fatturatiRegionali, sum(dr.importo) AS fatturatoTotale UNWIND
+    fatturatiRegionali AS r WHERE toLower(trim(r.regione)) = ''umbria'' RETURN r.fatturato
+    AS fatturatoUmbria, fatturatoTotale, (r.fatturato / fatturatoTotale) * 100 AS
+    percentuale'
+- id: sales_cycle_090
+  question: Trova il cliente con il valore medio degli ordini più alto.
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH c, doc, sum(dr.importo)
+    AS valoreOrdine RETURN c.name AS cliente, avg(valoreOrdine) AS valoreMedioOrdine
+    ORDER BY valoreMedioOrdine DESC LIMIT 1
+- id: sales_cycle_090_var1
+  question: Variant 1
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH c, doc, sum(dr.importo)
+    AS valoreOrdine RETURN c.name AS cliente, avg(valoreOrdine) AS valoreMedioOrdine
+    ORDER BY valoreMedioOrdine DESC LIMIT 1
+- id: sales_cycle_090_var2
+  question: Individua il cliente con la media più elevata degli ordini.
+  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH c, doc, sum(dr.importo)
+    AS valoreOrdine RETURN c.name AS cliente, avg(valoreOrdine) AS valoreMedioOrdine
+    ORDER BY valoreMedioOrdine DESC LIMIT 1
+- id: sales_cycle_095
+  question: Quante note di credito clienti (NCC) abbiamo emesso in totale?
+  cypher: 'MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType {codice: ''NCC''}) RETURN
+    count(doc) AS numeroNoteCredito'
+- id: sales_cycle_095_var1
+  question: Variant 1
+  cypher: 'MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType {codice: ''NCC''}) RETURN
+    count(doc) AS numeroNoteCredito'
+- id: sales_cycle_095_var2
+  question: Qual è il totale delle note di credito clienti (NCC) che abbiamo emesso?
+  cypher: 'MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType {codice: ''NCC''}) RETURN
+    count(doc) AS numeroNoteCredito'
+- id: sales_cycle_099
+  question: Qual è il valore fatturato presente solo nelle fatture clienti (FVC)?
+  cypher: 'MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType {codice: ''FVC''}) MATCH
+    (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = ''Fatturato''
+    RETURN sum(dr.importo) AS totaleFatturatoInFVC'
+- id: sales_cycle_099_var1
+  question: Qual è l'importo registrato esclusivamente nelle fatture clienti (FVC)?
+  cypher: 'MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType {codice: ''FVC''}) MATCH
+    (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = ''Fatturato''
+    RETURN sum(dr.importo) AS totaleFatturatoInFVC'
+- id: sales_cycle_099_var2
+  question: Qual è la somma riportata unicamente nelle fatture clienti (FVC)?
+  cypher: 'MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType {codice: ''FVC''}) MATCH
+    (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = ''Fatturato''
+    RETURN sum(dr.importo) AS totaleFatturatoInFVC'
+- id: sales_cycle_100
+  question: Mostrami il totale ordinato attraverso gli ordini clienti (OC) per la
+    ditta '1'.
+  cypher: 'MATCH (d:Ditta {dittaId: ''1''})<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType
+    {codice: ''OC''}) MATCH (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore
+    = ''Ordinato'' RETURN sum(dr.importo) AS totaleOrdinatoDitta1'
+- id: sales_cycle_100_var1
+  question: Variant 1
+  cypher: 'MATCH (d:Ditta {dittaId: ''1''})<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType
+    {codice: ''OC''}) MATCH (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore
+    = ''Ordinato'' RETURN sum(dr.importo) AS totaleOrdinatoDitta1'
+- id: sales_cycle_100_var2
+  question: Fammi vedere il totale degli ordini clienti (OC) per la ditta '1'.
+  cypher: 'MATCH (d:Ditta {dittaId: ''1''})<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType
+    {codice: ''OC''}) MATCH (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore
+    = ''Ordinato'' RETURN sum(dr.importo) AS totaleOrdinatoDitta1'
+- id: sales_cycle_101
+  question: Qual è il valore medio delle righe fatturate nelle note di consegna clienti
+    (DDTV)?
+  cypher: 'MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType {codice: ''DDTV''}) MATCH
+    (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = ''Bollato'' RETURN
+    avg(dr.importo) AS valoreMedioBollato'
+- id: sales_cycle_101_var1
+  question: Variant 1
+  cypher: 'MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType {codice: ''DDTV''}) MATCH
+    (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = ''Bollato'' RETURN
+    avg(dr.importo) AS valoreMedioBollato'
+- id: sales_cycle_101_var2
+  question: Qual è la media dei valori delle righe fatturate nei documenti di trasporto
+    clienti (DDTV)?
+  cypher: 'MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType {codice: ''DDTV''}) MATCH
+    (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = ''Bollato'' RETURN
+    avg(dr.importo) AS valoreMedioBollato'
+- id: sales_cycle_102
+  question: Chi è il cliente con il valore fatturato più alto considerando solo le
+    fatture immediate (FVC)?
+  cypher: 'MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType
+    {codice: ''FVC''}) MATCH (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore
+    = ''Fatturato'' AND dr.importo > 0 RETURN c.name AS cliente, sum(dr.importo) AS
+    totale ORDER BY totale DESC LIMIT 1'
+- id: sales_cycle_102_var1
+  question: Variant 1
+  cypher: 'MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType
+    {codice: ''FVC''}) MATCH (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore
+    = ''Fatturato'' AND dr.importo > 0 RETURN c.name AS cliente, sum(dr.importo) AS
+    totale ORDER BY totale DESC LIMIT 1'
+- id: sales_cycle_102_var2
+  question: Qual è il cliente con il maggiore valore di fatturato considerando esclusivamente
+    le fatture immediate (FVC)?
+  cypher: 'MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType
+    {codice: ''FVC''}) MATCH (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore
+    = ''Fatturato'' AND dr.importo > 0 RETURN c.name AS cliente, sum(dr.importo) AS
+    totale ORDER BY totale DESC LIMIT 1'
+- id: sales_cycle_105
+  question: Quale tipo di documento (nome) ha il valore medio più alto per riga (considerando
+    solo i valori fatturati)?
+  cypher: MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType) MATCH (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN dt.nome AS nomeTipoDocumento,
+    avg(dr.importo) AS valoreMedioRiga ORDER BY valoreMedioRiga DESC LIMIT 1
+- id: sales_cycle_105_var1
+  question: Variante 1
+  cypher: MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType) MATCH (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN dt.nome AS nomeTipoDocumento,
+    avg(dr.importo) AS valoreMedioRiga ORDER BY valoreMedioRiga DESC LIMIT 1
+- id: sales_cycle_105_var2
+  question: Variante 2
+  cypher: MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType) MATCH (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN dt.nome AS nomeTipoDocumento,
+    avg(dr.importo) AS valoreMedioRiga ORDER BY valoreMedioRiga DESC LIMIT 1

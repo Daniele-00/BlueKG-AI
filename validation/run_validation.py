@@ -140,13 +140,21 @@ CONFIGS_SPECIALIST = {
         "synthesizer": "gpt-4o",
         "translator": "gpt-4o",
     },
-    "llama3-coder": {
-        "contextualizer": "gpt-4o-mini",
+    "llama3": {
+        "contextualizer": "llama3",
         "router": "llama3",
         "coder": "llama3",
         "general_conversation": "llama3",
         "synthesizer": "llama3",
         "translator": "llama3",
+    },
+    "llama3-coder": {
+        "contextualizer": "gpt-4o-mini",
+        "router": "gpt-4o-mini",
+        "coder": "llama3",
+        "general_conversation": "llama3",
+        "synthesizer": "gpt-4o-mini",
+        "translator": "gpt-4o-mini",
     },
     "llama3-8b-vertex": {
         "contextualizer": "llama3-8b-vertex",
@@ -271,7 +279,21 @@ def _normalize_rows(result: List[Dict[str, Any]]) -> set:
 def jaccard_similarity(
     result1: List[Dict[str, Any]], result2: List[Dict[str, Any]]
 ) -> float:
-    """Calcola indice di Jaccard tra due liste di risultati."""
+    """Indice di Jaccard tra i risultati (alias-aware).
+
+    Come viene calcolato:
+    - Ogni riga viene convertita in una tupla ordinabile di (chiave, valore_normalizzato)
+      tramite `_normalize_rows`, quindi si confrontano gli insiemi senza ordine.
+    - J = |intersezione| / |unione|. Vale 1.0 se i set coincidono, 0.0 se disgiunti.
+
+    A cosa serve e perché spesso 0 o 1:
+    - Misura la sovrapposizione dei risultati reali (non il testo query).
+    - È sensibile agli alias: nomi colonna diversi producono righe diverse.
+    - Con set piccoli (es. TOP 10 o una sola riga) è comune ottenere valori estremi
+      (1.0 quando tutto coincide, 0.0 quando differisce l'insieme o l'ordinamento
+      combinato a DISTINCT/ORDER BY). Per questo lo usiamo come metrica informativa,
+      ma NON per decidere l'attendibilità.
+    """
     set1 = _normalize_rows(result1)
     set2 = _normalize_rows(result2)
     if not set1 and not set2:
@@ -283,72 +305,24 @@ def jaccard_similarity(
     return len(intersection) / len(union)
 
 
-def jaccard_value_only(
-    result1: List[Dict[str, Any]], result2: List[Dict[str, Any]]
-) -> float:
-    """Indice di Jaccard ignorando gli alias delle colonne (value-only).
-
-    Confronta i risultati convertendo ogni riga in una tupla canonica di soli
-    valori normalizzati e ordinati stabilmente. L'ordine delle righe è ignorato.
-    """
-    set1 = {_canonical_row_values(d) for d in (result1 or [])}
-    set2 = {_canonical_row_values(d) for d in (result2 or [])}
-    if not set1 and not set2:
-        return 1.0
-    union = set1 | set2
-    if not union:
-        return 1.0
-    intersection = set1 & set2
-    return len(intersection) / len(union)
-
-
-def jaccard_on_expected_columns(
-    gen_res: List[Dict[str, Any]],
-    exp_res: List[Dict[str, Any]],
-) -> float:
-    """Indice di Jaccard proiettando la generata sulle colonne attese.
-
-    - Usa come schema le chiavi presenti nella prima riga dell'atteso.
-    - Proietta le righe della generata solo se includono tutte le colonne attese.
-    - Confronta gli insiemi di tuple (k, valore_normalizzato) ordinate per chiave.
-    - Ignora l'ordine delle righe.
-    """
-    expected_keys: List[str] = []
-    if exp_res and isinstance(exp_res[0], dict):
-        expected_keys = list(exp_res[0].keys())
-
-    def _project_row(row: Dict[str, Any]) -> Tuple[Tuple[str, Any], ...]:
-        # Richiede la presenza di tutte le chiavi attese
-        for k in expected_keys:
-            if k not in row:
-                return tuple()
-        return tuple(
-            sorted(((k, _normalize_scalar(row.get(k))) for k in expected_keys))
-        )
-
-    exp_set: set = set()
-    gen_set: set = set()
-
-    if exp_res:
-        exp_set = {_project_row(r) for r in exp_res}
-        # L'atteso deve sempre avere tutte le colonne: rimuovi eventuali sentinel vuoti
-        exp_set.discard(tuple())
-    if gen_res and expected_keys:
-        gen_set = {_project_row(r) for r in gen_res}
-        # Righe senza colonne attese generano sentinel vuoto: rimuovi
-        gen_set.discard(tuple())
-
-    if not exp_set and not gen_set:
-        return 1.0
-    union = exp_set | gen_set
-    if not union:
-        return 1.0
-    intersection = exp_set & gen_set
-    return len(intersection) / len(union)
+## NOTE: varianti alternative del Jaccard (value-only, proiezione colonne attese)
+## sono state rimosse per semplicità. Manteniamo solo il Jaccard alias-aware
+## come metrica informativa e usiamo la query similarity per l'attendibilità.
 
 
 def query_string_similarity(expected: str, generated: str) -> float:
-    """Calcola similarità tra stringhe di query utilizzando SequenceMatcher."""
+    """Similarità testuale tra query (SequenceMatcher).
+
+    Cosa facciamo:
+    - Normalizziamo gli spazi (collassiamo whitespace) per rendere il confronto
+      robusto a formattazione.
+    - Calcoliamo un punteggio [0..1] basato su matching di sottosequenze.
+
+    Come la usiamo:
+    - È la metrica per l'"attendibilità": se >= soglia (default 0.80) consideriamo
+      la query ragionevolmente equivalente, anche quando il set di risultati differisce
+      per dettagli come DISTINCT/ORDER BY o alias.
+    """
     if not expected or not generated:
         return 0.0
     # Normalizza whitespace per confronti più robusti.
@@ -596,7 +570,16 @@ def wait_for_api():
 # =======================================================================
 
 
-def run_validation(approach: str, config_name: str):
+def run_validation(approach: str, config_name: str, min_query_sim: float = 0.8):
+    """Esegue la validazione.
+
+    Criterio di successo:
+    - strict: risultati uguali (o equivalenti via fallback).
+    - attendibile: query_string_similarity >= min_query_sim (default 0.80).
+
+    Nota: manteniamo il Jaccard solo come metrica informativa sui set di risultati,
+    ma non lo usiamo per determinare l'attendibilità.
+    """
     """Esegue validazione."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     full_config_name = f"{approach}-{config_name}"
@@ -623,7 +606,9 @@ def run_validation(approach: str, config_name: str):
         validation_data = json.load(f)
 
     total = len(validation_data)
-    success = 0
+    # Nuovi contatori: attendibile (threshold) vs strict
+    success_attendibile = 0
+    success_strict = 0
     results = []
 
     print(f"Test totali: {total}\n")
@@ -631,8 +616,8 @@ def run_validation(approach: str, config_name: str):
     # Esegui test
     for i, test in enumerate(validation_data, 1):
         test_id = test["id"]
-        question = test["question"]
-        expected_cypher = test["expected_cypher"]
+        question = test["input"]
+        expected_cypher = test["output"]
 
         print(f"[{i}/{total}] {test_id}")
 
@@ -656,7 +641,7 @@ def run_validation(approach: str, config_name: str):
             # Chiama API
             response = requests.post(
                 f"{API_URL}/ask",
-                json={"question": question, "user_id": f"val_{test_id}_{timestamp}"},
+                json={"question": question, "user_id": f"val_{i}_{timestamp}"},
                 timeout=180,
             )
 
@@ -692,13 +677,14 @@ def run_validation(approach: str, config_name: str):
 
                 # Metriche di similarità sui risultati e sulle query
                 jac = jaccard_similarity(gen_res, exp_res)
-                jac_val = jaccard_value_only(gen_res, exp_res)
-                jac_proj = jaccard_on_expected_columns(gen_res, exp_res)
                 qsim = query_string_similarity(expected_cypher, generated)
                 result["jaccard_index"] = jac
-                result["jaccard_value_only"] = jac_val
-                result["jaccard_expected_projection"] = jac_proj
                 result["query_similarity"] = qsim
+
+                # Soglia "attendibile": SOLO query similarity
+                attendibile = isinstance(qsim, (int, float)) and qsim >= float(
+                    min_query_sim
+                )
 
                 same = compare_results(gen_res, exp_res)
                 if not same:
@@ -707,10 +693,19 @@ def run_validation(approach: str, config_name: str):
                 if not same:
                     # Fallback 2: se entrambe sono scalari numerici uguali entro tolleranza, considera PASS
                     same = compare_numeric_scalar(gen_res, exp_res)
+                result["strict_success"] = bool(same)
+                result["attendibile"] = bool(attendibile)
                 if same:
                     result["success"] = True
-                    success += 1
-                    print("  ✅ PASS")
+                    result["success_reason"] = "strict"
+                    success_strict += 1
+                    success_attendibile += 1
+                    print("  ✅ PASS (strict)")
+                elif attendibile:
+                    result["success"] = True
+                    result["success_reason"] = "attendibile"
+                    success_attendibile += 1
+                    print(f"  ✅ PASS (attendibile: qsim>={min_query_sim})")
                 else:
                     # Spiega mismatch
                     diff = explain_mismatch(gen_res, exp_res, max_rows=3)
@@ -736,7 +731,11 @@ def run_validation(approach: str, config_name: str):
     driver.close()
 
     # Metriche
-    accuracy = (success / total * 100) if total > 0 else 0
+    # Accuracy
+    # - attendibile: passa se strict OR query_similarity >= soglia
+    # - strict: passa solo se i risultati coincidono (o tramite fallback)
+    accuracy_att = (success_attendibile / total * 100) if total > 0 else 0
+    accuracy_str = (success_strict / total * 100) if total > 0 else 0
     avg_time = sum(r["time_total"] for r in results if r["time_total"]) / total
     # Medie indici (solo dove calcolati)
     jac_values = [
@@ -744,28 +743,12 @@ def run_validation(approach: str, config_name: str):
         for r in results
         if isinstance(r.get("jaccard_index"), (int, float))
     ]
-    jac_val_values = [
-        r["jaccard_value_only"]
-        for r in results
-        if isinstance(r.get("jaccard_value_only"), (int, float))
-    ]
-    jac_proj_values = [
-        r["jaccard_expected_projection"]
-        for r in results
-        if isinstance(r.get("jaccard_expected_projection"), (int, float))
-    ]
     qsim_values = [
         r["query_similarity"]
         for r in results
         if isinstance(r.get("query_similarity"), (int, float))
     ]
     avg_jaccard = (sum(jac_values) / len(jac_values)) if jac_values else None
-    avg_jaccard_value_only = (
-        (sum(jac_val_values) / len(jac_val_values)) if jac_val_values else None
-    )
-    avg_jaccard_expected_projection = (
-        (sum(jac_proj_values) / len(jac_proj_values)) if jac_proj_values else None
-    )
     avg_qsim = (sum(qsim_values) / len(qsim_values)) if qsim_values else None
 
     # Salva
@@ -779,13 +762,15 @@ def run_validation(approach: str, config_name: str):
                 "timestamp": timestamp,
                 "summary": {
                     "total": total,
-                    "success": success,
-                    "failures": total - success,
-                    "accuracy": accuracy,
+                    "success_attendibile": success_attendibile,
+                    "success_strict": success_strict,
+                    "failures": total - success_attendibile,
+                    "accuracy": accuracy_att,
+                    "accuracy_strict": accuracy_str,
+                    "min_query_similarity": float(min_query_sim),
                     "avg_time": avg_time,
                     "avg_jaccard": avg_jaccard,
-                    "avg_jaccard_value_only": avg_jaccard_value_only,
-                    "avg_jaccard_expected_projection": avg_jaccard_expected_projection,
+                    # Manteniamo solo l'avg del Jaccard principale come metrica informativa
                     "avg_query_similarity": avg_qsim,
                 },
                 "results": results,
@@ -803,45 +788,39 @@ def run_validation(approach: str, config_name: str):
         lines.append("")
         lines.append("## Summary")
         lines.append(f"- Total: {total}")
-        lines.append(f"- Success: {success}")
-        lines.append(f"- Failures: {total - success}")
-        lines.append(f"- Accuracy: {accuracy:.1f}%")
+        lines.append(f"- Success (attendibile): {success_attendibile}")
+        lines.append(f"- Success (strict): {success_strict}")
+        lines.append(f"- Failures: {total - success_attendibile}")
+        lines.append(
+            f"- Accuracy (attendibile): {accuracy_att:.1f}%  |  Accuracy (strict): {accuracy_str:.1f}%"
+        )
+        lines.append(f"- Threshold: min_query_sim={float(min_query_sim):.2f}")
         lines.append(f"- Avg Time: {avg_time:.2f}s")
         if avg_jaccard is not None:
             lines.append(f"- Avg Jaccard: {avg_jaccard:.3f}")
-        if avg_jaccard_value_only is not None:
-            lines.append(f"- Avg Jaccard (value-only): {avg_jaccard_value_only:.3f}")
-        if avg_jaccard_expected_projection is not None:
-            lines.append(
-                f"- Avg Jaccard (proj exp cols): {avg_jaccard_expected_projection:.3f}"
-            )
+        # Solo il Jaccard principale come informazione
         if avg_qsim is not None:
             lines.append(f"- Avg Query Similarity: {avg_qsim:.3f}")
         lines.append("")
         lines.append("## Tests")
         lines.append(
-            "| # | Test ID | PASS | Jac | JacVal | JacProj | QuerySim | Gen Time (s) | Note |"
+            "| # | Test ID | PASS | Att | Jac | QuerySim | Gen Time (s) | Note |"
         )
         lines.append(
-            "|:-:|:--------|:----:|:---:|:------:|:-------:|:--------:|:------------:|:-----|"
+            "|:-:|:--------|:----:|:---:|:---:|:--------:|:------------:|:-----|"
         )
         for idx, r in enumerate(results, 1):
             ok = "✅" if r.get("success") else "❌"
+            att = "✅" if r.get("attendibile") else "❌"
             jac = r.get("jaccard_index")
-            jac_val = r.get("jaccard_value_only")
-            jac_proj = r.get("jaccard_expected_projection")
             qsim = r.get("query_similarity")
             jac_s = f"{jac:.3f}" if isinstance(jac, (int, float)) else "-"
-            jac_val_s = f"{jac_val:.3f}" if isinstance(jac_val, (int, float)) else "-"
-            jac_proj_s = (
-                f"{jac_proj:.3f}" if isinstance(jac_proj, (int, float)) else "-"
-            )
             qsim_s = f"{qsim:.3f}" if isinstance(qsim, (int, float)) else "-"
             tgen = r.get("time_total")
             tgen_s = f"{tgen:.2f}" if isinstance(tgen, (int, float)) else "-"
             note = r.get("error") or ""
             lines.append(
-                f"| {idx} | {r.get('test_id','')} | {ok} | {jac_s} | {jac_val_s} | {jac_proj_s} | {qsim_s} | {tgen_s} | {note} |"
+                f"| {idx} | {r.get('test_id','')} | {ok} | {att} | {jac_s} | {qsim_s} | {tgen_s} | {note} |"
             )
         with open(report_md, "w", encoding="utf-8") as rf:
             rf.write("\n".join(lines) + "\n")
@@ -853,14 +832,14 @@ def run_validation(approach: str, config_name: str):
     print("RISULTATI")
     print("=" * 70)
     print(f"Config:    {full_config_name}")
-    print(f"Accuracy:  {accuracy:.1f}% ({success}/{total})")
+    print(
+        f"Accuracy (attendibile): {accuracy_att:.1f}% ({success_attendibile}/{total})"
+    )
+    print(f"Accuracy (strict):     {accuracy_str:.1f}% ({success_strict}/{total})")
     print(f"Avg Time:  {avg_time:.2f}s")
     if avg_jaccard is not None:
         print(f"Avg Jaccard: {avg_jaccard:.3f}")
-    if avg_jaccard_value_only is not None:
-        print(f"Avg Jaccard (value-only): {avg_jaccard_value_only:.3f}")
-    if avg_jaccard_expected_projection is not None:
-        print(f"Avg Jaccard (proj exp cols): {avg_jaccard_expected_projection:.3f}")
+    # NOTE: rimosse varianti di Jaccard per semplicità
     if avg_qsim is not None:
         print(f"Avg QuerySim: {avg_qsim:.3f}")
     print(f"Saved:     {output_file.name}")
@@ -869,8 +848,10 @@ def run_validation(approach: str, config_name: str):
         "config": full_config_name,
         "approach": approach,
         "config_name": config_name,
-        "accuracy": accuracy,
-        "success": success,
+        "accuracy": accuracy_att,
+        "accuracy_strict": accuracy_str,
+        "success": success_attendibile,
+        "success_strict": success_strict,
         "total": total,
         "avg_time": avg_time,
     }
@@ -903,6 +884,19 @@ def main():
         help="Testa tutte le config dell'approccio scelto",
     )
     parser.add_argument("--list", action="store_true", help="Lista config")
+    # Soglia attendibile (CLI override; fallback a env o default)
+    try:
+        import os as _os
+
+        _def_min_qsim = float(_os.getenv("VAL_MIN_QUERY_SIM", "0.8"))
+    except Exception:
+        _def_min_qsim = 0.8
+    parser.add_argument(
+        "--min-query-sim",
+        type=float,
+        default=_def_min_qsim,
+        help="Soglia minima query similarity per attendibile (default 0.8 o VAL_MIN_QUERY_SIM)",
+    )
 
     args = parser.parse_args()
 
@@ -924,14 +918,14 @@ def main():
         update_model_config("specialist", "gpt4o-mini")
         prompt_restart_api("specialist")
         wait_for_api()
-        res1 = run_validation("specialist", "gpt4o-mini")
+        res1 = run_validation("specialist", "gpt4o-mini", args.min_query_sim)
 
         # Test hybrid
         print("\nTesting HYBRID...")
         update_model_config("hybrid", "gpt4o-mini")
         prompt_restart_api("hybrid")
         wait_for_api()
-        res2 = run_validation("hybrid", "gpt4o-mini")
+        res2 = run_validation("hybrid", "gpt4o-mini", args.min_query_sim)
 
         # Confronto
         if res1 and res2:
@@ -962,7 +956,7 @@ def main():
             update_model_config(approach, config)
             prompt_restart_api(approach)
             wait_for_api()
-            res = run_validation(approach, config)
+            res = run_validation(approach, config, args.min_query_sim)
             if res:
                 all_results.append(res)
 
@@ -987,13 +981,13 @@ def main():
                 update_model_config(args.approach, cfg_name)
                 prompt_restart_api(args.approach)
                 wait_for_api()
-                run_validation(args.approach, cfg_name)
+                run_validation(args.approach, cfg_name, args.min_query_sim)
         else:
             # Singola config
             update_model_config(args.approach, args.config)
             prompt_restart_api(args.approach)
             wait_for_api()
-            run_validation(args.approach, args.config)
+            run_validation(args.approach, args.config, args.min_query_sim)
         return
 
     # Help

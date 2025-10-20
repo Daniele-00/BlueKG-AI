@@ -44,7 +44,8 @@ profiles:
 
   ollama:
     translator: ""
-    router: ""
+    router: |
+      You are a strict, deterministic classifier. Return ONLY one label in UPPERCASE from: GENERAL_CONVERSATION, SALES_CYCLE, PURCHASE_CYCLE, DITTE_QUERY, GENERAL_QUERY, CROSS_DOMAIN. No explanations.
     coder: ""
     contextualizer: ""
     synthesizer: ""

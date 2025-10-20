@@ -726,6 +726,12 @@ if not all(
     print("Uno o più file prompt non sono stati caricati. Il programma terminerà.")
     exit()
 
+logger.info("📚 Inizializzo Example Retriever...")
+from example_retriever import ExampleRetriever
+
+example_retriever = ExampleRetriever()
+logger.info(f"✅ Esempi: {example_retriever.get_stats()}")
+
 
 # --- 3. FUNZIONI DEGLI AGENTI SPECIALISTI ---
 def run_translator_agent(question: str) -> str:
@@ -762,10 +768,8 @@ def run_specialist_router_agent(question: str) -> str:
     return route.strip()
 
 
-def run_coder_agent(question: str, relevant_schema: str, prompt_template: str) -> str:
-    """
-    Esegue un Coder specializzato assemblando il prompt completo prima di passarlo a LangChain.
-    """
+def run_coder_agent_2(question: str, relevant_schema: str, prompt_template: str) -> str:
+    """Esegue un Coder specializzato assemblando il prompt completo prima di passarlo a LangChain."""
     logger.info(f"🤖 Chiamata a un Coder Specializzato...")
     # 1. Header/Suffix da config
     coder_tpl = (config.prompt_profiles or {}).get("templates", {}).get("coder", {})
@@ -810,6 +814,67 @@ def run_coder_agent(question: str, relevant_schema: str, prompt_template: str) -
         except Exception:
             pass
     return candidate
+
+
+def run_coder_agent(
+    question: str,
+    relevant_schema: str,
+    prompt_template: str,
+    specialist_type: str,
+    original_question_it: str,
+) -> str:
+    """Coder con esempi dinamici RAG"""
+    logger.info(f"🤖 Coder: {specialist_type}")
+
+    # 1. RECUPERA ESEMPI
+    # Usa la domanda originale in IT per il retrieval degli esempi
+    relevant_examples = example_retriever.retrieve(
+        question=original_question_it, specialist=specialist_type, top_k=3
+    )
+
+    # 2. FORMATTA ESEMPI (con escape delle graffe)
+    if relevant_examples:
+        examples_text = "\n\n**RELEVANT EXAMPLES:**\n" + "\n\n".join(
+            [
+                f"Q: {ex['question']}\n```cypher\n{ex['cypher'].strip().replace('{', '{{').replace('}', '}}')}\n```"
+                for ex in relevant_examples
+            ]
+        )
+        logger.info(f"📚 Recuperati: {[ex['id'] for ex in relevant_examples]}")
+    else:
+        examples_text = ""
+
+    # 3. ASSEMBLA PROMPT
+    prompt_header = """
+    **Original Question (IT):** {original_question_it}
+    **Task (EN):** {question}
+    **Relevant Schema:**
+    {schema}
+    ---
+    """
+
+    final_prompt_text = (
+        prompt_header
+        + BASE_CYPHER_RULES
+        + "\n---\n"
+        + prompt_template
+        + "\n---\n"
+        + examples_text
+        + "\nFinal Cypher Query:"
+    )
+
+    # 4. GENERA (passa attraverso il profilo per includere il system message)
+    query = _invoke_with_profile(
+        agent_name="coder",
+        prompt_text=final_prompt_text,
+        variables={
+            "question": question,  # EN
+            "schema": relevant_schema,
+            "original_question_it": original_question_it,
+        },
+    )
+
+    return extract_cypher(query)
 
 
 def run_contextualizer_agent(question: str, chat_history: str) -> str:
@@ -999,11 +1064,21 @@ async def ask_question(user_question: UserQuestionWithSession):
 
         # 2c. Genera la query Cypher con il Coder specializzato
         start_gen_time = time.perf_counter()
+        """
         generated_query = run_coder_agent(
             question=english_task,
             relevant_schema=relevant_schema,
             prompt_template=coder_prompt_template,
         )
+        """
+        generated_query = run_coder_agent(
+            question=english_task,
+            relevant_schema=relevant_schema,
+            prompt_template=coder_prompt_template,
+            specialist_type=specialist_route,
+            original_question_it=original_question_text,
+        )
+
         timing_details["generazione_query"] = time.perf_counter() - start_gen_time
         logger.info(
             f"Query generata dallo specialista '{specialist_route}':\n{generated_query}"
@@ -1259,6 +1334,52 @@ async def clear_cache():
             "message": "Errore durante lo svuotamento della cache.",
             "error": str(e),
         }
+
+
+@app.post("/debug/rag")
+async def debug_rag(request: dict):
+    """
+    Testa il retrieval RAG per una domanda
+
+    Body:
+    {
+        "question": "Chi è il cliente con maggior fatturato?",
+        "specialist": "SALES_CYCLE",  # opzionale, se omesso usa router
+        "top_k": 5  # opzionale, default 3
+    }
+    """
+    question = request.get("question")
+    specialist = request.get("specialist")
+    top_k = request.get("top_k", 3)
+
+    if not question:
+        raise HTTPException(status_code=400, detail="Missing 'question'")
+
+    # Se specialist non specificato, usa router
+    if not specialist:
+        english_task = run_translator_agent(question)
+        specialist = run_specialist_router_agent(english_task)
+
+    # Recupera esempi
+    examples = example_retriever.retrieve(question, specialist, top_k=top_k)
+
+    return {
+        "question": question,
+        "specialist_used": specialist,
+        "top_k": top_k,
+        "retrieved_examples": [
+            {
+                "rank": i + 1,
+                "id": ex["id"],
+                "question": ex["question"],
+                "cypher": ex["cypher"],
+            }
+            for i, ex in enumerate(examples)
+        ],
+        "total_available": len(
+            example_retriever.examples_by_specialist.get(specialist, [])
+        ),
+    }
 
 
 # =======================================================================

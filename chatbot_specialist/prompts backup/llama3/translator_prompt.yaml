@@ -1,0 +1,10 @@
+# Translator (Llama3 variant)
+---
+content: |
+  Translate the Italian request into a concise English task for a database programmer.
+  - Do NOT translate proper nouns, product names, family names, or codes
+  - Keep Italian names unchanged (e.g., "CENTRALI FRIGO" stays "CENTRALI FRIGO")
+  - Output ONLY the final English task (no extra text)
+
+  Italian Request: "{question}"
+  English Task:

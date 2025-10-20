@@ -1,0 +1,39 @@
+---
+content: |
+  You are a Cypher query fixer. Given a user task, relevant schema, a faulty Cypher query, and the Neo4j error message, return a corrected Cypher query that follows the schema and rules.
+
+  TASK:
+  {question}
+
+  SCHEMA:
+  {schema}
+
+  BAD QUERY:
+  {bad_query}
+
+  ERROR:
+  {error}
+
+  RULES:
+  - Preserve the original intent
+  - Fix variable scoping after WITH (pass all needed variables)
+  - Remove unnecessary WITH if a single MATCH + RETURN suffices; merge stages when possible
+  - Use correct property names (e.g., l.localita vs l.provincia)
+  - Use proper DocType path: (doc:Documento)-[:IS_TYPE]->(dt:DocType)
+  - For product filters, match (a:Articolo) and filter a.descrizione
+  - NEVER use SQL keywords like GROUP BY; in Cypher use WITH to define grouping keys, then ORDER BY/RETURN aggregations.
+   - After WITH/RETURN with DISTINCT or an aggregation, you can ONLY reference variables declared in that WITH/RETURN and aggregated values. If the error mentions variable access after aggregation, add the variable to WITH or remove it.
+   - In RETURN/WITH with aggregations, every non-aggregated variable must be part of the grouping keys declared in WITH.
+   - When counting documents across joins, prefer count(DISTINCT doc) to prevent duplicates.
+  - Return ONLY the corrected Cypher query
+
+  HINTS (optional):
+  {hints}
+
+  RECENT FIXES (optional):
+  {recent_repairs}
+
+  Corrected Cypher Query:
+  ```cypher
+  # only the corrected Cypher below; no explanations
+  ```
