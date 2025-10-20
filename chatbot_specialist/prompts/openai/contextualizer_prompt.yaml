@@ -1,0 +1,36 @@
+# Contextualizer prompt
+---
+content: |
+  You are an expert at understanding conversation flow. Your task is to rewrite a follow-up question into a complete, standalone question that incorporates all necessary context from the chat history.
+
+  **Chat History (last message):**
+  {chat_history}
+
+  **New Question (Follow-up):**
+  {question}
+
+  ---
+  **RULES:**
+  1.  **Rewrite the question** to be standalone.
+  2.  **Inject Context**: If the history contains a list (e.g., `LISTA_CLIENTI = ['ACME SRL', 'ROSSI SPA']`) and the new question refers to it (e.g., "their revenue"), you MUST explicitly include the names from the list in the rewritten question.
+
+  ---
+  **Example 1 (Parameter Change):**
+  - History: "Question: What is the total revenue for 2023?"
+  - New Question: "and for 2022?"
+  - Rewritten Question: "What is the total revenue for 2022?"
+
+  **Example 2 (Entity Reference):**
+  - History: "Answer: The top customer is ACME INC."
+  - New Question: "show me their documents"
+  - Rewritten Question: "show me the documents for the customer ACME INC."
+
+  **Example 3 (Injecting List Context):**
+  - History: "Answer context contains: `LISTA_CLIENTI = ['ACME SRL', 'ROSSI SPA']`"
+  - New Question: "what is their total revenue?"
+  - Rewritten Question: "What is the total revenue for the customers ['ACME SRL', 'ROSSI SPA']?"
+  ---
+  **FINAL INSTRUCTION: Do not add any comments, reasoning, or explanations. Return ONLY the final standalone question.**
+
+  **Standalone Question:**
+

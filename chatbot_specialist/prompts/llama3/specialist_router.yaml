@@ -1,0 +1,32 @@
+# Specialist Router (Llama3 variant)
+---
+content: |
+  Return ONLY one of: GENERAL_CONVERSATION, SALES_CYCLE, PURCHASE_CYCLE, DITTE_QUERY, GENERAL_QUERY, CROSS_DOMAIN
+
+  DECISION:
+  1) Conversational? (ciao, grazie, spiegami, come stai, cosa puoi fare, hi, hello, thanks, how are you) → GENERAL_CONVERSATION
+  2) CROSS_DOMAIN only if the question requires BOTH sales AND purchases in the SAME answer:
+     - profit/margin (profitto/margine), compare venduto vs acquistato, "venduti ma mai acquistati", "acquistati ma mai venduti".
+     - DO NOT use CROSS_DOMAIN for trend/crescita/perdita: those are SALES_CYCLE (time series of revenue).
+  3) Company structural question? If mentions "ditta", "ditte", "azienda", "aziende", "company" AND does not include monetary keywords (fatturato, ricavi, valore, importo, costo) → DITTE_QUERY
+  4) Calculation intent? If it asks totals/averages/ranking/counts → not GENERAL_QUERY
+     - Keywords: totale, somma, quanto, media, massimo, minimo, top, migliore, più, conta, quanti, numero di, trend, crescita, perdita
+  5) SALES vs PURCHASE
+     - SALES_CYCLE: venduto, fatturato, ricavi, clienti, prodotti venduti, trend/crescita/perdita (time series vendite)
+     - PURCHASE_CYCLE: acquistato, comprato, costo, speso, pagato, fornitori 
+  6) Otherwise GENERAL_QUERY (listing/lookups only)
+
+  Examples:
+  - "Qual è il fatturato del cliente X?" → SALES_CYCLE
+  - "Top 5 prodotti per quantità venduta" → SALES_CYCLE
+  - "Trend della ditta 2 (crescita o perdita)?" → SALES_CYCLE
+  - "Quanto abbiamo speso per fornitore X?" → PURCHASE_CYCLE
+  - "Quale fornitore ha inviato più documenti?" → PURCHASE_CYCLE
+  - "Quanti clienti unici ha la ditta '1'?" → DITTE_QUERY
+  - "Elenca le ditte" → DITTE_QUERY
+  - "Elenca i clienti della ditta 3" → GENERAL_QUERY
+  - "Ciao, come stai?" → GENERAL_CONVERSATION
+  - "Prodotti che vendiamo ma non acquistiamo" → CROSS_DOMAIN
+
+  Question: "{question}"
+  Category:

@@ -7,9 +7,11 @@
 /nextCloudTables
 /chatbot_specialist/__pycache__
 /chatbot_specialist/.env
+/chatbot_specialist/diagnostics/
 /chatbot_hybrid/__pycache__
 /chatbot_hybrid/.env
 /chatbot_singleAgent/__pycache__
 /chatbot_singleAgent/.env
 /.svnignore
 /.svn
+/llama3_cypher_expert/llama3_finetuned

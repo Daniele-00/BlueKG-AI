@@ -67,7 +67,7 @@
   {
     "id": "TEST_13_FORNITORE_CON_PIU_DOCUMENTI",
     "question": "Quale fornitore ci ha inviato più documenti?",
-    "expected_cypher": "MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(doc:Documento) RETURN gf.ragioneSociale AS fornitore, count(doc) AS numeroDocumenti ORDER BY numeroDocumenti DESC LIMIT 1"
+    "expected_cypher": "MATCH (f:Fornitore)-[:HA_EMESSO]->(doc:Documento) RETURN f.ragioneSociale AS fornitore, count(DISTINCT doc) AS numeroDocumenti ORDER BY numeroDocumenti DESC LIMIT 1"
   },
   {
     "id": "TEST_14_CLIENTI_SENZA_PRODOTTO",
@@ -77,7 +77,7 @@
   {
     "id": "TEST_15_LOCALITA_CON_PIU_FORNITORI",
     "question": "Qual è la località con il maggior numero di fornitori?",
-    "expected_cypher": "MATCH (f:Fornitore)-[:SI_TROVA_A]->(l:Luogo) WHERE l.localita IS NOT NULL RETURN l.localita AS localita, count(DISTINCT f) AS numeroFornitori ORDER BY numeroFornitori DESC LIMIT 1"
+    "expected_cypher": "MATCH (f:Fornitore)-[:SI_TROVA_A]->(l:Luogo) RETURN l.localita AS localita, count(DISTINCT f) AS numeroFornitori ORDER BY numeroFornitori DESC LIMIT 1"
   },
   {
     "id": "TEST_16_IMPORTO_MEDIO_RIGA",
@@ -86,8 +86,8 @@
   },
   {
     "id": "TEST_17_FILTRO_MULTIPLO",
-    "question": "Mostrami i documenti di tipo 'FVC' emessi a Gennaio 2025 al cliente 'L'ABBONDANZA SRL'",
-    "expected_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType) WHERE toLower(trim(c.name)) = 'l\\'abbondanza srl' AND dt.codice = 'FVC' AND doc.dataEmissione.year = 2025 AND doc.dataEmissione.month = 1 RETURN doc.documentoId AS documento"
+    "question": "Mostrami 10 documenti di tipo 'FVC' emessi a Gennaio 2025 al cliente 'L'ABBONDANZA SRL'",
+    "expected_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType) WHERE toLower(trim(c.name)) = 'l\\'abbondanza srl' AND dt.codice = 'FVC' AND doc.dataEmissione.year = 2025 AND doc.dataEmissione.month = 1 RETURN DISTINCT doc.documentoId AS documento ORDER BY documento LIMIT 10"
   }
 ]
 

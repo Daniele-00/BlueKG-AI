@@ -18,13 +18,25 @@ query_limits:
   max_results_for_synthesizer: 10   # Risultati passati al synthesizer
   max_results_display: 50           # Risultati totali mostrati all'utente
   query_timeout_seconds: 30         # Timeout esecuzione query
+  provider_overrides:
+    synthesizer:
+      openai: 10
+      ollama: 8
 
 # Retry configuration
 retry:
   enabled: true
-  max_attempts: 2                   # Numero massimo retry per query
+  max_attempts: 3                   # Numero massimo retry per query (incluso il tentativo iniziale)
   retry_on_zero_results: false      # Retry se 0 risultati (costoso!)
   retry_on_syntax_error: true       # Retry se errore sintassi
+  repairable_error_patterns:        # Regex o substring per attivare il repair
+    - "SyntaxError"
+    - "Variable .* not defined"
+    - "Invalid input"
+    - "Type mismatch"
+  max_recent_repairs: 8             # Quanti fix recenti includere nel prompt
+  hints_files:                      # File opzionali con suggerimenti extra (testo libero)
+    - chatbot_specialist/diagnostics/repair_hints.md
 
 # Logging
 logging:

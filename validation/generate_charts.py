@@ -265,6 +265,51 @@ def plot_time_vs_accuracy(results_list, output_dir):
     print(f"✅ Salvato: accuracy_vs_time.png")
 
 
+def plot_jaccard_metrics(results_list, output_dir):
+    """Grafico a barre raggruppate: medie Jaccard per config.
+
+    Include tre varianti se disponibili nel JSON:
+    - avg_jaccard (alias-aware)
+    - avg_jaccard_value_only (ignora alias)
+    - avg_jaccard_expected_projection (proiezione su colonne attese)
+    """
+    configs = [r.get("config") for r in results_list]
+    avg_jac = [r.get("summary", {}).get("avg_jaccard") for r in results_list]
+    avg_jac_val = [r.get("summary", {}).get("avg_jaccard_value_only") for r in results_list]
+    avg_jac_proj = [r.get("summary", {}).get("avg_jaccard_expected_projection") for r in results_list]
+
+    # Se nessuna metrica è presente, non generare il grafico
+    if not any(x is not None for x in (avg_jac + avg_jac_val + avg_jac_proj)):
+        return
+
+    x = np.arange(len(configs))
+    width = 0.25
+
+    fig, ax = plt.subplots(figsize=(12, 7))
+
+    bars1 = ax.bar(x - width, [v if v is not None else np.nan for v in avg_jac], width, label="Jaccard", color="#4C78A8")
+    bars2 = ax.bar(x, [v if v is not None else np.nan for v in avg_jac_val], width, label="Jaccard (value-only)", color="#F58518")
+    bars3 = ax.bar(x + width, [v if v is not None else np.nan for v in avg_jac_proj], width, label="Jaccard (proj exp cols)", color="#54A24B")
+
+    ax.set_ylabel("Average Jaccard", fontsize=12, fontweight="bold")
+    ax.set_title("Average Jaccard Metrics by Configuration", fontsize=14, fontweight="bold", pad=20)
+    ax.set_xticks(x)
+    ax.set_xticklabels(configs, rotation=15, ha="right")
+    ax.set_ylim(0, 1.05)
+    ax.legend()
+
+    # Annotazioni sopra le barre
+    for bars in (bars1, bars2, bars3):
+        for bar in bars:
+            height = bar.get_height()
+            if not np.isnan(height):
+                ax.text(bar.get_x() + bar.get_width() / 2.0, height + 0.02, f"{height:.2f}", ha="center", va="bottom", fontsize=9)
+
+    plt.tight_layout()
+    plt.savefig(output_dir / "jaccard_metrics.png", dpi=300, bbox_inches="tight")
+    print(f"✅ Salvato: jaccard_metrics.png")
+
+
 def plot_timing_distribution(df, output_dir):
     """Box plot: Distribuzione tempi per fase."""
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
@@ -326,6 +371,16 @@ def generate_summary_report(results_list, output_dir):
                 f"Success:       {result['summary']['success']}/{result['summary']['total']}\n"
             )
             f.write(f"Avg Time:      {result['summary']['avg_time']:.2f}s\n")
+            # Jaccard metrics (if present)
+            avg_jac = result.get('summary', {}).get('avg_jaccard')
+            avg_jac_val = result.get('summary', {}).get('avg_jaccard_value_only')
+            avg_jac_proj = result.get('summary', {}).get('avg_jaccard_expected_projection')
+            if avg_jac is not None:
+                f.write(f"Avg Jaccard:   {avg_jac:.3f}\n")
+            if avg_jac_val is not None:
+                f.write(f"Jaccard (value-only): {avg_jac_val:.3f}\n")
+            if avg_jac_proj is not None:
+                f.write(f"Jaccard (proj exp cols): {avg_jac_proj:.3f}\n")
 
             # Failed tests
             failed = [t for t in result["results"] if not t["success"]]
@@ -379,6 +434,7 @@ def main():
     plot_timing_breakdown(results, output_dir)
     plot_success_rate_by_test(results, output_dir)
     plot_time_vs_accuracy(results, output_dir)
+    plot_jaccard_metrics(results, output_dir)
 
     # Timing distribution (serve DataFrame)
     df = extract_timing_data(results)
@@ -395,6 +451,7 @@ def main():
     print("  ⏱️  timing_breakdown.png")
     print("  📋 success_heatmap.png")
     print("  ⚖️  accuracy_vs_time.png")
+    print("  📐 jaccard_metrics.png")
     print("  📊 timing_distribution.png")
     print("  📄 summary_report.txt")
 

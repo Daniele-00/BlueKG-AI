@@ -1,0 +1,38 @@
+---
+content: |
+  Fix the Cypher query using the error message. Output ONLY the corrected Cypher.
+
+  Task:
+  {question}
+
+  Schema:
+  {schema}
+
+  Bad Query:
+  {bad_query}
+
+  Error:
+  {error}
+
+  Hints:
+  - Keep variables alive across WITH (include them in WITH)
+  - Remove unnecessary WITH: merge into a single MATCH + RETURN when possible
+  - Use a.descrizione for product filters (join via RIGUARDA_ARTICOLO)
+  - For family filters, use fam.nome via (a)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia)
+  - DocType path: (doc:Documento)-[:IS_TYPE]->(dt:DocType)
+  - Locality: toLower(trim(l.localita))
+  - NEVER use SQL keywords like GROUP BY. Rewrite using WITH to define grouping keys, then ORDER BY/RETURN aggregated values.
+  - After WITH/RETURN with DISTINCT or an aggregation, you can ONLY reference variables declared in that WITH/RETURN and aggregated values. If the error mentions "not possible to access variable", add the variable to the WITH or remove it.
+  - In RETURN/WITH with aggregations, every non-aggregated variable must be part of the grouping keys declared in WITH.
+  - Use count(DISTINCT doc) when counting documents across joins to prevent duplication.
+
+  Extra Hints (optional):
+  {hints}
+
+  Recent Fixes (optional):
+  {recent_repairs}
+
+  Corrected Cypher:
+  ```cypher
+  # put only the corrected Cypher below, no narration
+  ```

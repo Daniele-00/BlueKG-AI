@@ -2,7 +2,8 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from langchain_neo4j import Neo4jGraph
 from langchain_core.output_parsers import StrOutputParser
-from langchain.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate
+from langchain_core.prompts import ChatPromptTemplate
 from cachetools import TTLCache
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
@@ -13,18 +14,95 @@ import time
 import json
 from datetime import date
 from neo4j.time import Date, DateTime, Time, Duration
+from pathlib import Path
 
 
 # Importazione dei modelli LLM
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 import yaml
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from typing import Any, List, Optional
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import BaseMessage, AIMessage, HumanMessage, SystemMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
+from google.cloud import aiplatform
 
 # Carica .env
 load_dotenv()
+
+
+from typing import Any, List, Optional
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import BaseMessage, AIMessage, HumanMessage, SystemMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
+from google.cloud import aiplatform
+from pydantic import PrivateAttr
+
+
+class VertexAIDedicatedEndpoint(BaseChatModel):
+    """Wrapper per endpoint dedicati Vertex AI"""
+
+    project_id: str
+    location: str
+    endpoint_id: str
+    temperature: float = 0.0
+    max_output_tokens: int = 2048
+
+    # Attributo privato per l'endpoint (non parte del modello Pydantic)
+    _endpoint: Any = PrivateAttr()
+
+    def model_post_init(self, __context: Any) -> None:
+        """Inizializza l'endpoint dopo che Pydantic ha validato i campi"""
+        super().model_post_init(__context)
+        aiplatform.init(project=self.project_id, location=self.location)
+        self._endpoint = aiplatform.Endpoint(self.endpoint_id)
+
+    def _generate(
+        self,
+        messages: List[BaseMessage],
+        stop: Optional[List[str]] = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        """Genera una risposta"""
+        # Converti i messaggi in formato Vertex AI
+        prompt = self._messages_to_prompt(messages)
+
+        # Chiama l'endpoint dedicato
+        response = self._endpoint.predict(
+            instances=[{"prompt": prompt}],
+            parameters={
+                "temperature": self.temperature,
+                "maxOutputTokens": self.max_output_tokens,
+            },
+            use_dedicated_endpoint=True,  # CRITICO per endpoint dedicati!
+        )
+
+        # Estrai il testo dalla risposta
+        text = response.predictions[0] if response.predictions else ""
+
+        message = AIMessage(content=text)
+        generation = ChatGeneration(message=message)
+        return ChatResult(generations=[generation])
+
+    def _messages_to_prompt(self, messages: List[BaseMessage]) -> str:
+        """Converti i messaggi langchain in un prompt"""
+        prompt_parts = []
+        for msg in messages:
+            if isinstance(msg, SystemMessage):
+                prompt_parts.append(f"System: {msg.content}")
+            elif isinstance(msg, HumanMessage):
+                prompt_parts.append(f"User: {msg.content}")
+            elif isinstance(msg, AIMessage):
+                prompt_parts.append(f"Assistant: {msg.content}")
+        return "\n\n".join(prompt_parts)
+
+    @property
+    def _llm_type(self) -> str:
+        return "vertex-ai-dedicated"
 
 
 class Config:
@@ -57,6 +135,24 @@ class Config:
         self.database = self._load_yaml("database.yaml")
         self.system = self._load_yaml("system.yaml")
         self.fuzzy = self._load_yaml("fuzzy.yaml")
+        self.prompt_profiles = self._load_yaml("prompt_profiles.yaml") or {}
+
+    def get_system_message(self, agent_name: str) -> str:
+        """Ritorna il system message per provider+agente dalle config.
+
+        Ordine:
+          profiles[provider][agent] → defaults[provider] → generic fallback
+        """
+        try:
+            cfg = self.get_model_config(agent_name)
+            provider = cfg["provider"]
+            prof = (self.prompt_profiles or {}).get("profiles", {})
+            defaults = (self.prompt_profiles or {}).get("defaults", {})
+            if provider in prof and agent_name in prof[provider]:
+                return prof[provider][agent_name] or defaults.get(provider) or ""
+            return defaults.get(provider) or ""
+        except Exception:
+            return ""
 
     def get_secret(self, key: str) -> str:
         """Ottieni un secret da .env"""
@@ -73,8 +169,7 @@ class Config:
 
         return {
             "model_id": model_id,
-            "model_name": model_def["model_name"],
-            "provider": model_def["provider"],
+            **model_def,
             "provider_config": provider,
         }
 
@@ -105,6 +200,23 @@ def create_llm_model(agent_name: str):
             request_timeout=cfg["provider_config"]["timeout"],
         )
 
+    elif cfg["provider"] == "vertex_ai":
+        return VertexAIDedicatedEndpoint(
+            project_id=cfg["project_id"],
+            location=cfg["location"],
+            endpoint_id=cfg["endpoint_id"],
+            temperature=cfg["provider_config"]["temperature"],
+        )
+
+    elif cfg["provider"] == "google":
+        api_key = config.get_secret(cfg["provider_config"]["api_key_env"])
+        return ChatGoogleGenerativeAI(
+            model=cfg["model_name"],
+            google_api_key=api_key,
+            temperature=cfg["provider_config"]["temperature"],
+            convert_system_message_to_human=False,
+        )
+
     else:
         raise ValueError(f"Provider sconosciuto: {cfg['provider']}")
 
@@ -112,7 +224,14 @@ def create_llm_model(agent_name: str):
 # Creazione modelli stratificati
 MODELLI_STRATIFICATI = {
     agent: create_llm_model(agent)
-    for agent in ["contextualizer", "router", "coder", "synthesizer", "translator"]
+    for agent in [
+        "contextualizer",
+        "router",
+        "coder",
+        "synthesizer",
+        "translator",
+        "general_conversation",
+    ]
 }
 
 print(f"Modelli caricati da config:")
@@ -150,6 +269,100 @@ logger.info(
 )
 logger.info(f"Session timeout: {config.system['sessions']['timeout_minutes']} minuti")
 logger.info(f"Max risultati per synthesizer: {MAX_RESULTS_FOR_SYNTHESIZER}")
+
+
+# == Query Repair diagnostics helpers ==
+def _diagnostics_dir() -> Path:
+    base = config.system.get("logging", {}).get("diagnostics_dir", "diagnostics")
+    p = Path(base)
+    try:
+        p.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    return p
+
+
+def _load_recent_repairs(max_items: int) -> str:
+    """Carica ultimi fix da file JSONL per includerli nel prompt del repair."""
+    diag_dir = _diagnostics_dir()
+    path = diag_dir / "query_repair_log.jsonl"
+    if not path.exists():
+        return ""
+    lines = []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f.readlines()[-max_items:]:
+                try:
+                    rec = json.loads(line)
+                    # Sintesi compatta
+                    lines.append(
+                        f"- err: {rec.get('error_short','')} | fix: {rec.get('fixed_hint','')}"
+                    )
+                except Exception:
+                    continue
+    except Exception:
+        return ""
+    return "\n".join(lines)
+
+
+def _append_repair_event(question: str, bad_query: str, error: str, fixed_query: str):
+    if not config.system.get("logging", {}).get("save_diagnostics", False):
+        return
+    diag_dir = _diagnostics_dir()
+    path = diag_dir / "query_repair_log.jsonl"
+    rec = {
+        "ts": datetime.now().isoformat(),
+        "question": question,
+        "bad_query": bad_query,
+        "error": error,
+        "error_short": (error.split("\n", 1)[0] if error else ""),
+        "fixed_query": fixed_query,
+        # Heuristic short hint
+        "fixed_hint": (fixed_query.split("\n", 1)[0] if fixed_query else ""),
+    }
+    try:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+def _suggest_unnecessary_with_hints(cypher: str) -> str:
+    """Detects potentially unnecessary WITH clauses and returns textual hints.
+
+    Heuristic: flags lines starting with WITH that
+    - do not contain DISTINCT/ORDER BY/LIMIT/WHERE
+    - do not contain function calls ("(")
+    These often act as pass-through and can be removed or merged.
+    """
+    try:
+        hints = []
+        # 0) Flag SQL GROUP BY usage
+        if re.search(r"\bGROUP\s+BY\b", cypher, flags=re.IGNORECASE):
+            hints.append(
+                "SQL keyword 'GROUP BY' detected: Cypher does not support GROUP BY. Replace with a WITH clause listing grouping keys, then ORDER/RETURN using aggregated values."
+            )
+        lines = cypher.splitlines()
+        for idx, line in enumerate(lines, start=1):
+            m = re.match(r"^\s*WITH\s+(.*)$", line, flags=re.IGNORECASE)
+            if not m:
+                continue
+            rest = (m.group(1) or "").strip().rstrip(";")
+            up = rest.upper()
+            if any(tok in up for tok in ["DISTINCT", "ORDER BY", "LIMIT", "WHERE"]):
+                continue
+            if "(" in rest:
+                # likely aggregations or function calls
+                continue
+            # Simple pass-through WITH — suggest removal or merge
+            hints.append(
+                f"Line {idx}: '{line.strip()}' looks unnecessary; consider removing or merging into a single MATCH ... RETURN."
+            )
+        if hints:
+            return "Auto-detected issues and suggestions:\n- " + "\n- ".join(hints)
+    except Exception:
+        pass
+    return ""
 
 
 # CONNESSIONE NEO4J (DA CONFIG + SECRETS DA .ENV)
@@ -407,28 +620,96 @@ def load_prompt_from_yaml(file_path: str):
         return None
 
 
-# CARICAMENTO MODULARE DEI PROMPT
+def resolve_prompt_path(agent_name: str, filename: str) -> str:
+    """Seleziona il file prompt in base a modello/provider, con fallback al default.
 
+    Ordine tentativi:
+      1) prompts/<model_name>/<filename>
+      2) prompts/<provider>/<filename>
+      3) prompts/<filename>
+    """
+    prompts_dir = config.system["paths"]["prompts_dir"]
+    cfg = config.get_model_config(agent_name)
+    model_name = cfg.get("model_name")
+    model_id = cfg.get("model_id")
+    provider = cfg.get("provider")
+
+    # Support model aliasing from config/prompt_profiles.yaml
+    aliases = (config.prompt_profiles or {}).get("model_aliases", {})
+    alias_dir = aliases.get(model_name) or aliases.get(model_id)
+
+    candidates = []
+    # 1) exact model_name directory
+    if model_name:
+        candidates.append(os.path.join(prompts_dir, model_name, filename))
+    # 1b) alias directory (e.g., map llama3-8b-vertex → llama3)
+    if alias_dir:
+        candidates.append(os.path.join(prompts_dir, alias_dir, filename))
+    # 2) provider directory
+    if provider:
+        candidates.append(os.path.join(prompts_dir, provider, filename))
+    # 3) default
+    candidates.append(os.path.join(prompts_dir, filename))
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    # Fallback finale: ultimo della lista
+    return candidates[-1]
+
+
+# CARICAMENTO MODULARE DEI PROMPT (con varianti per modello/provider)
 PROMPTS_DIR = config.system["paths"]["prompts_dir"]
 
 BASE_CYPHER_RULES = load_prompt_from_yaml(
-    os.path.join(PROMPTS_DIR, "base_cypher_rules.yaml")
+    resolve_prompt_path("coder", "base_cypher_rules.yaml")
 )
 SPECIALIST_ROUTER_PROMPT = load_prompt_from_yaml(
-    os.path.join(PROMPTS_DIR, "specialist_router.yaml")
+    resolve_prompt_path("router", "specialist_router.yaml")
 )
 SPECIALIST_CODERS = load_prompt_from_yaml(
-    os.path.join(PROMPTS_DIR, "specialist_coders.yaml")
+    resolve_prompt_path("coder", "specialist_coders.yaml")
 )
 ADVANCED_CONTEXTUALIZER_PROMPT = load_prompt_from_yaml(
-    os.path.join(PROMPTS_DIR, "contextualizer_prompt.yaml")
+    resolve_prompt_path("contextualizer", "contextualizer_prompt.yaml")
 )
 SYNTHESIZER_PROMPT = load_prompt_from_yaml(
-    os.path.join(PROMPTS_DIR, "synthesizer_prompt.yaml")
+    resolve_prompt_path("synthesizer", "synthesizer_prompt.yaml")
 )
 TRANSLATOR_PROMPT = load_prompt_from_yaml(
-    os.path.join(PROMPTS_DIR, "translator_prompt.yaml")
+    resolve_prompt_path("translator", "translator_prompt.yaml")
 )
+GENERAL_CONVERSATION_PROMPT = load_prompt_from_yaml(
+    resolve_prompt_path("general_conversation", "general_conversation_prompt.yaml")
+)
+QUERY_REPAIR_PROMPT = load_prompt_from_yaml(
+    resolve_prompt_path("coder", "query_repair_prompt.yaml")
+)
+
+
+def _invoke_with_profile(agent_name: str, prompt_text: str, variables: dict) -> str:
+    """Invoca l'LLM con una struttura di prompt diversa per provider."""
+    cfg = config.get_model_config(agent_name)
+    model = MODELLI_STRATIFICATI[agent_name]
+
+    try:
+        if cfg["provider"] in ("openai", "ollama", "google"):
+            system_msg = config.get_system_message(agent_name)
+            prompt = ChatPromptTemplate.from_messages(
+                [("system", system_msg), ("user", prompt_text)]
+            )
+            chain = prompt | model | StrOutputParser()
+            return chain.invoke(variables)
+        else:
+            # Fallback per altri provider (es. Vertex AI)
+            prompt = PromptTemplate.from_template(prompt_text)
+            chain = prompt | model | StrOutputParser()
+            return chain.invoke(variables)
+
+    except Exception as e:
+        # Log dell'errore e rilancia (oppure gestisci in modo più specifico)
+        logger.error(f"Errore invocando {agent_name}: {e}")
+        raise
+
 
 # Verifica che tutti i prompt siano stati caricati correttamente
 if not all(
@@ -439,6 +720,7 @@ if not all(
         ADVANCED_CONTEXTUALIZER_PROMPT,
         SYNTHESIZER_PROMPT,
         TRANSLATOR_PROMPT,
+        GENERAL_CONVERSATION_PROMPT,
     ]
 ):
     print("Uno o più file prompt non sono stati caricati. Il programma terminerà.")
@@ -449,18 +731,34 @@ if not all(
 def run_translator_agent(question: str) -> str:
     """Translates the user's Italian question into an English task."""
     logger.info("🤖 Chiamata all'Agente Traduttore...")
-    prompt = PromptTemplate.from_template(TRANSLATOR_PROMPT)
-    chain = prompt | MODELLI_STRATIFICATI["translator"] | StrOutputParser()
-    task = chain.invoke({"question": question})
+    # Usa adattatore per differenziare struttura tra modelli
+    task = _invoke_with_profile(
+        agent_name="translator",
+        prompt_text=TRANSLATOR_PROMPT,
+        variables={"question": question},
+    )
     return task.strip()
+
+
+def run_general_conversation_agent(question: str) -> str:
+    """Generates a conversational answer without querying the graph."""
+    logger.info("🤖 Chiamata all'Agente Conversazionale...")
+    response = _invoke_with_profile(
+        agent_name="general_conversation",
+        prompt_text=GENERAL_CONVERSATION_PROMPT,
+        variables={"question": question},
+    )
+    return response.strip()
 
 
 def run_specialist_router_agent(question: str) -> str:
     """Classifies the question to route it to the correct specialist coder."""
     logger.info("🤖 Chiamata allo Specialist Router...")
-    prompt = PromptTemplate.from_template(SPECIALIST_ROUTER_PROMPT)
-    chain = prompt | MODELLI_STRATIFICATI["router"] | StrOutputParser()
-    route = chain.invoke({"question": question})
+    route = _invoke_with_profile(
+        agent_name="router",
+        prompt_text=SPECIALIST_ROUTER_PROMPT,
+        variables={"question": question},
+    )
     return route.strip()
 
 
@@ -469,36 +767,49 @@ def run_coder_agent(question: str, relevant_schema: str, prompt_template: str) -
     Esegue un Coder specializzato assemblando il prompt completo prima di passarlo a LangChain.
     """
     logger.info(f"🤖 Chiamata a un Coder Specializzato...")
-    # 1. PREPARO IL PROMPT HEADER CON DOMANDA E SCHEMA
-    prompt_header = """
-    **User Question:** {question}
-    **Relevant Schema:**
-    {schema}
-    ---
-    """
-    # 2. ASSEMBLO IL PROMPT COMPLETO:
-    #    Header + Regole Comuni + Regole Specifiche
+    # 1. Header/Suffix da config
+    coder_tpl = (config.prompt_profiles or {}).get("templates", {}).get("coder", {})
+    prompt_header = coder_tpl.get("header", "{schema}\n---\n")
+    prompt_suffix = coder_tpl.get("suffix", "Final Cypher Query:")
+
+    # 2. Assemblaggio: Header + Regole comuni + Regole speciali + Suffix
     final_prompt_text = (
         prompt_header
         + BASE_CYPHER_RULES
         + "\n---\n"
-        + prompt_template  # Questo è il pezzo che arriva da SPECIALIST_CODERS
-        + "\nFinal Cypher Query:"
+        + prompt_template
+        + "\n"
+        + prompt_suffix
     )
 
     # 3. CREO IL TEMPLATE FINALE
     #   E LO PASSO A LANGCHAIN
-    prompt = PromptTemplate.from_template(final_prompt_text)
-
-    chain = prompt | MODELLI_STRATIFICATI["coder"] | StrOutputParser()
-
-    query = chain.invoke(
-        {
-            "question": question,
-            "schema": relevant_schema,
-        }
+    query = _invoke_with_profile(
+        agent_name="coder",
+        prompt_text=final_prompt_text,
+        variables={"question": question, "schema": relevant_schema},
     )
-    return extract_cypher(query)
+    candidate = extract_cypher(query)
+    # Pre-repair guardrails: if SQL artifacts or non-Cypher preface slipped in, trigger a repair pass
+    needs_repair = bool(re.search(r"\bGROUP\s+BY\b", candidate, flags=re.IGNORECASE))
+    if needs_repair and QUERY_REPAIR_PROMPT:
+        try:
+            fixed = _invoke_with_profile(
+                agent_name="coder",
+                prompt_text=QUERY_REPAIR_PROMPT,
+                variables={
+                    "question": question,
+                    "schema": relevant_schema,
+                    "bad_query": candidate,
+                    "error": "Invalid SQL dialect: found GROUP BY; rewrite using Cypher WITH.",
+                    "hints": _suggest_unnecessary_with_hints(candidate),
+                    "recent_repairs": "",
+                },
+            )
+            candidate = extract_cypher(fixed)
+        except Exception:
+            pass
+    return candidate
 
 
 def run_contextualizer_agent(question: str, chat_history: str) -> str:
@@ -509,26 +820,24 @@ def run_contextualizer_agent(question: str, chat_history: str) -> str:
         return question  # Se non c'è cronologia, restituisce la domanda originale
 
     logger.info("Chiamata al Contextualizer Avanzato...")
-    prompt = PromptTemplate.from_template(ADVANCED_CONTEXTUALIZER_PROMPT)
-    chain = prompt | MODELLI_STRATIFICATI["contextualizer"] | StrOutputParser()
-
-    rewritten_question = chain.invoke(
-        {"chat_history": chat_history, "question": question}
+    rewritten_question = _invoke_with_profile(
+        agent_name="contextualizer",
+        prompt_text=ADVANCED_CONTEXTUALIZER_PROMPT,
+        variables={"chat_history": chat_history, "question": question},
     )
     return rewritten_question.strip()
 
 
 def run_synthesizer_agent(question: str, context_str: str, total_results: int) -> str:
     logger.info("Chiamata al Synthesizer...")
-    prompt = PromptTemplate.from_template(SYNTHESIZER_PROMPT)
-    chain = prompt | MODELLI_STRATIFICATI["synthesizer"] | StrOutputParser()
-
-    answer = chain.invoke(
-        {
+    answer = _invoke_with_profile(
+        agent_name="synthesizer",
+        prompt_text=SYNTHESIZER_PROMPT,
+        variables={
             "question": question,
             "context": context_str,
             "total_results": total_results,
-        }
+        },
     )
     return answer.strip()
 
@@ -563,12 +872,30 @@ def extract_cypher(text: str) -> str:
     """
     Estrae la query Cypher da una stringa, anche se è avvolta in blocchi di codice Markdown.
     """
-    # Cerca un blocco di codice Cypher
-    match = re.search(r"```(?:cypher)?\s*\n(.*?)\n\s*```", text, re.DOTALL)
+    if not text:
+        return ""
+    t = text.strip()
+    # 1) Cerca un blocco di codice Cypher
+    match = re.search(r"```(?:cypher)?\s*\n(.*?)\n\s*```", t, re.DOTALL | re.IGNORECASE)
     if match:
         return match.group(1).strip()
-    # Se non trova un blocco, assume che la risposta sia già la query pulita
-    return text.strip()
+    # 2) Rimuovi eventuali prefazioni (es. "Here is the corrected Cypher query:")
+    lines = t.splitlines()
+    cypher_start = re.compile(
+        r"^\s*(MATCH|OPTIONAL\s+MATCH|WITH|RETURN|CALL|UNWIND|MERGE|CREATE)\b",
+        re.IGNORECASE,
+    )
+    start_idx = None
+    for i, line in enumerate(lines):
+        if cypher_start.search(line):
+            start_idx = i
+            break
+    if start_idx is not None:
+        candidate = "\n".join(lines[start_idx:]).strip()
+        candidate = candidate.strip("`")
+        return candidate
+    # 3) Fallback: restituisce il testo così com'è
+    return t
 
 
 # --- 4. ENDPOINT API CON CACHE ---
@@ -639,6 +966,30 @@ async def ask_question(user_question: UserQuestionWithSession):
         timing_details["routing"] = time.perf_counter() - start_route_time
         logger.info(f" Rotta decisa dallo Specialist Router: {specialist_route}")
 
+        if specialist_route == "GENERAL_CONVERSATION":
+            start_conv_time = time.perf_counter()
+            conversation_reply = run_general_conversation_agent(original_question_text)
+            timing_details["conversazione"] = time.perf_counter() - start_conv_time
+            timing_details["generazione_query"] = 0.0
+            timing_details["esecuzione_db"] = 0.0
+            timing_details["sintesi_risposta"] = 0.0
+            timing_details["totale"] = time.perf_counter() - start_total_time
+
+            add_message_to_session(
+                user_id,
+                original_question_text,
+                conversation_reply,
+                [],
+                "",
+            )
+
+            return {
+                "domanda": original_question_text,
+                "query_generata": None,
+                "risposta": conversation_reply,
+                "timing_details": timing_details,
+            }
+
         # 2b. Seleziona il prompt corretto dal dizionario degli specialisti
         coder_prompt_template = SPECIALIST_CODERS.get(
             specialist_route, SPECIALIST_CODERS["GENERAL_QUERY"]
@@ -659,16 +1010,144 @@ async def ask_question(user_question: UserQuestionWithSession):
         )
 
         ## == FASE 3: ESECUZIONE E SINTESI DELLA RISPOSTA
-        # 3a. Esecuzione della query sul database
+        # 3a. Esecuzione query con ciclo di repair (configurabile)
         start_db_time = time.perf_counter()
-        context_completo = graph.query(generated_query)
+        attempts = max(1, int(config.system.get("retry", {}).get("max_attempts", 1)))
+        patterns = config.system.get("retry", {}).get("repairable_error_patterns", [])
+        max_recent = int(config.system.get("retry", {}).get("max_recent_repairs", 0))
+        hints_texts = []
+        for hint_file in config.system.get("retry", {}).get("hints_files", []) or []:
+            try:
+                with open(hint_file, "r", encoding="utf-8") as hf:
+                    hints_texts.append(hf.read())
+            except Exception:
+                continue
+        recent_repairs = _load_recent_repairs(max_recent) if max_recent > 0 else ""
+
+        last_error_msg = None
+        current_query = generated_query
+
+        # Preflight: intercetta sintassi SQL non valida per Cypher (es. GROUP BY, HAVING, OVER)
+        try:
+            sql_like = re.compile(
+                r"\b(GROUP\s+BY|HAVING|OVER\b|PARTITION\s+BY|ROW_NUMBER\s*\(|RANK\s*\(|WINDOW\b)",
+                re.IGNORECASE,
+            )
+            if current_query and sql_like.search(current_query) and QUERY_REPAIR_PROMPT:
+                logger.info(
+                    "Preflight Repair: rilevata sintassi SQL-like (GROUP BY/HAVING/OVER). Provo a correggere prima dell'esecuzione."
+                )
+                preflight_hints = (
+                    "SQL-like keywords are invalid in Cypher (GROUP BY, HAVING, OVER).\n"
+                    "Use Cypher aggregation instead: RETURN key, sum(val) AS total; or WITH key, sum(val) AS total RETURN key, total.\n"
+                    "For best-year or ranking, use WITH + collect(...) and pick the first element after ORDER BY, not GROUP BY.\n"
+                )
+                auto_hints_pf = _suggest_unnecessary_with_hints(current_query)
+                combined_hints_pf = "\n\n".join(
+                    [
+                        h
+                        for h in [
+                            hints_blob if "hints_blob" in locals() else "",
+                            preflight_hints,
+                            auto_hints_pf,
+                        ]
+                        if h
+                    ]
+                ).strip()
+                fixed_pf = _invoke_with_profile(
+                    agent_name="coder",
+                    prompt_text=QUERY_REPAIR_PROMPT,
+                    variables={
+                        "question": english_task,
+                        "schema": relevant_schema,
+                        "bad_query": current_query,
+                        "error": "Detected SQL-like syntax (GROUP BY/HAVING/OVER) not valid in Cypher.",
+                        "hints": combined_hints_pf,
+                        "recent_repairs": recent_repairs,
+                    },
+                )
+                fixed_pf_query = extract_cypher(fixed_pf)
+                logger.info(f"Query corretta (preflight) proposta:\n{fixed_pf_query}")
+                _append_repair_event(
+                    english_task,
+                    current_query,
+                    "Preflight SQL-like syntax",
+                    fixed_pf_query,
+                )
+                current_query = fixed_pf_query
+        except Exception:
+            pass
+        for attempt_idx in range(1, attempts + 1):
+            try:
+                context_completo = graph.query(current_query)
+                generated_query = current_query
+                last_error_msg = None
+                break
+            except Exception as e:
+                last_error_msg = str(e)
+                logger.warning(
+                    f"Tentativo {attempt_idx}/{attempts} fallito: {last_error_msg[:180]}"
+                )
+                if not QUERY_REPAIR_PROMPT:
+                    continue
+                # Check se l'errore è riparabile
+                if not any(
+                    (
+                        re.search(pat, last_error_msg)
+                        if any(ch in pat for ch in ".*?[]()^$")
+                        else (pat in last_error_msg)
+                    )
+                    for pat in patterns
+                ):
+                    continue
+                # Prepara prompt di repair
+                hints_blob = "\n\n".join(hints_texts).strip()
+                # Auto-detected hints (e.g., unnecessary WITH)
+                auto_hints = _suggest_unnecessary_with_hints(current_query)
+                combined_hints = "\n\n".join(hints_texts).strip() or ""
+                if auto_hints:
+                    combined_hints = (
+                        (combined_hints + "\n\n" + auto_hints).strip()
+                        if combined_hints
+                        else auto_hints
+                    )
+
+                fixed = _invoke_with_profile(
+                    agent_name="coder",
+                    prompt_text=QUERY_REPAIR_PROMPT,
+                    variables={
+                        "question": english_task,
+                        "schema": relevant_schema,
+                        "bad_query": current_query,
+                        "error": last_error_msg,
+                        "hints": combined_hints,
+                        "recent_repairs": recent_repairs,
+                    },
+                )
+                fixed_query = extract_cypher(fixed)
+                logger.info(f"Query corretta proposta:\n{fixed_query}")
+                _append_repair_event(
+                    english_task, current_query, last_error_msg, fixed_query
+                )
+                current_query = fixed_query
+                continue
+        if last_error_msg:
+            # re-raise ultimo errore se tutti i tentativi falliscono
+            raise Exception(last_error_msg)
         total_results = len(context_completo)
         timing_details["esecuzione_db"] = time.perf_counter() - start_db_time
         logger.info(f"Query eseguita. Trovati {total_results} risultati.")
 
         # 3b. Prepara il contesto e chiama il Synthesizer per la risposta finale
-        MAX_RESULTS_FOR_SYNTHESIZER = 10  # Aumentato a 10 per risposte più ricche
-        context_da_inviare = context_completo[:MAX_RESULTS_FOR_SYNTHESIZER]
+        # Limite gestito da config: query_limits.provider_overrides.synthesizer
+        synth_cfg = config.get_model_config("synthesizer")
+        ql = config.system.get("query_limits", {})
+        provider_overrides = ql.get("provider_overrides", {}).get("synthesizer", {})
+        max_results_cfg = ql.get("max_results_for_synthesizer", 10)
+        max_results_final = int(
+            provider_overrides.get(synth_cfg["provider"], max_results_cfg)
+        )
+        context_da_inviare = context_completo[:max_results_final]
 
         sanitized_context = make_context_json_serializable(context_da_inviare)
         context_str_for_llm = json.dumps(
