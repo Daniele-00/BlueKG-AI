@@ -15,3 +15,4 @@
 /.svnignore
 /.svn
 /llama3_cypher_expert/llama3_finetuned
+llama3_cypher_expert/llama3_finetuned/adapter_model.safetensors
