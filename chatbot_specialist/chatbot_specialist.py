@@ -13,6 +13,8 @@ import logging
 import time
 import json
 from datetime import date
+import copy
+import hashlib
 from neo4j.time import Date, DateTime, Time, Duration
 from neo4j.exceptions import Neo4jError
 from pathlib import Path
@@ -283,6 +285,24 @@ def _diagnostics_dir() -> Path:
     return p
 
 
+def _normalize_text_for_cache(text: str) -> str:
+    """Normalizza testo per confronti cache (minuscolo, spazi puliti)."""
+
+    if not text:
+        return ""
+    cleaned = re.sub(r"\s+", " ", text.strip().lower())
+    return cleaned
+
+
+def _make_cache_key(user_id: str, original_question: str, normalized_task: str) -> str:
+    """Crea una chiave cache che combina utente e domanda normalizzata."""
+
+    base = _normalize_text_for_cache(normalized_task) or _normalize_text_for_cache(
+        original_question
+    )
+    return f"{user_id}:::{base}"
+
+
 def _load_recent_repairs(max_items: int) -> str:
     """Carica ultimi fix da file JSONL per includerli nel prompt del repair."""
     diag_dir = _diagnostics_dir()
@@ -406,7 +426,9 @@ def get_query_timeout_seconds() -> Optional[float]:
 
 
 def execute_cypher_with_timeout(
-    query: str, params: Optional[Dict[str, Any]] = None, timeout_seconds: Optional[float] = None
+    query: str,
+    params: Optional[Dict[str, Any]] = None,
+    timeout_seconds: Optional[float] = None,
 ) -> List[Dict[str, Any]]:
     """Execute a Cypher query enforcing the configured timeout."""
 
@@ -459,6 +481,28 @@ class ConversationSession(BaseModel):
 # Cache globale per le sessioni di conversazione (scade dopo 30 minuti di inattività)
 conversation_sessions: Dict[str, ConversationSession] = {}
 SESSION_TIMEOUT = timedelta(minutes=config.system["sessions"]["timeout_minutes"])
+ENABLE_MEMORY = config.system["sessions"].get("enable_memory", False)
+
+# Controlla quante interazioni recenti passiamo al contextualizer
+MAX_HISTORY_FOR_CONTEXTUALIZER = 4
+# Lunghezza massima (caratteri) per sintesi testo memorizzata nel prompt
+MAX_CONTEXT_SNIPPET_LENGTH = 220
+
+SCOPE_RESET_KEYWORDS = {
+    "in generale",
+    "nel complesso",
+    "complessivamente",
+    "overall",
+    "in general",
+    "globalmente",
+    "su tutti",
+    "per tutti",
+    "considerando tutti",
+    "senza filtri",
+    "tutti i clienti",
+    "tutte le ditte",
+    "tutti i fornitori",
+}
 
 
 def get_or_create_session(user_id: str) -> ConversationSession:
@@ -491,6 +535,9 @@ def add_message_to_session(
     user_id: str, question: str, answer: str, context: List[Dict], query: str
 ):
     """Aggiungi un messaggio alla sessione di conversazione"""
+    if not ENABLE_MEMORY:
+        return
+
     session = get_or_create_session(user_id)
 
     message = ConversationMessage(
@@ -512,33 +559,188 @@ def add_message_to_session(
     )
 
 
-def get_conversation_context(user_id: str) -> str:
-    """Genera contesto conversazione COMPATTO"""
-    session = conversation_sessions.get(user_id)
-    if not session or len(session.messages) == 0:
+def _summarize_for_memory(
+    text: str, max_length: int = MAX_CONTEXT_SNIPPET_LENGTH
+) -> str:
+    """Compatta un testo rimuovendo spazi ripetuti e tronca in modo sicuro."""
+
+    if not text:
+        return ""
+    sanitized = re.sub(r"\s+", " ", text.strip())
+    if len(sanitized) <= max_length:
+        return sanitized
+    return sanitized[: max_length - 3].rstrip() + "..."
+
+
+def _collect_entities_from_context(context: List[Dict]) -> Dict[str, set]:
+    """Estrae rapidamente entità note dal contesto della risposta precedente."""
+
+    buckets = {
+        "clienti": set(),
+        "fornitori": set(),
+        "ditte": set(),
+        "prodotti": set(),
+    }
+
+    for item in context or []:
+        if not isinstance(item, dict):
+            continue
+        for key, value in item.items():
+            if value in (None, ""):
+                continue
+            lower_key = str(key).lower()
+            # Normalizzo il valore a stringa per facilitarne il prompt engineering
+            val_str = str(value)
+            if "fornit" in lower_key:
+                buckets["fornitori"].add(val_str)
+            elif "ditta" in lower_key:
+                buckets["ditte"].add(val_str)
+            elif "articolo" in lower_key or "prodotto" in lower_key:
+                buckets["prodotti"].add(val_str)
+            elif "cliente" in lower_key:
+                buckets["clienti"].add(val_str)
+    return buckets
+
+
+def _extract_explicit_identifiers(text: str) -> Dict[str, set]:
+    """Trova riferimenti espliciti (es. ditta '1') nella domanda originale."""
+
+    ids = {
+        "ditta": set(),
+        "cliente": set(),
+        "fornitore": set(),
+    }
+    if not text:
+        return ids
+
+    patterns = {
+        "ditta": r"ditta\s*['\"]?(\w+)['\"]?",
+        "cliente": r"cliente\s*['\"]?(\w+)['\"]?",
+        "fornitore": r"fornitore\s*['\"]?(\w+)['\"]?",
+    }
+
+    lowered = text.lower()
+    for label, pattern in patterns.items():
+        for match in re.finditer(pattern, lowered, flags=re.IGNORECASE):
+            ids[label].add(match.group(1))
+    return ids
+
+
+def _should_reset_scope(question: str) -> bool:
+    """Determina se la nuova domanda richiede di ignorare lo scope precedente."""
+
+    if not question:
+        return False
+
+    lowered = question.lower()
+    return any(keyword in lowered for keyword in SCOPE_RESET_KEYWORDS)
+
+
+def _scope_summary_for_synth(original: str, contextualized: str) -> str:
+    """Genera un promemoria sintetico sui filtri interpretati dal contextualizer."""
+
+    if not contextualized:
         return ""
 
-    last_msg = session.messages[-1]
+    norm_original = _normalize_text_for_cache(original)
+    norm_contextualized = _normalize_text_for_cache(contextualized)
+    if norm_original == norm_contextualized:
+        return ""
 
-    context_lines = ["CONVERSAZIONE PRECEDENTE (ultimo messaggio):"]
-    context_lines.append(f"Domanda: {last_msg.question}")
+    explicit_refs = _extract_explicit_identifiers(contextualized)
+    fragments: List[str] = []
 
-    # Estrai SOLO nomi, niente altro
-    if last_msg.context:
-        nomi_clienti = []
-        nomi_fornitori = []
+    if explicit_refs.get("ditta"):
+        ditte = ", ".join(sorted({f"ditta '{val}'" for val in explicit_refs["ditta"]}))
+        fragments.append(f"clienti appartenenti a {ditte}")
+    if explicit_refs.get("cliente"):
+        clienti = ", ".join(
+            sorted({f"cliente '{val}'" for val in explicit_refs["cliente"]})
+        )
+        fragments.append(f"le entità {clienti}")
+    if explicit_refs.get("fornitore"):
+        fornitori = ", ".join(
+            sorted({f"fornitore '{val}'" for val in explicit_refs["fornitore"]})
+        )
+        fragments.append(f"i dati relativi a {fornitori}")
 
-        for item in last_msg.context:
-            if "cliente" in item and item["cliente"]:
-                nomi_clienti.append(item["cliente"])
-            elif "fornitore" in item and item["fornitore"]:
-                nomi_fornitori.append(item["fornitore"])
+    if fragments:
+        detail = "; ".join(fragments)
+        templates = [
+            "Perimetro considerato: {detail}.",
+            "Ambito di analisi corrente: {detail}.",
+            "Sto focalizzando la risposta su {detail}.",
+            "Analisi limitata a {detail}.",
+        ]
+        digest = hashlib.md5(norm_contextualized.encode("utf-8")).hexdigest()
+        idx = int(digest[:2], 16) % len(templates)
+        return templates[idx].format(detail=detail)
 
-        if nomi_clienti:
-            # Lista Python per facilitare parsing LLM
-            context_lines.append(f"LISTA_CLIENTI = {nomi_clienti}")
-        if nomi_fornitori:
-            context_lines.append(f"LISTA_FORNITORI = {nomi_fornitori}")
+    return f'Interpretazione contestualizzata: "{contextualized}"'
+
+
+def get_conversation_context(user_id: str) -> str:
+    """Costruisce un contesto multi-turno compatto per il contextualizer."""
+
+    if not ENABLE_MEMORY:
+        return ""
+
+    session = conversation_sessions.get(user_id)
+    if not session or not session.messages:
+        return ""
+
+    history_slice = session.messages[-MAX_HISTORY_FOR_CONTEXTUALIZER:]
+    context_lines: List[str] = ["CONVERSAZIONE PRECEDENTE (più recente per primo):"]
+
+    aggregated_entities = {
+        "clienti": set(),
+        "fornitori": set(),
+        "ditte": set(),
+        "prodotti": set(),
+    }
+    explicit_refs = {"ditta": set(), "cliente": set(), "fornitore": set()}
+
+    for offset, message in enumerate(reversed(history_slice), start=1):
+        context_lines.append(f"[Turno -{offset}]")
+        context_lines.append(f"Domanda: {message.question}")
+
+        explicit = _extract_explicit_identifiers(message.question)
+        for label, values in explicit.items():
+            explicit_refs[label].update(values)
+
+        if message.query_generated:
+            context_lines.append(
+                "QueryCypher: " + _summarize_for_memory(message.query_generated, 260)
+            )
+
+        if message.answer:
+            context_lines.append("Risposta: " + _summarize_for_memory(message.answer))
+
+        entities = _collect_entities_from_context(message.context)
+        for bucket, values in entities.items():
+            aggregated_entities[bucket].update(values)
+
+    # Inserisco blocchi riassuntivi finali per aiutare il contextualizer a non perdere riferimenti
+    entity_block = []
+    for label, values in aggregated_entities.items():
+        if values:
+            entity_block.append(f"{label.upper()} = {sorted(values)}")
+
+    if entity_block:
+        context_lines.append("ENTITA_RILEVANTI:")
+        context_lines.extend(entity_block)
+
+    explicit_block = []
+    for label, values in explicit_refs.items():
+        if values:
+            explicit_block.append(
+                f"RIFERIMENTI_ESPLICITI_{label.upper()} = {sorted(values)}"
+            )
+    if explicit_block:
+        context_lines.append(
+            "NOTA: Mantieni invariati i riferimenti testuali espliciti (es. ID)."
+        )
+        context_lines.extend(explicit_block)
 
     return "\n".join(context_lines)
 
@@ -943,27 +1145,45 @@ def run_contextualizer_agent(question: str, chat_history: str) -> str:
     """
     Riscrive una domanda di follow-up in una domanda autonoma, gestendo la memoria.
     """
-    if not chat_history:
+    reset_scope = _should_reset_scope(question)
+    if reset_scope:
+        logger.info("Contextualizer: il testo sembra richiedere uno scope generale.")
+
+    if not ENABLE_MEMORY or not chat_history:
         return question  # Se non c'è cronologia, restituisce la domanda originale
 
     logger.info("Chiamata al Contextualizer Avanzato...")
     rewritten_question = _invoke_with_profile(
         agent_name="contextualizer",
         prompt_text=ADVANCED_CONTEXTUALIZER_PROMPT,
-        variables={"chat_history": chat_history, "question": question},
+        variables={
+            "chat_history": chat_history,
+            "question": question,
+            "scope_hint": "RESET_SCOPE" if reset_scope else "",
+        },
     )
     return rewritten_question.strip()
 
 
-def run_synthesizer_agent(question: str, context_str: str, total_results: int) -> str:
+def run_synthesizer_agent(
+    question: str,
+    context_str: str,
+    total_results: int,
+    contextualized_question: Optional[str] = None,
+    filters_summary: Optional[str] = None,
+) -> str:
     logger.info("Chiamata al Synthesizer...")
+
+    contextualized_question = contextualized_question or question
     answer = _invoke_with_profile(
         agent_name="synthesizer",
         prompt_text=SYNTHESIZER_PROMPT,
         variables={
             "question": question,
+            "contextualized_question": contextualized_question,
             "context": context_str,
             "total_results": total_results,
+            "filters_summary": filters_summary or "",
         },
     )
     return answer.strip()
@@ -1083,6 +1303,38 @@ async def ask_question(user_question: UserQuestionWithSession):
         english_task = run_translator_agent(question_text)
         logger.info(f"Task tradotto in Inglese: '{english_task}'")
 
+        cache_key = None
+        if ENABLE_MEMORY:
+            cache_key = _make_cache_key(user_id, question_text, english_task)
+        cached_entry = None
+        if cache_key and cache_key in query_cache:
+            cached_entry = copy.deepcopy(query_cache[cache_key])
+            if cached_entry:
+                logger.info(
+                    f"♻️ Cache HIT per utente {user_id}. Riutilizzo risposta pre-calcolata."
+                )
+                cached_response = cached_entry.get("response") or {}
+                cached_timings = cached_response.get("timing_details", {})
+                timings_copy = dict(cached_timings)
+                timings_copy["cache_hit"] = True
+                cached_response["timing_details"] = timings_copy
+
+                add_message_to_session(
+                    user_id,
+                    original_question_text,
+                    cached_response.get("risposta", ""),
+                    cached_entry.get("context", []),
+                    cached_entry.get("query_generata", ""),
+                )
+
+                return {
+                    "domanda": original_question_text,
+                    "query_generata": cached_entry.get("query_generata"),
+                    "risposta": cached_response.get("risposta"),
+                    "timing_details": timings_copy,
+                    "cached": True,
+                }
+
         timing_details["preprocessing"] = time.perf_counter() - start_preprocessing_time
 
         ## == FASE 2: ROUTING E GENERAZIONE QUERY SPECIALIZZATA
@@ -1109,13 +1361,22 @@ async def ask_question(user_question: UserQuestionWithSession):
                 [],
                 "",
             )
-
-            return {
+            response_payload = {
                 "domanda": original_question_text,
                 "query_generata": None,
                 "risposta": conversation_reply,
                 "timing_details": timing_details,
             }
+            if cache_key:
+                query_cache[cache_key] = {
+                    "response": copy.deepcopy(response_payload),
+                    "context": [],
+                    "query_generata": None,
+                    "specialist": specialist_route,
+                }
+                logger.info("♻️ Cache STORE per conversazione generale")
+
+            return response_payload
 
         # 2b. Seleziona il prompt corretto dal dizionario degli specialisti
         coder_prompt_template = SPECIALIST_CODERS.get(
@@ -1298,10 +1559,16 @@ async def ask_question(user_question: UserQuestionWithSession):
         )
 
         start_synth_time = time.perf_counter()
+        filters_summary = _scope_summary_for_synth(
+            original_question_text, question_text
+        )
+
         final_answer = run_synthesizer_agent(
             question=original_question_text,
             context_str=context_str_for_llm,
             total_results=total_results,
+            contextualized_question=question_text,
+            filters_summary=filters_summary,
         )
         timing_details["sintesi_risposta"] = time.perf_counter() - start_synth_time
 
@@ -1319,12 +1586,23 @@ async def ask_question(user_question: UserQuestionWithSession):
             generated_query,
         )
 
-        return {
+        response_payload = {
             "domanda": original_question_text,
             "query_generata": generated_query,
             "risposta": final_answer,
             "timing_details": timing_details,
         }
+
+        if cache_key:
+            query_cache[cache_key] = {
+                "response": copy.deepcopy(response_payload),
+                "context": context_completo,
+                "query_generata": generated_query,
+                "specialist": specialist_route,
+            }
+            logger.info("♻️ Cache STORE per query specialist")
+
+        return response_payload
 
     except QueryTimeoutError as e:
         logger.error(
