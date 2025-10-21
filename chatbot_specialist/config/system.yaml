@@ -1,52 +1,38 @@
-# =============================================================================
-# CONFIGURAZIONE SISTEMA E RUNTIME
-# =============================================================================
-
-# Cache settings
 cache:
-  query_ttl_seconds: 600        # Quanto tempo una risposta resta in cache
-  max_cache_size: 100           # Numero massimo risposte in cache
-
-# Session management
-sessions:
-  timeout_minutes: 30           # Timeout inattività sessione
-  max_messages_per_session: 15  # Messaggi da mantenere in memoria
-  cleanup_interval_seconds: 300 # Ogni quanto pulire sessioni morte
-
-# Query execution limits
+  max_cache_size: 100
+  query_ttl_seconds: 600
+logging:
+  diagnostics_dir: diagnostics
+  level: INFO
+  save_diagnostics: true
+paths:
+  config_dir: config
+  prompts_dir: prompts
+  test_results: test_results.json
+  validation_set: validation_set.json
 query_limits:
-  max_results_for_synthesizer: 10   # Risultati passati al synthesizer
-  max_results_display: 50           # Risultati totali mostrati all'utente
-  query_timeout_seconds: 30         # Timeout esecuzione query
+  max_results_display: 50
+  max_results_for_synthesizer: 10
   provider_overrides:
     synthesizer:
-      openai: 10
       ollama: 8
-
-# Retry configuration
+      openai: 10
+  query_timeout_seconds: 30
 retry:
   enabled: true
-  max_attempts: 3                   # Numero massimo retry per query (incluso il tentativo iniziale)
-  retry_on_zero_results: false      # Retry se 0 risultati (costoso!)
-  retry_on_syntax_error: true       # Retry se errore sintassi
-  repairable_error_patterns:        # Regex o substring per attivare il repair
-    - "SyntaxError"
-    - "Variable .* not defined"
-    - "Invalid input"
-    - "Type mismatch"
-  max_recent_repairs: 8             # Quanti fix recenti includere nel prompt
-  hints_files:                      # File opzionali con suggerimenti extra (testo libero)
-    - chatbot_specialist/diagnostics/repair_hints.md
-
-# Logging
-logging:
-  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
-  save_diagnostics: true
-  diagnostics_dir: "diagnostics"
-
-# File paths
-paths:
-  prompts_dir: "prompts"
-  validation_set: "validation_set.json"
-  test_results: "test_results.json"
-  config_dir: "config"
+  hints_files:
+  - chatbot_specialist/diagnostics/repair_hints.md
+  max_attempts: 3
+  max_recent_repairs: 8
+  repairable_error_patterns:
+  - SyntaxError
+  - Variable .* not defined
+  - Invalid input
+  - Type mismatch
+  retry_on_syntax_error: true
+  retry_on_zero_results: false
+sessions:
+  cleanup_interval_seconds: 300
+  enable_memory: false
+  max_messages_per_session: 15
+  timeout_minutes: 30

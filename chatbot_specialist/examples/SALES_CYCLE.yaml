@@ -192,13 +192,13 @@ examples:
     WHERE toLower(trim(a.descrizione)) = 'gas freon solstice n40 r448a' AND dr.tipoValore
     = 'Fatturato' AND dr.importo > 0 RETURN sum(dr.importo) AS totaleVenduto
 - id: sales_cycle_015
-  question: Attualmente la ditta 2 è in perdita o in crescita?
+  question: Qual è la Situazione attuale della ditta '2'?
   cypher: 'MATCH (d:Ditta {dittaId: ''2''})<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
     WHERE dr.tipoValore = ''Fatturato'' AND dr.importo > 0 AND doc.dataEmissione.year
     IN [date().year, date().year - 1] RETURN doc.dataEmissione.year AS anno, sum(dr.importo)
     AS fatturatoAnnuale ORDER BY anno DESC'
 - id: sales_cycle_015_var1
-  question: La ditta 2 sta attualmente perdendo o crescendo?
+  question: Situazione attuale della ditta '2'.
   cypher: 'MATCH (d:Ditta {dittaId: ''2''})<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
     WHERE dr.tipoValore = ''Fatturato'' AND dr.importo > 0 AND doc.dataEmissione.year
     IN [date().year, date().year - 1] RETURN doc.dataEmissione.year AS anno, sum(dr.importo)

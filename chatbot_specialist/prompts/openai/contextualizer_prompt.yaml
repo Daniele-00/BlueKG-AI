@@ -9,10 +9,15 @@ content: |
   **New Question (Follow-up):**
   {question}
 
+  **Scope Hint (può essere vuoto):**
+  {scope_hint}
+
   ---
   **RULES:**
   1.  **Rewrite the question** to be standalone.
   2.  **Inject Context**: If the history contains a list (e.g., `LISTA_CLIENTI = ['ACME SRL', 'ROSSI SPA']`) and the new question refers to it (e.g., "their revenue"), you MUST explicitly include the names from the list in the rewritten question.
+  3.  **Preserve Explicit IDs**: If the new question cita identificatori testuali (es. "ditta '2'", "cliente 45"), mantienili invariati nella domanda riscritta. Non sostituirli con nomi presi dal contesto.
+  4.  **Comprendi lo Scope**: Se la nuova domanda chiede esplicitamente una vista "in generale"/"complessiva" o contraddice filtri precedenti, rimuovi quei filtri anche senza suggerimento. Se `Scope Hint` vale `RESET_SCOPE`, ignora i vincoli precedenti a meno che il testo non li richieda di nuovo.
 
   ---
   **Example 1 (Parameter Change):**
@@ -33,4 +38,3 @@ content: |
   **FINAL INSTRUCTION: Do not add any comments, reasoning, or explanations. Return ONLY the final standalone question.**
 
   **Standalone Question:**
-

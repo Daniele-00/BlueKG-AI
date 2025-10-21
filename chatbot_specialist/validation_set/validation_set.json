@@ -71,7 +71,7 @@
     },
     {
         "id": "TEST-15-Genera la query Cypher per rispondere a questo input in italiano",
-        "input": "Attualmente la ditta 2 è in perdita o in crescita?",
+        "input": "Situazione attuale della ditta '2'",
         "output": "MATCH (d:Ditta {dittaId: '2'})<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 AND doc.dataEmissione.year IN [date().year, date().year - 1] RETURN doc.dataEmissione.year AS anno, sum(dr.importo) AS fatturatoAnnuale ORDER BY anno DESC"
     },
     {
@@ -529,7 +529,7 @@
         "input": "Mostrami il totale fatturato e il totale ordinato per ciascuna ditta.",
         "output": "MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) RETURN d.dittaId AS ditta, sum(CASE dr.tipoValore WHEN 'Fatturato' THEN dr.importo ELSE 0 END) AS totaleFatturato, sum(CASE dr.tipoValore WHEN 'Ordinato' THEN dr.importo ELSE 0 END) AS totaleOrdinato ORDER BY ditta ASC"
     }
-]
+        ]
 
 
 

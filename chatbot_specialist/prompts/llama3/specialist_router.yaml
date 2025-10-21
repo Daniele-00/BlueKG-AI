@@ -14,7 +14,7 @@ content: |
   4) Calculation intent? If it asks totals/averages/ranking/counts → not GENERAL_QUERY
       - Keywords: totale, somma, quanto, media, massimo, minimo, top, migliore, più, conta, quanti, numero di, trend, crescita, perdita
   5) SALES vs PURCHASE (classification keywords)
-     - SALES_CYCLE → venduto, vendita, fatturato, ricavi, cliente/i, prodotti venduti, incassato, ricavo, fatture di vendita, HA_RICEVUTO
+     - SALES_CYCLE → venduto, vendita, fatturato, ricavi, cliente/i, prodotti venduti, incassato, ricavo, fatture di vendita, situazione o situazione attuale, HA_RICEVUTO
      - PURCHASE_CYCLE → acquistato, acquisto, comprato, costo, spesa/speso, pagato, fornitore/fornitori, ordini di acquisto, fatture di acquisto, documenti emessi, HA_EMESSO
      - Tie‑breaker: if both families/products and buy-words appear (acquista/comprato/fornitore/emesso), PREFER PURCHASE_CYCLE.
   6) Otherwise GENERAL_QUERY (listing/lookups only)
@@ -31,6 +31,7 @@ content: |
   - "Qual è la famiglia più venduta?" → SALES_CYCLE
   - "Elenca i prodotti acquistati dal fornitore Y" → PURCHASE_CYCLE
   - "Elenca i prodotti venduti al cliente Z" → SALES_CYCLE
+  - "Situazione attuale ditta 1" → SALES_CYCLE
   - "Quanti clienti unici ha la ditta '1'?" → DITTE_QUERY
   - "Elenca le ditte" → DITTE_QUERY
   - "Elenca i clienti della ditta 3" → GENERAL_QUERY

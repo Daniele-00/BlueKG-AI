@@ -3,6 +3,9 @@
 content: |
   Rewrite the follow-up question as a complete standalone question using the last chat message.
   - If the last answer lists entities (e.g., LISTA_CLIENTI), explicitly include them if referenced.
+  - Preserve explicit identifiers quoted in the new question (es. "ditta '2'", "cliente 45").
+  - If the new question asks for a "general" view or contradicts previous filters, drop those filters even without explicit hints.
+  - If the scope hint equals RESET_SCOPE, treat it as a request to ignore previous scope unless the question reintroduces constraints.
   - Return ONLY the final standalone question.
 
   Chat History (last message):
@@ -10,5 +13,8 @@ content: |
 
   New Question:
   {question}
+
+  Scope Hint (may be empty):
+  {scope_hint}
 
   Standalone Question:
