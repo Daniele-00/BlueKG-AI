@@ -23,8 +23,10 @@ Script di validazione universale per confrontare approcci Specialist vs Hybrid.
 
 import json
 import math
+import os
 import requests
 from neo4j import GraphDatabase
+from neo4j.exceptions import Neo4jError
 import argparse
 from datetime import datetime
 from pathlib import Path
@@ -80,8 +82,8 @@ SPECIALIST_DIR = SCRIPT_DIR.parent / "chatbot_specialist"
 HYBRID_DIR = SCRIPT_DIR.parent / "chatbot_hybrid"
 
 # Output directories (dentro validation/)
-# VALIDATION_SET = SCRIPT_DIR / "validation_set_2.json"
-VALIDATION_SET = SCRIPT_DIR / "validation_set.json"
+VALIDATION_SET = SCRIPT_DIR / "validation_set_2.json"
+# VALIDATION_SET = SCRIPT_DIR / "validation_set.json"
 RESULTS_DIR = SCRIPT_DIR / "validation_results"
 RESULTS_DIR.mkdir(exist_ok=True)
 
@@ -91,16 +93,24 @@ API_URL = "http://127.0.0.1:8000"
 # Neo4j
 try:
     from dotenv import load_dotenv
-    import os
 
     load_dotenv()
-    NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
-    NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
-    NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "Blue2018")
-except:
-    NEO4J_URI = "bolt://localhost:7687"
-    NEO4J_USER = "neo4j"
-    NEO4J_PASSWORD = "Blue2018"
+except Exception:
+    pass
+
+NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "Blue2018")
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+NEO4J_QUERY_TIMEOUT_SECONDS = _env_float("NEO4J_QUERY_TIMEOUT_SECONDS", 30.0)
 
 # =======================================================================
 # CONFIGURAZIONI MODELLI
@@ -480,8 +490,24 @@ def compare_subset_on_expected_columns(
 
 def run_query(tx, query, params=None):
     """Esegue query e ritorna risultati."""
-    result = tx.run(query, params)
-    return [r.data() for r in result]
+    run_kwargs = {}
+    if NEO4J_QUERY_TIMEOUT_SECONDS and NEO4J_QUERY_TIMEOUT_SECONDS > 0:
+        run_kwargs["timeout"] = int(NEO4J_QUERY_TIMEOUT_SECONDS * 1000)
+
+    try:
+        result = tx.run(query, params or {}, **run_kwargs)
+        return [r.data() for r in result]
+    except Neo4jError as exc:
+        code = getattr(exc, "code", "") or ""
+        message = str(exc)
+        if "Timeout" in code or "timed out" in message.lower():
+            timeout_msg = (
+                f"Neo4j query exceeded the {NEO4J_QUERY_TIMEOUT_SECONDS:.0f}s timeout limit."
+                if NEO4J_QUERY_TIMEOUT_SECONDS
+                else "Neo4j query timed out."
+            )
+            raise TimeoutError(timeout_msg) from exc
+        raise
 
 
 def clear_system_cache():
@@ -724,7 +750,8 @@ def run_validation(approach: str, config_name: str, min_query_sim: float = 0.8):
 
         except Exception as e:
             result["error"] = str(e)[:200]
-            print(f"  FAIL: {str(e)[:120]}")
+            label = "TIMEOUT" if isinstance(e, TimeoutError) else "FAIL"
+            print(f"  {label}: {str(e)[:120]}")
 
         results.append(result)
 

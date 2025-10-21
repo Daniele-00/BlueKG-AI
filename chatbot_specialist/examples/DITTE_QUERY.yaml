@@ -5,12 +5,13 @@ examples:
     WHERE toLower(trim(fam.nome)) = 'centrali frigo' RETURN DISTINCT d.dittaId AS
     ditta ORDER BY ditta
 - id: ditte_query_016_var1
-  question: Variant 1
+  question: 'Variant 1: Quali aziende offrono articoli della serie ''CENTRALI FRIGO''?'
   cypher: MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia)
     WHERE toLower(trim(fam.nome)) = 'centrali frigo' RETURN DISTINCT d.dittaId AS
     ditta ORDER BY ditta
 - id: ditte_query_016_var2
-  question: Quali aziende offrono articoli della serie 'CENTRALI FRIGO'?
+  question: 'Variant 2: Quali imprese commercializzano prodotti della linea ''CENTRALI
+    FRIGO''?'
   cypher: MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia)
     WHERE toLower(trim(fam.nome)) = 'centrali frigo' RETURN DISTINCT d.dittaId AS
     ditta ORDER BY ditta
@@ -19,11 +20,11 @@ examples:
   cypher: 'MATCH (d:Ditta {dittaId: ''1''})<-[:APPARTIENE_A]-(c:Cliente) RETURN count(DISTINCT
     c) AS numeroClientiUnici'
 - id: ditte_query_017_var1
-  question: Quanti sono i clienti unici dell'azienda '1'?
+  question: Variant 1
   cypher: 'MATCH (d:Ditta {dittaId: ''1''})<-[:APPARTIENE_A]-(c:Cliente) RETURN count(DISTINCT
     c) AS numeroClientiUnici'
 - id: ditte_query_017_var2
-  question: Qual è il numero di clienti unici della società '1'?
+  question: Qual è il numero di clienti unici della ditta '1'?
   cypher: 'MATCH (d:Ditta {dittaId: ''1''})<-[:APPARTIENE_A]-(c:Cliente) RETURN count(DISTINCT
     c) AS numeroClientiUnici'
 - id: ditte_query_034
@@ -31,11 +32,11 @@ examples:
   cypher: MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(f:Fornitore) RETURN gf.ragioneSociale
     AS gruppo, count(f) AS numeroFornitori ORDER BY numeroFornitori DESC
 - id: ditte_query_034_var1
-  question: A quanti gruppi di fornitori appartengono i vari fornitori?
+  question: 'Variant 1: A quanti gruppi di fornitori appartengono i vari fornitori?'
   cypher: MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(f:Fornitore) RETURN gf.ragioneSociale
     AS gruppo, count(f) AS numeroFornitori ORDER BY numeroFornitori DESC
 - id: ditte_query_034_var2
-  question: Qual è il numero di fornitori per ogni gruppo di fornitori?
+  question: 'Variant 2: A quale gruppo appartiene ciascun fornitore?'
   cypher: MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(f:Fornitore) RETURN gf.ragioneSociale
     AS gruppo, count(f) AS numeroFornitori ORDER BY numeroFornitori DESC
 - id: ditte_query_077
@@ -44,12 +45,12 @@ examples:
     WHERE toLower(trim(fam.nome)) = 'centrali frigo' RETURN DISTINCT d.dittaId AS
     ditta ORDER BY ditta
 - id: ditte_query_077_var1
-  question: Quali società commercializzano articoli della linea 'CENTRALI FRIGO'?
+  question: Quali società commercializzano articoli della serie 'CENTRALI FRIGO'?
   cypher: MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia)
     WHERE toLower(trim(fam.nome)) = 'centrali frigo' RETURN DISTINCT d.dittaId AS
     ditta ORDER BY ditta
 - id: ditte_query_077_var2
-  question: Quali imprese offrono prodotti appartenenti alla gamma 'CENTRALI FRIGO'?
+  question: Quali imprese offrono prodotti appartenenti alla linea 'CENTRALI FRIGO'?
   cypher: MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia)
     WHERE toLower(trim(fam.nome)) = 'centrali frigo' RETURN DISTINCT d.dittaId AS
     ditta ORDER BY ditta

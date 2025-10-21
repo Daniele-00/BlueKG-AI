@@ -246,8 +246,8 @@
     },
     {
         "id": "TEST-50-Genera la query Cypher per rispondere a questo input in italiano",
-        "input": "Elenca i clienti che hanno acquistato prodotti forniti da fornitori della stessa provincia del cliente.",
-        "output": "MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) WITH c, l.provincia AS provinciaCliente MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:SI_TROVA_A]->(lf:Luogo) WHERE lf.provincia = provinciaCliente WITH c, collect(DISTINCT gf) AS fornitoriLocali MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo) MATCH (a)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)-[:RAGGRUPPATO_SOTTO]->(gf_check:GruppoFornitore) WHERE gf_check IN fornitoriLocali RETURN DISTINCT c.name AS cliente"
+        "input": "Qual è il fornitore con il maggior numero di articoli forniti?",
+        "output": "MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo) RETURN gf.ragioneSociale AS fornitore, count(DISTINCT a) AS numeroArticoli ORDER BY numeroArticoli DESC LIMIT 1"
     },
     {
         "id": "TEST-51-Genera la query Cypher per rispondere a questo input in italiano",
@@ -312,7 +312,7 @@
     {
         "id": "TEST-63-Genera la query Cypher per rispondere a questo input in italiano",
         "input": "Calcola il rapporto tra costo totale e fatturato totale per il prodotto 'GAS FREON SOLSTICE N40 R448A'",
-        "output": "MATCH (a:Articolo) WHERE toLower(trim(a.descrizione)) = 'gas freon solstice n40 r448a' OPTIONAL MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_acq:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore) WITH a, sum(dr_acq.importo) AS costoTotale OPTIONAL MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_ven:RigaDocumento {tipoValore: 'Fatturato'})<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(:Cliente) WHERE dr_ven.importo > 0 WITH costoTotale, sum(dr_ven.importo) AS fatturatoTotale RETURN costoTotale, fatturatoTotale, (fatturatoTotale / costoTotale) AS rapporto"
+        "output": "MATCH (a:Articolo) WHERE toLower(trim(a.descrizione)) = 'gas freon solstice n40 r448a' OPTIONAL MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_acq:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore) WITH a, sum(dr_acq.importo) AS costoTotale OPTIONAL MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_ven:RigaDocumento {tipoValore: 'Fatturato'})<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(:Cliente) WHERE dr_ven.importo > 0 WITH costoTotale, sum(dr_ven.importo) AS fatturatoTotale RETURN  costoTotale, fatturatoTotale, CASE WHEN costoTotale <> 0 THEN fatturatoTotale / costoTotale ELSE null END AS rapporto"
     },
     {
         "id": "TEST-64-Genera la query Cypher per rispondere a questo input in italiano",

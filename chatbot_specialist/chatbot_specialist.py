@@ -14,6 +14,7 @@ import time
 import json
 from datetime import date
 from neo4j.time import Date, DateTime, Time, Duration
+from neo4j.exceptions import Neo4jError
 from pathlib import Path
 
 
@@ -378,6 +379,67 @@ except Exception as e:
     raise
 
 
+class QueryTimeoutError(RuntimeError):
+    """Raised when a Neo4j query exceeds the configured timeout."""
+
+
+def _parse_positive_float(value: Optional[float]) -> Optional[float]:
+    try:
+        if value is None:
+            return None
+        parsed = float(value)
+        if parsed <= 0:
+            return None
+        return parsed
+    except (TypeError, ValueError):
+        return None
+
+
+def get_query_timeout_seconds() -> Optional[float]:
+    """Return the configured Neo4j query timeout in seconds, if any."""
+
+    try:
+        ql_cfg = config.system.get("query_limits", {}) or {}
+        return _parse_positive_float(ql_cfg.get("query_timeout_seconds"))
+    except Exception:
+        return None
+
+
+def execute_cypher_with_timeout(
+    query: str, params: Optional[Dict[str, Any]] = None, timeout_seconds: Optional[float] = None
+) -> List[Dict[str, Any]]:
+    """Execute a Cypher query enforcing the configured timeout."""
+
+    effective_timeout = timeout_seconds
+    if effective_timeout is None:
+        effective_timeout = get_query_timeout_seconds()
+
+    timeout_ms = None
+    if effective_timeout:
+        timeout_ms = max(1, int(effective_timeout * 1000))
+
+    run_kwargs = {}
+    if timeout_ms:
+        run_kwargs["timeout"] = timeout_ms
+
+    try:
+        with graph._driver.session() as session:  # type: ignore[attr-defined]
+            result = session.run(query, params or {}, **run_kwargs)
+            return [record.data() for record in result]
+    except Neo4jError as exc:
+        code = getattr(exc, "code", "") or ""
+        message = str(exc)
+        if "Timeout" in code or "timed out" in message.lower():
+            if effective_timeout:
+                human_msg = (
+                    f"Neo4j query exceeded the {effective_timeout:.0f}s timeout limit."
+                )
+            else:
+                human_msg = "Neo4j query timed out during execution."
+            raise QueryTimeoutError(human_msg) from exc
+        raise
+
+
 # Definizione degli schemi per le richieste e le risposte
 class ConversationMessage(BaseModel):
     timestamp: datetime
@@ -548,7 +610,7 @@ def correggi_nomi_fuzzy_neo4j(question: str) -> tuple[str, list]:
                 ORDER BY score DESC
                 LIMIT 1
                 """
-                result = graph.query(query)
+                result = execute_cypher_with_timeout(query)
 
                 if result and result[0]["score"] > best_score:
                     best_match = result[0]["nome"]
@@ -979,7 +1041,7 @@ async def health_check():
     """Endpoint per verificare lo stato dell'API"""
     try:
         # Ottieni lo stato del database Neo4j
-        graph.query("RETURN 1")
+        execute_cypher_with_timeout("RETURN 1")
         return {
             "status": "online",
             "message": "API BlueAI operativa",
@@ -1154,10 +1216,16 @@ async def ask_question(user_question: UserQuestionWithSession):
             pass
         for attempt_idx in range(1, attempts + 1):
             try:
-                context_completo = graph.query(current_query)
+                context_completo = execute_cypher_with_timeout(current_query)
                 generated_query = current_query
                 last_error_msg = None
                 break
+            except QueryTimeoutError as timeout_exc:
+                last_error_msg = str(timeout_exc)
+                logger.error(
+                    f"Tentativo {attempt_idx}/{attempts} fallito per timeout della query Neo4j: {last_error_msg}"
+                )
+                raise
             except Exception as e:
                 last_error_msg = str(e)
                 logger.warning(
@@ -1258,6 +1326,11 @@ async def ask_question(user_question: UserQuestionWithSession):
             "timing_details": timing_details,
         }
 
+    except QueryTimeoutError as e:
+        logger.error(
+            f"Timeout durante l'esecuzione della query Neo4j: {e}", exc_info=False
+        )
+        raise HTTPException(status_code=504, detail=str(e))
     except Exception as e:
         logger.error(
             f"ERRORE GRAVE nel flusso ad agenti specializzati: {e}", exc_info=True

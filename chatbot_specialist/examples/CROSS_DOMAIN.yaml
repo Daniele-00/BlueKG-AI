@@ -58,107 +58,90 @@ examples:
     WHERE NOT EXISTS { MATCH (a)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)
     } RETURN DISTINCT a.descrizione AS prodotto ORDER BY prodotto LIMIT 5
 - id: cross_domain_025_var2
-  question: Variant 2
+  question: Quali sono 5 prodotti che abbiamo venduto senza mai comprarli?
   cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
     WHERE NOT EXISTS { MATCH (a)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)
     } RETURN DISTINCT a.descrizione AS prodotto ORDER BY prodotto LIMIT 5
 - id: cross_domain_026
   question: Elenca 5 prodotti che abbiamo acquistato ma mai venduto
-  cypher: MATCH (f:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
-    WHERE NOT EXISTS { MATCH (a)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(:Cliente)
-    } RETURN DISTINCT a.descrizione AS prodotto ORDER BY prodotto LIMIT 5
+  cypher: 'MATCH (a:Articolo)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)
+    WHERE NOT (a)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento {tipoValore: ''Fatturato''})
+    RETURN DISTINCT a.descrizione AS prodottoMaiVenduto
+    ORDER BY prodottoMaiVenduto LIMIT 5'
 - id: cross_domain_026_var1
   question: Variant 1
-  cypher: MATCH (f:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
-    WHERE NOT EXISTS { MATCH (a)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(:Cliente)
-    } RETURN DISTINCT a.descrizione AS prodotto ORDER BY prodotto LIMIT 5
-- id: cross_domain_026_var2
-  question: Quali sono 5 articoli che abbiamo comprato ma non venduto?
-  cypher: MATCH (f:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
-    WHERE NOT EXISTS { MATCH (a)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(:Cliente)
-    } RETURN DISTINCT a.descrizione AS prodotto ORDER BY prodotto LIMIT 5
-- id: cross_domain_050
-  question: Elenca i clienti che hanno acquistato prodotti forniti da fornitori della
-    stessa provincia del cliente.
-  cypher: MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) WITH c, l.provincia AS provinciaCliente
-    MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:SI_TROVA_A]->(lf:Luogo)
-    WHERE lf.provincia = provinciaCliente WITH c, collect(DISTINCT gf) AS fornitoriLocali
-    MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
-    MATCH (a)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)-[:RAGGRUPPATO_SOTTO]->(gf_check:GruppoFornitore)
-    WHERE gf_check IN fornitoriLocali RETURN DISTINCT c.name AS cliente
-- id: cross_domain_050_var1
-  question: Variant 1
-  cypher: MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) WITH c, l.provincia AS provinciaCliente
-    MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:SI_TROVA_A]->(lf:Luogo)
-    WHERE lf.provincia = provinciaCliente WITH c, collect(DISTINCT gf) AS fornitoriLocali
-    MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
-    MATCH (a)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)-[:RAGGRUPPATO_SOTTO]->(gf_check:GruppoFornitore)
-    WHERE gf_check IN fornitoriLocali RETURN DISTINCT c.name AS cliente
-- id: cross_domain_050_var2
-  question: Indica i clienti che hanno comprato prodotti da fornitori situati nella
-    stessa provincia del cliente.
-  cypher: MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) WITH c, l.provincia AS provinciaCliente
-    MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:SI_TROVA_A]->(lf:Luogo)
-    WHERE lf.provincia = provinciaCliente WITH c, collect(DISTINCT gf) AS fornitoriLocali
-    MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
-    MATCH (a)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)-[:RAGGRUPPATO_SOTTO]->(gf_check:GruppoFornitore)
-    WHERE gf_check IN fornitoriLocali RETURN DISTINCT c.name AS cliente
+  cypher: 'MATCH (a:Articolo)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)
+    WHERE NOT (a)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento {tipoValore: ''Fatturato''})
+    RETURN DISTINCT a.descrizione AS prodottoMaiVenduto
+    ORDER BY prodottoMaiVenduto LIMIT 5'
+  question: Variant 2
+  cypher: 'MATCH (a:Articolo)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)
+    WHERE NOT (a)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento {tipoValore: ''Fatturato''})
+    RETURN DISTINCT a.descrizione AS prodottoMaiVenduto
+    ORDER BY prodottoMaiVenduto LIMIT 5'
 - id: cross_domain_051
   question: Chi sono i principali fornitori degli articoli venduti al nostro miglior
     cliente?
   cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
     WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH c, sum(dr.importo) AS
-    fatturato ORDER BY fatturato DESC LIMIT 1 MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
-    WITH collect(DISTINCT a) AS articoliTop MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a_check:Articolo)
-    WHERE a_check IN articoliTop RETURN gf.ragioneSociale as fornitore, sum(dr.importo)
-    AS valoreAcquistato ORDER BY valoreAcquistato DESC
+    fatturatoCliente ORDER BY fatturatoCliente DESC LIMIT 1 WITH c AS topCliente MATCH
+    (topCliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    WITH topCliente, collect(DISTINCT a) AS articoliDelTopCliente MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    WHERE a IN articoliDelTopCliente RETURN gf.ragioneSociale AS fornitore, count(DISTINCT
+    a) AS numeroArticoliDiversiForniti ORDER BY numeroArticoliDiversiForniti DESC
 - id: cross_domain_051_var1
-  question: Quali sono i fornitori principali degli articoli che vendiamo al nostro
-    cliente più importante?
+  question: Quali sono i fornitori principali degli articoli venduti al nostro cliente
+    più importante?
   cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
     WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH c, sum(dr.importo) AS
-    fatturato ORDER BY fatturato DESC LIMIT 1 MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
-    WITH collect(DISTINCT a) AS articoliTop MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a_check:Articolo)
-    WHERE a_check IN articoliTop RETURN gf.ragioneSociale as fornitore, sum(dr.importo)
-    AS valoreAcquistato ORDER BY valoreAcquistato DESC
+    fatturatoCliente ORDER BY fatturatoCliente DESC LIMIT 1 WITH c AS topCliente MATCH
+    (topCliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    WITH topCliente, collect(DISTINCT a) AS articoliDelTopCliente MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    WHERE a IN articoliDelTopCliente RETURN gf.ragioneSociale AS fornitore, count(DISTINCT
+    a) AS numeroArticoliDiversiForniti ORDER BY numeroArticoliDiversiForniti DESC
 - id: cross_domain_051_var2
-  question: Quali sono i principali fornitori dei prodotti venduti al nostro cliente
-    migliore?
+  question: Quali fornitori forniscono principalmente gli articoli venduti al nostro
+    cliente migliore?
   cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
     WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH c, sum(dr.importo) AS
-    fatturato ORDER BY fatturato DESC LIMIT 1 MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
-    WITH collect(DISTINCT a) AS articoliTop MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a_check:Articolo)
-    WHERE a_check IN articoliTop RETURN gf.ragioneSociale as fornitore, sum(dr.importo)
-    AS valoreAcquistato ORDER BY valoreAcquistato DESC
+    fatturatoCliente ORDER BY fatturatoCliente DESC LIMIT 1 WITH c AS topCliente MATCH
+    (topCliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    WITH topCliente, collect(DISTINCT a) AS articoliDelTopCliente MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    WHERE a IN articoliDelTopCliente RETURN gf.ragioneSociale AS fornitore, count(DISTINCT
+    a) AS numeroArticoliDiversiForniti ORDER BY numeroArticoliDiversiForniti DESC
 - id: cross_domain_052
   question: Quali sono le famiglie di prodotti vendute sia dalla ditta '1' che dalla
     ditta '2'?
-  cypher: 'MATCH (d1:Ditta {ditta: ''1''})<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia)
-    WITH collect(DISTINCT fam) AS famiglieDitta1 MATCH (d2:Ditta {ditta: ''2''})<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam_check:Famiglia)
-    WHERE fam_check IN famiglieDitta1 RETURN fam_check.nome AS famigliaComune'
+  cypher: 'MATCH (fam1:Famiglia)<-[:INCLUSA_IN*0..]-(:Sottofamiglia)<-[:APPARTIENE_A]-(:Articolo)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(:Cliente)-[:APPARTIENE_A]->(:Ditta
+    {dittaId: ''1''}) WITH collect(DISTINCT fam1) AS famiglieDitta1 MATCH (fam2:Famiglia)<-[:INCLUSA_IN*0..]-(:Sottofamiglia)<-[:APPARTIENE_A]-(:Articolo)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(:Cliente)-[:APPARTIENE_A]->(:Ditta
+    {dittaId: ''2''}) WHERE fam2 IN famiglieDitta1 RETURN DISTINCT fam2.nome AS famigliaComune
+    ORDER BY famigliaComune'
 - id: cross_domain_052_var1
   question: Variant 1
-  cypher: 'MATCH (d1:Ditta {ditta: ''1''})<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia)
-    WITH collect(DISTINCT fam) AS famiglieDitta1 MATCH (d2:Ditta {ditta: ''2''})<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam_check:Famiglia)
-    WHERE fam_check IN famiglieDitta1 RETURN fam_check.nome AS famigliaComune'
+  cypher: 'MATCH (fam1:Famiglia)<-[:INCLUSA_IN*0..]-(:Sottofamiglia)<-[:APPARTIENE_A]-(:Articolo)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(:Cliente)-[:APPARTIENE_A]->(:Ditta
+    {dittaId: ''1''}) WITH collect(DISTINCT fam1) AS famiglieDitta1 MATCH (fam2:Famiglia)<-[:INCLUSA_IN*0..]-(:Sottofamiglia)<-[:APPARTIENE_A]-(:Articolo)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(:Cliente)-[:APPARTIENE_A]->(:Ditta
+    {dittaId: ''2''}) WHERE fam2 IN famiglieDitta1 RETURN DISTINCT fam2.nome AS famigliaComune
+    ORDER BY famigliaComune'
 - id: cross_domain_052_var2
   question: Quali categorie di prodotti sono offerte sia dall'azienda '1' che dall'azienda
     '2'?
-  cypher: 'MATCH (d1:Ditta {ditta: ''1''})<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia)
-    WITH collect(DISTINCT fam) AS famiglieDitta1 MATCH (d2:Ditta {ditta: ''2''})<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam_check:Famiglia)
-    WHERE fam_check IN famiglieDitta1 RETURN fam_check.nome AS famigliaComune'
+  cypher: 'MATCH (fam1:Famiglia)<-[:INCLUSA_IN*0..]-(:Sottofamiglia)<-[:APPARTIENE_A]-(:Articolo)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(:Cliente)-[:APPARTIENE_A]->(:Ditta
+    {dittaId: ''1''}) WITH collect(DISTINCT fam1) AS famiglieDitta1 MATCH (fam2:Famiglia)<-[:INCLUSA_IN*0..]-(:Sottofamiglia)<-[:APPARTIENE_A]-(:Articolo)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(:Cliente)-[:APPARTIENE_A]->(:Ditta
+    {dittaId: ''2''}) WHERE fam2 IN famiglieDitta1 RETURN DISTINCT fam2.nome AS famigliaComune
+    ORDER BY famigliaComune'
 - id: cross_domain_053
   question: Mostrami 5 prodotti che abbiamo acquistato ma mai venduto.
   cypher: 'MATCH (a:Articolo)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)
     WITH DISTINCT a WHERE NOT (a)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento {tipoValore:
     ''Fatturato''}) RETURN a.descrizione AS prodottoMaiVenduto LIMIT 5'
 - id: cross_domain_053_var1
-  question: Fammi vedere 5 articoli che abbiamo comprato ma non venduto.
+  question: Fammi vedere 5 prodotti che abbiamo comprato ma non venduto.
   cypher: 'MATCH (a:Articolo)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)
     WITH DISTINCT a WHERE NOT (a)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento {tipoValore:
     ''Fatturato''}) RETURN a.descrizione AS prodottoMaiVenduto LIMIT 5'
 - id: cross_domain_053_var2
-  question: Elenca 5 prodotti che sono stati acquistati ma non sono mai stati venduti.
+  question: Visualizza 5 articoli che sono stati acquistati ma non sono mai stati
+    venduti.
   cypher: 'MATCH (a:Articolo)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)
     WITH DISTINCT a WHERE NOT (a)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento {tipoValore:
     ''Fatturato''}) RETURN a.descrizione AS prodottoMaiVenduto LIMIT 5'
@@ -170,7 +153,8 @@ examples:
     WITH a, sum(dr_acq.importo) AS costoTotale OPTIONAL MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_ven:RigaDocumento
     {tipoValore: ''Fatturato''})<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(:Cliente)
     WHERE dr_ven.importo > 0 WITH costoTotale, sum(dr_ven.importo) AS fatturatoTotale
-    RETURN costoTotale, fatturatoTotale, (fatturatoTotale / costoTotale) AS rapporto'
+    RETURN  costoTotale, fatturatoTotale, CASE WHEN costoTotale <> 0 THEN fatturatoTotale
+    / costoTotale ELSE null END AS rapporto'
 - id: cross_domain_063_var1
   question: Variant 1
   cypher: 'MATCH (a:Articolo) WHERE toLower(trim(a.descrizione)) = ''gas freon solstice
@@ -178,7 +162,8 @@ examples:
     WITH a, sum(dr_acq.importo) AS costoTotale OPTIONAL MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_ven:RigaDocumento
     {tipoValore: ''Fatturato''})<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(:Cliente)
     WHERE dr_ven.importo > 0 WITH costoTotale, sum(dr_ven.importo) AS fatturatoTotale
-    RETURN costoTotale, fatturatoTotale, (fatturatoTotale / costoTotale) AS rapporto'
+    RETURN  costoTotale, fatturatoTotale, CASE WHEN costoTotale <> 0 THEN fatturatoTotale
+    / costoTotale ELSE null END AS rapporto'
 - id: cross_domain_063_var2
   question: Variant 2
   cypher: 'MATCH (a:Articolo) WHERE toLower(trim(a.descrizione)) = ''gas freon solstice
@@ -186,27 +171,41 @@ examples:
     WITH a, sum(dr_acq.importo) AS costoTotale OPTIONAL MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_ven:RigaDocumento
     {tipoValore: ''Fatturato''})<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(:Cliente)
     WHERE dr_ven.importo > 0 WITH costoTotale, sum(dr_ven.importo) AS fatturatoTotale
-    RETURN costoTotale, fatturatoTotale, (fatturatoTotale / costoTotale) AS rapporto'
-- id: cross_domain_081
-  question: Trova i prodotti in comune venduti all'azienda '1' e acquistati dal fornitore
-    'FORNITORE ESEMPIO SPA'.
-  cypher: 'MATCH (d:Ditta {dittaId: ''1''})<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
-    WITH collect(DISTINCT a) AS prodottiVenduti MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a2:Articolo)
-    WHERE toLower(trim(gf.ragioneSociale)) = ''fornitore esempio spa'' AND a2 IN prodottiVenduti
-    RETURN a2.descrizione AS prodottoComune'
-- id: cross_domain_081_var1
-  question: Variant 1
-  cypher: 'MATCH (d:Ditta {dittaId: ''1''})<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
-    WITH collect(DISTINCT a) AS prodottiVenduti MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a2:Articolo)
-    WHERE toLower(trim(gf.ragioneSociale)) = ''fornitore esempio spa'' AND a2 IN prodottiVenduti
-    RETURN a2.descrizione AS prodottoComune'
-- id: cross_domain_081_var2
-  question: Individua i prodotti condivisi che l'azienda '1' vende e che il fornitore
-    'FORNITORE ESEMPIO SPA' acquista.
-  cypher: 'MATCH (d:Ditta {dittaId: ''1''})<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
-    WITH collect(DISTINCT a) AS prodottiVenduti MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a2:Articolo)
-    WHERE toLower(trim(gf.ragioneSociale)) = ''fornitore esempio spa'' AND a2 IN prodottiVenduti
-    RETURN a2.descrizione AS prodottoComune'
+    RETURN  costoTotale, fatturatoTotale, CASE WHEN costoTotale <> 0 THEN fatturatoTotale
+    / costoTotale ELSE null END AS rapporto'
+- id: cross_domain_082
+  question: Per i primi 3 clienti per fatturato, mostra il loro prodotto più acquistato
+    per valore.
+  cypher: 'MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = ''Fatturato'' AND dr.importo > 0 WITH c, sum(dr.importo)
+    AS fatturatoCliente ORDER BY fatturatoCliente DESC LIMIT 3 MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr2:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    WHERE dr2.tipoValore = ''Fatturato'' AND dr2.importo > 0 WITH c, a, sum(dr2.importo)
+    AS valoreProdotto ORDER BY c.name, valoreProdotto DESC WITH c, head(collect({prodotto:
+    a.descrizione, valore: valoreProdotto})) AS topProdotto RETURN c.name AS cliente,
+    topProdotto.prodotto AS prodottoTop, topProdotto.valore AS valoreTop ORDER BY
+    c.name'
+- id: cross_domain_082_var1
+  question: 'Variant 1: Per i tre clienti principali in termini di fatturato, indica
+    il prodotto che hanno acquistato di più in valore.'
+  cypher: 'MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = ''Fatturato'' AND dr.importo > 0 WITH c, sum(dr.importo)
+    AS fatturatoCliente ORDER BY fatturatoCliente DESC LIMIT 3 MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr2:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    WHERE dr2.tipoValore = ''Fatturato'' AND dr2.importo > 0 WITH c, a, sum(dr2.importo)
+    AS valoreProdotto ORDER BY c.name, valoreProdotto DESC WITH c, head(collect({prodotto:
+    a.descrizione, valore: valoreProdotto})) AS topProdotto RETURN c.name AS cliente,
+    topProdotto.prodotto AS prodottoTop, topProdotto.valore AS valoreTop ORDER BY
+    c.name'
+- id: cross_domain_082_var2
+  question: 'Variant 2: Mostra il prodotto con il valore d''acquisto più alto per
+    i primi tre clienti per fatturato.'
+  cypher: 'MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    WHERE dr.tipoValore = ''Fatturato'' AND dr.importo > 0 WITH c, sum(dr.importo)
+    AS fatturatoCliente ORDER BY fatturatoCliente DESC LIMIT 3 MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr2:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    WHERE dr2.tipoValore = ''Fatturato'' AND dr2.importo > 0 WITH c, a, sum(dr2.importo)
+    AS valoreProdotto ORDER BY c.name, valoreProdotto DESC WITH c, head(collect({prodotto:
+    a.descrizione, valore: valoreProdotto})) AS topProdotto RETURN c.name AS cliente,
+    topProdotto.prodotto AS prodottoTop, topProdotto.valore AS valoreTop ORDER BY
+    c.name'
 - id: cross_domain_083
   question: Quali clienti hanno effettuato ordini ma non hanno ancora ricevuto una
     fattura?
@@ -214,14 +213,13 @@ examples:
     {tipoValore: ''Ordinato''}) WITH DISTINCT c MATCH (c) WHERE NOT (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento
     {tipoValore: ''Fatturato''}) RETURN c.name AS clienteSenzaFattura'
 - id: cross_domain_083_var1
-  question: 'Variant 1: Quali sono i clienti che hanno fatto ordini ma non hanno ricevuto
-    ancora una fattura?'
+  question: Variant 1
   cypher: 'MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento
     {tipoValore: ''Ordinato''}) WITH DISTINCT c MATCH (c) WHERE NOT (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento
     {tipoValore: ''Fatturato''}) RETURN c.name AS clienteSenzaFattura'
 - id: cross_domain_083_var2
-  question: 'Variant 2: Chi sono i clienti che hanno ordinato ma non hanno ancora
-    ottenuto una fattura?'
+  question: Quali sono i clienti che hanno fatto ordini ma non hanno ricevuto ancora
+    una fattura?
   cypher: 'MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento
     {tipoValore: ''Ordinato''}) WITH DISTINCT c MATCH (c) WHERE NOT (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento
     {tipoValore: ''Fatturato''}) RETURN c.name AS clienteSenzaFattura'
@@ -231,45 +229,54 @@ examples:
   cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
     WITH a, sum(dr.quantita) AS quantitaTotale ORDER BY quantitaTotale DESC LIMIT
     1 MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_acq:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)
-    RETURN a.descrizione AS prodotto, avg(dr_acq.importo / dr_acq.quantita) AS costoMedioUnitario
+    RETURN a.descrizione AS prodotto, avg(CASE WHEN dr_acq.quantita = 0 OR dr_acq.quantita
+    IS NULL THEN null ELSE dr_acq.importo / dr_acq.quantita END) AS costoMedioUnitario
 - id: cross_domain_087_var1
   question: 'Variant 1: Qual è il costo medio di acquisto del prodotto venduto in
     maggior quantità?'
   cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
     WITH a, sum(dr.quantita) AS quantitaTotale ORDER BY quantitaTotale DESC LIMIT
     1 MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_acq:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)
-    RETURN a.descrizione AS prodotto, avg(dr_acq.importo / dr_acq.quantita) AS costoMedioUnitario
+    RETURN a.descrizione AS prodotto, avg(CASE WHEN dr_acq.quantita = 0 OR dr_acq.quantita
+    IS NULL THEN null ELSE dr_acq.importo / dr_acq.quantita END) AS costoMedioUnitario
 - id: cross_domain_087_var2
   question: 'Variant 2: Qual è il prezzo medio di acquisto del prodotto con il maggior
     numero di vendite?'
   cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
     WITH a, sum(dr.quantita) AS quantitaTotale ORDER BY quantitaTotale DESC LIMIT
     1 MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_acq:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)
-    RETURN a.descrizione AS prodotto, avg(dr_acq.importo / dr_acq.quantita) AS costoMedioUnitario
+    RETURN a.descrizione AS prodotto, avg(CASE WHEN dr_acq.quantita = 0 OR dr_acq.quantita
+    IS NULL THEN null ELSE dr_acq.importo / dr_acq.quantita END) AS costoMedioUnitario
 - id: cross_domain_092
   question: Ci sono prodotti venduti a un prezzo inferiore al loro costo medio di
     acquisto?
   cypher: MATCH (a:Articolo) OPTIONAL MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_acq:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)
-    WITH a, avg(dr_acq.importo / dr_acq.quantita) AS costoMedio OPTIONAL MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_ven:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(:Cliente)
+    WITH a, avg(CASE WHEN dr_acq.quantita = 0 OR dr_acq.quantita IS NULL THEN null
+    ELSE dr_acq.importo / dr_acq.quantita END) AS costoMedio OPTIONAL MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_ven:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(:Cliente)
     WHERE dr_ven.tipoValore = 'Fatturato' AND dr_ven.importo > 0 WITH a, costoMedio,
-    avg(dr_ven.importo / dr_ven.quantita) AS prezzoMedioVendita WHERE prezzoMedioVendita
-    < costoMedio RETURN a.descrizione AS prodottoInPerdita
+    avg(CASE WHEN dr_ven.quantita = 0 OR dr_ven.quantita IS NULL THEN null ELSE dr_ven.importo
+    / dr_ven.quantita END) AS prezzoMedioVendita WHERE prezzoMedioVendita < costoMedio
+    RETURN a.descrizione AS prodottoInPerdita
 - id: cross_domain_092_var1
   question: Esistono articoli venduti a un prezzo più basso rispetto al loro costo
     medio di acquisto?
   cypher: MATCH (a:Articolo) OPTIONAL MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_acq:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)
-    WITH a, avg(dr_acq.importo / dr_acq.quantita) AS costoMedio OPTIONAL MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_ven:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(:Cliente)
+    WITH a, avg(CASE WHEN dr_acq.quantita = 0 OR dr_acq.quantita IS NULL THEN null
+    ELSE dr_acq.importo / dr_acq.quantita END) AS costoMedio OPTIONAL MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_ven:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(:Cliente)
     WHERE dr_ven.tipoValore = 'Fatturato' AND dr_ven.importo > 0 WITH a, costoMedio,
-    avg(dr_ven.importo / dr_ven.quantita) AS prezzoMedioVendita WHERE prezzoMedioVendita
-    < costoMedio RETURN a.descrizione AS prodottoInPerdita
+    avg(CASE WHEN dr_ven.quantita = 0 OR dr_ven.quantita IS NULL THEN null ELSE dr_ven.importo
+    / dr_ven.quantita END) AS prezzoMedioVendita WHERE prezzoMedioVendita < costoMedio
+    RETURN a.descrizione AS prodottoInPerdita
 - id: cross_domain_092_var2
   question: Vi sono prodotti che vengono venduti a un prezzo inferiore rispetto al
     loro costo medio di acquisto?
   cypher: MATCH (a:Articolo) OPTIONAL MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_acq:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)
-    WITH a, avg(dr_acq.importo / dr_acq.quantita) AS costoMedio OPTIONAL MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_ven:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(:Cliente)
+    WITH a, avg(CASE WHEN dr_acq.quantita = 0 OR dr_acq.quantita IS NULL THEN null
+    ELSE dr_acq.importo / dr_acq.quantita END) AS costoMedio OPTIONAL MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_ven:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(:Cliente)
     WHERE dr_ven.tipoValore = 'Fatturato' AND dr_ven.importo > 0 WITH a, costoMedio,
-    avg(dr_ven.importo / dr_ven.quantita) AS prezzoMedioVendita WHERE prezzoMedioVendita
-    < costoMedio RETURN a.descrizione AS prodottoInPerdita
+    avg(CASE WHEN dr_ven.quantita = 0 OR dr_ven.quantita IS NULL THEN null ELSE dr_ven.importo
+    / dr_ven.quantita END) AS prezzoMedioVendita WHERE prezzoMedioVendita < costoMedio
+    RETURN a.descrizione AS prodottoInPerdita
 - id: cross_domain_103
   question: Per il cliente 'ACME SRL', confronta il totale ordinato e il totale fatturato.
   cypher: 'MATCH (c:Cliente) WHERE toLower(trim(c.name)) = ''acme srl'' OPTIONAL MATCH
@@ -278,15 +285,16 @@ examples:
     {tipoValore: ''Fatturato''}) WHERE dr_fat.importo > 0 RETURN totaleOrdinato, sum(dr_fat.importo)
     AS totaleFatturato'
 - id: cross_domain_103_var1
-  question: Variant 1
+  question: Confronta il totale degli ordini e il totale delle fatture per il cliente
+    'ACME SRL'.
   cypher: 'MATCH (c:Cliente) WHERE toLower(trim(c.name)) = ''acme srl'' OPTIONAL MATCH
     (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr_ord:RigaDocumento {tipoValore:
     ''Ordinato''}) WITH c, sum(dr_ord.importo) AS totaleOrdinato OPTIONAL MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr_fat:RigaDocumento
     {tipoValore: ''Fatturato''}) WHERE dr_fat.importo > 0 RETURN totaleOrdinato, sum(dr_fat.importo)
     AS totaleFatturato'
 - id: cross_domain_103_var2
-  question: Per il cliente 'ACME SRL', metti a confronto il totale degli ordini e
-    il totale delle fatture.
+  question: Per il cliente 'ACME SRL', verifica la differenza tra il totale degli
+    ordini e il totale delle fatture.
   cypher: 'MATCH (c:Cliente) WHERE toLower(trim(c.name)) = ''acme srl'' OPTIONAL MATCH
     (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr_ord:RigaDocumento {tipoValore:
     ''Ordinato''}) WITH c, sum(dr_ord.importo) AS totaleOrdinato OPTIONAL MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr_fat:RigaDocumento
@@ -294,25 +302,19 @@ examples:
     AS totaleFatturato'
 - id: cross_domain_106
   question: Mostrami il totale fatturato e il totale ordinato per ciascuna ditta.
-  cypher: 'MATCH (d:Ditta)<-[:APPARTIENE_A]-(c:Cliente) OPTIONAL MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr_ord:RigaDocumento
-    {tipoValore: ''Ordinato''}) WITH d, c, sum(dr_ord.importo) AS totaleOrdinato OPTIONAL
-    MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr_fat:RigaDocumento
-    {tipoValore: ''Fatturato''}) WHERE dr_fat.importo > 0 WITH d, sum(totaleOrdinato)
-    AS totaleOrdinatoDitta, sum(dr_fat.importo) AS totaleFatturatoDitta RETURN d.dittaId
-    AS ditta, totaleOrdinatoDitta, totaleFatturatoDitta'
+  cypher: MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    RETURN d.dittaId AS ditta, sum(CASE dr.tipoValore WHEN 'Fatturato' THEN dr.importo
+    ELSE 0 END) AS totaleFatturato, sum(CASE dr.tipoValore WHEN 'Ordinato' THEN dr.importo
+    ELSE 0 END) AS totaleOrdinato ORDER BY ditta ASC
 - id: cross_domain_106_var1
   question: Variant 1
-  cypher: 'MATCH (d:Ditta)<-[:APPARTIENE_A]-(c:Cliente) OPTIONAL MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr_ord:RigaDocumento
-    {tipoValore: ''Ordinato''}) WITH d, c, sum(dr_ord.importo) AS totaleOrdinato OPTIONAL
-    MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr_fat:RigaDocumento
-    {tipoValore: ''Fatturato''}) WHERE dr_fat.importo > 0 WITH d, sum(totaleOrdinato)
-    AS totaleOrdinatoDitta, sum(dr_fat.importo) AS totaleFatturatoDitta RETURN d.dittaId
-    AS ditta, totaleOrdinatoDitta, totaleFatturatoDitta'
+  cypher: MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    RETURN d.dittaId AS ditta, sum(CASE dr.tipoValore WHEN 'Fatturato' THEN dr.importo
+    ELSE 0 END) AS totaleFatturato, sum(CASE dr.tipoValore WHEN 'Ordinato' THEN dr.importo
+    ELSE 0 END) AS totaleOrdinato ORDER BY ditta ASC
 - id: cross_domain_106_var2
-  question: Visualizza il totale delle vendite e degli ordini per ogni azienda.
-  cypher: 'MATCH (d:Ditta)<-[:APPARTIENE_A]-(c:Cliente) OPTIONAL MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr_ord:RigaDocumento
-    {tipoValore: ''Ordinato''}) WITH d, c, sum(dr_ord.importo) AS totaleOrdinato OPTIONAL
-    MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr_fat:RigaDocumento
-    {tipoValore: ''Fatturato''}) WHERE dr_fat.importo > 0 WITH d, sum(totaleOrdinato)
-    AS totaleOrdinatoDitta, sum(dr_fat.importo) AS totaleFatturatoDitta RETURN d.dittaId
-    AS ditta, totaleOrdinatoDitta, totaleFatturatoDitta'
+  question: Fammi vedere il totale delle vendite e degli ordini per ogni azienda.
+  cypher: MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+    RETURN d.dittaId AS ditta, sum(CASE dr.tipoValore WHEN 'Fatturato' THEN dr.importo
+    ELSE 0 END) AS totaleFatturato, sum(CASE dr.tipoValore WHEN 'Ordinato' THEN dr.importo
+    ELSE 0 END) AS totaleOrdinato ORDER BY ditta ASC

@@ -11,8 +11,8 @@ examples:
     n40 r448a' WITH a MATCH (c:Cliente) WHERE NOT (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a)
     RETURN c.name AS cliente ORDER BY cliente LIMIT 5
 - id: general_query_019_var2
-  question: Indica 5 clienti che non hanno mai comprato il prodotto 'GAS FREON SOLSTICE
-    N40 R448A'
+  question: Quali sono 5 clienti che non hanno mai comprato il prodotto 'GAS FREON
+    SOLSTICE N40 R448A'?
   cypher: MATCH (a:Articolo) WHERE toLower(trim(a.descrizione)) = 'gas freon solstice
     n40 r448a' WITH a MATCH (c:Cliente) WHERE NOT (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a)
     RETURN c.name AS cliente ORDER BY cliente LIMIT 5
@@ -36,42 +36,41 @@ examples:
     SRL'
   cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType)
     WHERE toLower(trim(c.name)) = 'l\'abbondanza srl' AND dt.codice = 'FVC' AND doc.dataEmissione.year
-    = 2025 AND doc.dataEmissione.month = 1 RETURN doc.documentoid AS documento LIMIT
+    = 2025 AND doc.dataEmissione.month = 1 RETURN doc.documentoId AS documento LIMIT
     10
 - id: general_query_022_var1
   question: Variant 1
   cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType)
     WHERE toLower(trim(c.name)) = 'l\'abbondanza srl' AND dt.codice = 'FVC' AND doc.dataEmissione.year
-    = 2025 AND doc.dataEmissione.month = 1 RETURN doc.documentoid AS documento LIMIT
+    = 2025 AND doc.dataEmissione.month = 1 RETURN doc.documentoId AS documento LIMIT
     10
 - id: general_query_022_var2
   question: Fammi vedere 10 documenti di categoria 'FVC' rilasciati a Gennaio 2025
     al cliente 'L'ABBONDANZA SRL'
   cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType)
     WHERE toLower(trim(c.name)) = 'l\'abbondanza srl' AND dt.codice = 'FVC' AND doc.dataEmissione.year
-    = 2025 AND doc.dataEmissione.month = 1 RETURN doc.documentoid AS documento LIMIT
+    = 2025 AND doc.dataEmissione.month = 1 RETURN doc.documentoId AS documento LIMIT
     10
 - id: general_query_028
   question: Elenca le sottofamiglie della famiglia 'CENTRALI FRIGO'
   cypher: MATCH (f:Famiglia)<-[:INCLUSA_IN]-(sf:Sottofamiglia) WHERE toLower(trim(f.nome))
     = 'centrali frigo' RETURN DISTINCT sf.nome AS sottofamiglia ORDER BY sottofamiglia
 - id: general_query_028_var1
-  question: 'Variant 1: Quali sono le sottofamiglie appartenenti alla famiglia ''CENTRALI
-    FRIGO''?'
+  question: Variant 1
   cypher: MATCH (f:Famiglia)<-[:INCLUSA_IN]-(sf:Sottofamiglia) WHERE toLower(trim(f.nome))
     = 'centrali frigo' RETURN DISTINCT sf.nome AS sottofamiglia ORDER BY sottofamiglia
 - id: general_query_028_var2
-  question: 'Variant 2: Puoi indicare le sottofamiglie della famiglia ''CENTRALI FRIGO''?'
+  question: Quali sono le sottofamiglie appartenenti alla famiglia 'CENTRALI FRIGO'?
   cypher: MATCH (f:Famiglia)<-[:INCLUSA_IN]-(sf:Sottofamiglia) WHERE toLower(trim(f.nome))
     = 'centrali frigo' RETURN DISTINCT sf.nome AS sottofamiglia ORDER BY sottofamiglia
 - id: general_query_038
   question: Quanti articoli unici sono presenti nel catalogo?
   cypher: MATCH (a:Articolo) RETURN count(DISTINCT a) AS totaleArticoli
 - id: general_query_038_var1
-  question: Quanti sono gli articoli unici disponibili nel catalogo?
+  question: Quanti sono gli articoli distinti nel catalogo?
   cypher: MATCH (a:Articolo) RETURN count(DISTINCT a) AS totaleArticoli
 - id: general_query_038_var2
-  question: Qual è il numero di articoli unici presenti nel catalogo?
+  question: Qual è il numero di articoli unici nel catalogo?
   cypher: MATCH (a:Articolo) RETURN count(DISTINCT a) AS totaleArticoli
 - id: general_query_039
   question: Elenca i clienti dell'azienda '1' situati nella provincia di 'PG'
@@ -103,24 +102,24 @@ examples:
     SPA'
   cypher: MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType)
     WHERE toLower(trim(gf.ragioneSociale)) = 'fornitore esempio spa' AND dt.codice
-    = 'FNA' RETURN doc.documentoid AS documento
+    = 'FNA' RETURN doc.documentoId AS documento
 - id: general_query_042_var1
   question: Variant 1
   cypher: MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType)
     WHERE toLower(trim(gf.ragioneSociale)) = 'fornitore esempio spa' AND dt.codice
-    = 'FNA' RETURN doc.documentoid AS documento
+    = 'FNA' RETURN doc.documentoId AS documento
 - id: general_query_042_var2
   question: Fammi vedere i documenti classificati come 'FNA' che sono stati ricevuti
     da 'FORNITORE ESEMPIO SPA'
   cypher: MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType)
     WHERE toLower(trim(gf.ragioneSociale)) = 'fornitore esempio spa' AND dt.codice
-    = 'FNA' RETURN doc.documentoid AS documento
+    = 'FNA' RETURN doc.documentoId AS documento
 - id: general_query_059
   question: Ultimo documento emesso nel 2024
   cypher: MATCH (doc:Documento) WHERE doc.dataEmissione.year = 2024 WITH doc ORDER
     BY doc.dataEmissione DESC LIMIT 1 OPTIONAL MATCH (doc)<-[:HA_RICEVUTO]-(c:Cliente)
     OPTIONAL MATCH (doc)<-[:HA_EMESSO]-(f:Fornitore)-[:RAGGRUPPATO_SOTTO]->(gf:GruppoFornitore)
-    RETURN doc.documentoId AS UltimoDocumentoID,  doc.dataEmissione AS DataEmissione,
+    RETURN doc.documentoId AS UltimodocumentoId,  doc.dataEmissione AS DataEmissione,
     CASE WHEN gf IS NOT NULL THEN gf.ragioneSociale ELSE 'Nostra Azienda (Vendita)'
     END AS EmessoDa, CASE WHEN c IS NOT NULL THEN c.name ELSE 'Nostra Azienda (Acquisto)'
     END AS EmessoA
@@ -129,7 +128,7 @@ examples:
   cypher: MATCH (doc:Documento) WHERE doc.dataEmissione.year = 2024 WITH doc ORDER
     BY doc.dataEmissione DESC LIMIT 1 OPTIONAL MATCH (doc)<-[:HA_RICEVUTO]-(c:Cliente)
     OPTIONAL MATCH (doc)<-[:HA_EMESSO]-(f:Fornitore)-[:RAGGRUPPATO_SOTTO]->(gf:GruppoFornitore)
-    RETURN doc.documentoId AS UltimoDocumentoID,  doc.dataEmissione AS DataEmissione,
+    RETURN doc.documentoId AS UltimodocumentoId,  doc.dataEmissione AS DataEmissione,
     CASE WHEN gf IS NOT NULL THEN gf.ragioneSociale ELSE 'Nostra Azienda (Vendita)'
     END AS EmessoDa, CASE WHEN c IS NOT NULL THEN c.name ELSE 'Nostra Azienda (Acquisto)'
     END AS EmessoA
@@ -138,7 +137,7 @@ examples:
   cypher: MATCH (doc:Documento) WHERE doc.dataEmissione.year = 2024 WITH doc ORDER
     BY doc.dataEmissione DESC LIMIT 1 OPTIONAL MATCH (doc)<-[:HA_RICEVUTO]-(c:Cliente)
     OPTIONAL MATCH (doc)<-[:HA_EMESSO]-(f:Fornitore)-[:RAGGRUPPATO_SOTTO]->(gf:GruppoFornitore)
-    RETURN doc.documentoId AS UltimoDocumentoID,  doc.dataEmissione AS DataEmissione,
+    RETURN doc.documentoId AS UltimodocumentoId,  doc.dataEmissione AS DataEmissione,
     CASE WHEN gf IS NOT NULL THEN gf.ragioneSociale ELSE 'Nostra Azienda (Vendita)'
     END AS EmessoDa, CASE WHEN c IS NOT NULL THEN c.name ELSE 'Nostra Azienda (Acquisto)'
     END AS EmessoA
@@ -164,7 +163,8 @@ examples:
   cypher: MATCH (c:Cliente)-[:APPARTIENE_A]->(d:Ditta) WITH c, collect(d.dittaId)
     AS ditte WHERE size(ditte) = 1 AND ditte[0] = '1' RETURN c.name AS clienteEsclusivo
 - id: general_query_061_var1
-  question: Quali sono i clienti che sono associati solo all'azienda '1' e a nessun'altra?
+  question: Quali sono i clienti che sono associati solo all'azienda '1' e non ad
+    altre?
   cypher: MATCH (c:Cliente)-[:APPARTIENE_A]->(d:Ditta) WITH c, collect(d.dittaId)
     AS ditte WHERE size(ditte) = 1 AND ditte[0] = '1' RETURN c.name AS clienteEsclusivo
 - id: general_query_061_var2
@@ -177,11 +177,11 @@ examples:
   cypher: MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType) RETURN dt.codice AS tipoDocumento,
     count(doc) AS numeroDocumenti ORDER BY numeroDocumenti DESC
 - id: general_query_067_var1
-  question: Fammi vedere quanti documenti ci sono per ogni tipo (codice).
+  question: Variant 1
   cypher: MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType) RETURN dt.codice AS tipoDocumento,
     count(doc) AS numeroDocumenti ORDER BY numeroDocumenti DESC
 - id: general_query_067_var2
-  question: Visualizza la quantità di documenti per ciascun tipo (codice).
+  question: Fammi vedere quanti documenti ci sono per ogni tipo (codice).
   cypher: MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType) RETURN dt.codice AS tipoDocumento,
     count(doc) AS numeroDocumenti ORDER BY numeroDocumenti DESC
 - id: general_query_072
@@ -193,26 +193,9 @@ examples:
   cypher: MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) WHERE toLower(trim(l.localita))
     = 'perugia' RETURN DISTINCT c.name AS cliente ORDER BY cliente LIMIT 5
 - id: general_query_072_var2
-  question: Quali sono cinque clienti che si trovano a Perugia?
+  question: Puoi fornire i nomi di 5 clienti che si trovano a Perugia?
   cypher: MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) WHERE toLower(trim(l.localita))
     = 'perugia' RETURN DISTINCT c.name AS cliente ORDER BY cliente LIMIT 5
-- id: general_query_080
-  question: Qual è il primo e l'ultimo documento di vendita mai registrato per il
-    cliente 'ACME SRL'?
-  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento) WHERE toLower(trim(c.name))
-    = 'acme srl' RETURN min(doc.dataEmissione) AS primoDocumento, max(doc.dataEmissione)
-    AS ultimoDocumento
-- id: general_query_080_var1
-  question: Variant 1
-  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento) WHERE toLower(trim(c.name))
-    = 'acme srl' RETURN min(doc.dataEmissione) AS primoDocumento, max(doc.dataEmissione)
-    AS ultimoDocumento
-- id: general_query_080_var2
-  question: Quali sono il documento di vendita iniziale e quello finale mai registrati
-    per il cliente 'ACME SRL'?
-  cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento) WHERE toLower(trim(c.name))
-    = 'acme srl' RETURN min(doc.dataEmissione) AS primoDocumento, max(doc.dataEmissione)
-    AS ultimoDocumento
 - id: general_query_088
   question: Elenca i fornitori che trattano solo prodotti di una singola famiglia.
   cypher: MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia)
@@ -231,34 +214,31 @@ examples:
     gf.ragioneSociale AS fornitoreMonoFamiglia
 - id: general_query_094
   question: Elenca i fornitori situati in un luogo dove non abbiamo clienti.
-  cypher: MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) WITH collect(DISTINCT l.localita)
-    AS localitaClienti MATCH (f:Fornitore)-[:SI_TROVA_A]->(lf:Luogo) WHERE NOT lf.localita
-    IN localitaClienti MATCH (f)-[:RAGGRUPPATO_SOTTO]->(gf:GruppoFornitore) RETURN
-    DISTINCT gf.ragioneSociale AS fornitoreIsolato
+  cypher: 'MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(f:Fornitore)-[:SI_TROVA_A]->(lf:Luogo)
+    WHERE NOT EXISTS { MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo {localita: lf.localita})
+    } RETURN DISTINCT gf.ragioneSociale AS fornitore ORDER BY fornitore'
 - id: general_query_094_var1
-  question: Quali sono i fornitori che si trovano in una località priva di clienti?
-  cypher: MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) WITH collect(DISTINCT l.localita)
-    AS localitaClienti MATCH (f:Fornitore)-[:SI_TROVA_A]->(lf:Luogo) WHERE NOT lf.localita
-    IN localitaClienti MATCH (f)-[:RAGGRUPPATO_SOTTO]->(gf:GruppoFornitore) RETURN
-    DISTINCT gf.ragioneSociale AS fornitoreIsolato
+  question: Variant 1
+  cypher: 'MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(f:Fornitore)-[:SI_TROVA_A]->(lf:Luogo)
+    WHERE NOT EXISTS { MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo {localita: lf.localita})
+    } RETURN DISTINCT gf.ragioneSociale AS fornitore ORDER BY fornitore'
 - id: general_query_094_var2
-  question: Indica i fornitori che si trovano in una zona dove non ci sono clienti.
-  cypher: MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) WITH collect(DISTINCT l.localita)
-    AS localitaClienti MATCH (f:Fornitore)-[:SI_TROVA_A]->(lf:Luogo) WHERE NOT lf.localita
-    IN localitaClienti MATCH (f)-[:RAGGRUPPATO_SOTTO]->(gf:GruppoFornitore) RETURN
-    DISTINCT gf.ragioneSociale AS fornitoreIsolato
+  question: Indica i fornitori che si trovano in una località priva di nostri clienti.
+  cypher: 'MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(f:Fornitore)-[:SI_TROVA_A]->(lf:Luogo)
+    WHERE NOT EXISTS { MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo {localita: lf.localita})
+    } RETURN DISTINCT gf.ragioneSociale AS fornitore ORDER BY fornitore'
 - id: general_query_096
   question: Mostrami tutti gli ordini fornitori (OF) per maggio 2024.
   cypher: 'MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType {codice: ''OF''}) WHERE doc.dataEmissione.year
-    = 2024 AND doc.dataEmissione.month = 5 RETURN doc.documentoid AS ordine'
+    = 2024 AND doc.dataEmissione.month = 5 RETURN doc.documentoId AS ordine'
 - id: general_query_096_var1
   question: Variant 1
   cypher: 'MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType {codice: ''OF''}) WHERE doc.dataEmissione.year
-    = 2024 AND doc.dataEmissione.month = 5 RETURN doc.documentoid AS ordine'
+    = 2024 AND doc.dataEmissione.month = 5 RETURN doc.documentoId AS ordine'
 - id: general_query_096_var2
   question: Visualizza tutti gli ordini dei fornitori (OF) per maggio 2024.
   cypher: 'MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType {codice: ''OF''}) WHERE doc.dataEmissione.year
-    = 2024 AND doc.dataEmissione.month = 5 RETURN doc.documentoid AS ordine'
+    = 2024 AND doc.dataEmissione.month = 5 RETURN doc.documentoId AS ordine'
 - id: general_query_098
   question: Elenca i clienti a cui abbiamo inviato una nota di consegna clienti (DDTV)
     a Roma.
@@ -283,14 +263,14 @@ examples:
     {tipoValore: ''Ordinato''}) WITH doc, sum(dr.importo) AS valoreOrdinato MATCH
     (doc)-[:CONTIENE_RIGA]->(dr_fat:RigaDocumento {tipoValore: ''Fatturato''}) WITH
     doc, valoreOrdinato, sum(dr_fat.importo) AS valoreFatturato WHERE valoreOrdinato
-    > valoreFatturato RETURN doc.documentoid AS ordineNonSaldato'
+    > valoreFatturato RETURN doc.documentoId AS ordineNonSaldato'
 - id: general_query_104_var1
   question: Variant 1
   cypher: 'MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType {codice: ''OC''}) MATCH (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento
     {tipoValore: ''Ordinato''}) WITH doc, sum(dr.importo) AS valoreOrdinato MATCH
     (doc)-[:CONTIENE_RIGA]->(dr_fat:RigaDocumento {tipoValore: ''Fatturato''}) WITH
     doc, valoreOrdinato, sum(dr_fat.importo) AS valoreFatturato WHERE valoreOrdinato
-    > valoreFatturato RETURN doc.documentoid AS ordineNonSaldato'
+    > valoreFatturato RETURN doc.documentoId AS ordineNonSaldato'
 - id: general_query_104_var2
   question: Quali sono i documenti d'ordine clienti (OC) che non sono stati ancora
     interamente fatturati?
@@ -298,4 +278,4 @@ examples:
     {tipoValore: ''Ordinato''}) WITH doc, sum(dr.importo) AS valoreOrdinato MATCH
     (doc)-[:CONTIENE_RIGA]->(dr_fat:RigaDocumento {tipoValore: ''Fatturato''}) WITH
     doc, valoreOrdinato, sum(dr_fat.importo) AS valoreFatturato WHERE valoreOrdinato
-    > valoreFatturato RETURN doc.documentoid AS ordineNonSaldato'
+    > valoreFatturato RETURN doc.documentoId AS ordineNonSaldato'

@@ -12,9 +12,30 @@ content: |
   2.  **Apostrophe Escaping**: To filter strings containing an apostrophe, you MUST escape it with a backslash (e.g., `WHERE c.name = 'l\'abbondanza srl'`).
   3.  **Negative Patterns**: For "negative" queries (`NOT`), the correct pattern is `MATCH (entity) WITH entity MATCH (main) WHERE NOT (main)-...->(entity)`. Do NOT define new variables inside a `WHERE NOT` clause.
   4.  **AGGREGATION RULE (CRITICAL):**
-    When using count/sum/avg (implicit GROUP BY):
-    NEVER: `RETURN toLower(trim(prop)), count(*)` ← Processed property
-    ALWAYS: `RETURN prop, count(*)`  ← Use raw property
+  5.  **DIVISION SAFETY (CRITICAL):** -> - Check denominator BEFORE division
+      - Use `= 0 OR IS NULL` for safety
+      - Return `null` for missing data, `0.0` for percentages
+      - Add `WHERE result IS NOT NULL` after CASE if needed
+          When using count/sum/avg (implicit GROUP BY):
+          NEVER: `RETURN toLower(trim(prop)), count(*)` ← Processed property
+          ALWAYS: `RETURN prop, count(*)`  ← Use raw property
+  ALWAYS protect divisions from zero denominators:
+
+    WRONG (unsafe):
+    RETURN sum(revenue) / count(customers) AS average
+    RETURN avg(price / quantity) AS unitPrice
+
+    CORRECT (safe):
+    RETURN CASE 
+      WHEN count(customers) = 0 THEN null
+      ELSE sum(revenue) / count(customers) 
+    END AS average
+
+    RETURN avg(CASE 
+      WHEN quantity = 0 OR quantity IS NULL THEN null
+      ELSE price / quantity 
+    END) AS unitPrice
+  
 
     Example WRONG:
     `RETURN toLower(trim(l.localita)) AS loc, count(f) AS num`
@@ -36,6 +57,7 @@ content: |
   - **Luogo (Location)**: Represents a geographical location. When asked to return a location, return the specific property (e.g., `l.localita` or `l.provincia`), NEVER the entire `l` node.
   - **Query Negative (`WHERE NOT`)**: The pattern `... WHERE NOT (entity)-[]->(...)` is complex. The example provided is the ONLY correct way to implement it. Follow it exactly.
   - **Provincia (Province)**: When asked for a province, respond with its abbreviation (e.g., "PG" for Perugia). If the abbreviation is unknown, use the locality property `l.localita` instead.
+  
   **BEST PRACTICES:**
   1. Security: Use ONLY `MATCH` and `RETURN`.
   2. Robustness: For string filters, ALWAYS use `WHERE toLower(trim(var.prop)) = 'lowercase value'`.

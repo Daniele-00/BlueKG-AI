@@ -1,0 +1,11 @@
+{
+  "entity": "Clienti",
+  "timestamp": "2025-10-21T12:23:04.383421",
+  "summary": {
+    "total_processed": 3251,
+    "total_valid": 3251,
+    "total_excluded": 0,
+    "exclusion_rate": 0.0
+  },
+  "exclusions_by_reason": {}
+}

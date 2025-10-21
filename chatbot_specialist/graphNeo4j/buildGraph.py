@@ -5,6 +5,105 @@ from decimal import Decimal
 from datetime import datetime, date
 import time
 import re
+from collections import defaultdict
+import json
+
+
+class ExclusionTracker:
+    """Tiene traccia di tutti i record esclusi e motivi"""
+
+    def __init__(self, entity_name):
+        self.entity_name = entity_name
+        self.excluded = defaultdict(list)  # motivo -> lista record
+        self.total_processed = 0
+        self.total_valid = 0
+
+    def add_exclusion(self, reason, record_sample=None):
+        """Registra un'esclusione"""
+        if record_sample:
+            # Salva solo campi chiave per evitare troppi dati
+            sample = {
+                k: v
+                for k, v in record_sample.items()
+                if k.startswith("_key")
+                or k in ["ragione_sociale", "tipo_documento", "descrizione"]
+            }
+            self.excluded[reason].append(sample)
+
+    def print_report(self):
+        """Stampa report dettagliato"""
+        total_excluded = sum(len(records) for records in self.excluded.values())
+
+        print(f"\n{'='*80}")
+        print(f"📊 REPORT ESCLUSIONI: {self.entity_name}")
+        print(f"{'='*80}")
+        print(f"✅ Record validi:   {self.total_valid:,}")
+        print(f"❌ Record esclusi:  {total_excluded:,}")
+        print(f"📋 Totale elaborati: {self.total_processed:,}")
+
+        if total_excluded > 0:
+            print(
+                f"\n📉 Percentuale esclusi: {(total_excluded/self.total_processed)*100:.2f}%"
+            )
+            print(f"\n🔍 DETTAGLIO ESCLUSIONI PER MOTIVO:\n")
+
+            for reason, records in sorted(
+                self.excluded.items(), key=lambda x: len(x[1]), reverse=True
+            ):
+                print(f"  ❌ {reason}: {len(records):,} record")
+
+                # Mostra fino a 3 esempi
+                if records:
+                    print(f"     Esempi:")
+                    for i, sample in enumerate(records[:3], 1):
+                        print(f"       {i}. {sample}")
+                    if len(records) > 3:
+                        print(f"       ... e altri {len(records)-3} record")
+                print()
+        else:
+            print("\n✅ Nessun record escluso!")
+
+        print(f"{'='*80}\n")
+
+    def save_to_file(self, filename=None):
+        """Salva report dettagliato in JSON"""
+        if filename is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"exclusion_report_{self.entity_name}_{timestamp}.json"
+
+        report = {
+            "entity": self.entity_name,
+            "timestamp": datetime.now().isoformat(),
+            "summary": {
+                "total_processed": self.total_processed,
+                "total_valid": self.total_valid,
+                "total_excluded": sum(
+                    len(records) for records in self.excluded.values()
+                ),
+                "exclusion_rate": (
+                    (
+                        sum(len(records) for records in self.excluded.values())
+                        / self.total_processed
+                        * 100
+                    )
+                    if self.total_processed > 0
+                    else 0
+                ),
+            },
+            "exclusions_by_reason": {
+                reason: {
+                    "count": len(records),
+                    "samples": records[:10],  # Salva fino a 10 esempi
+                }
+                for reason, records in self.excluded.items()
+            },
+        }
+
+        with open(filename, "w", encoding="utf-8") as f:
+            json.dump(report, f, indent=2, ensure_ascii=False)
+
+        print(f"💾 Report dettagliato salvato in: {filename}")
+
 
 # --- CONFIGURAZIONE DEI DATABASE ---
 # Inserisci qui le credenziali corrette per MS SQL Server
@@ -147,16 +246,26 @@ def converti_tipi_per_neo4j(data):
 
 def pulisci_record_fornitori(fornitori):
     """
-    Pulisce i record dei fornitori, rimuove spazi e gestisce i null.
+    Pulisce i record dei fornitori con logging dettagliato delle esclusioni.
     """
     print("🧹 Pulizia record fornitori in corso...")
+
+    tracker = ExclusionTracker("Fornitori")
     fornitori_puliti = []
 
     for forn in fornitori:
+        tracker.total_processed += 1
         forn_pulito = forn.copy()
 
-        # Saltiamo record senza ID
+        # CONTROLLO 1: ID fornitore mancante
         if not forn_pulito.get("_keyfornitore"):
+            tracker.add_exclusion(
+                "ID fornitore mancante (_keyfornitore)",
+                {
+                    "_keyfornitore": None,
+                    "ragione_sociale": forn_pulito.get("ragione_sociale"),
+                },
+            )
             continue
 
         def clean_str(value):
@@ -188,8 +297,14 @@ def pulisci_record_fornitori(fornitori):
         )
 
         fornitori_puliti.append(forn_pulito)
+        tracker.total_valid += 1
 
-    print(f"✅ Pulizia completata: {len(fornitori_puliti)} fornitori validi.")
+    # Stampa report
+    tracker.print_report()
+
+    # Salva report su file (opzionale)
+    tracker.save_to_file()
+
     return fornitori_puliti
 
 
@@ -249,13 +364,16 @@ def carica_fornitori(tx, fornitori):
 
 def pulisci_record_clienti(clienti):
     """
-    Pulisce i record dei clienti, rimuove spazi e sostituisce i valori null.
+    Pulisce i record dei clienti con logging dettagliato delle esclusioni.
     """
-    print(" Pulizia record clienti in corso...")
+    print("🧹 Pulizia record clienti in corso...")
+
+    tracker = ExclusionTracker("Clienti")
     clienti_puliti = []
-    record_scartati = 0
 
     for i, cliente in enumerate(clienti):
+        tracker.total_processed += 1
+
         if (i + 1) % 5000 == 0:
             print(f"   Processati {i + 1}/{len(clienti)} clienti...")
 
@@ -267,9 +385,15 @@ def pulisci_record_clienti(clienti):
         else:
             cliente_pulito["codice_ditta"] = DEFAULT_VALUES["id"]
 
-        # Campi obbligatori per MERGE
+        # CONTROLLO 1: ID cliente mancante
         if not cliente_pulito.get("_keycliente"):
-            record_scartati += 1
+            tracker.add_exclusion(
+                "ID cliente mancante (_keycliente)",
+                {
+                    "_keycliente": None,
+                    "ragione_sociale": cliente_pulito.get("ragione_sociale"),
+                },
+            )
             continue
 
         # Funzione helper per pulire le stringhe
@@ -309,30 +433,53 @@ def pulisci_record_clienti(clienti):
             cliente_pulito["fido_euro"] = DEFAULT_VALUES["numeric"]
 
         clienti_puliti.append(cliente_pulito)
+        tracker.total_valid += 1
 
-    print(
-        f" Pulizia completata: {len(clienti_puliti)} validi, {record_scartati} scartati"
-    )
+    # Stampa report
+    tracker.print_report()
+
+    # Salva report su file (opzionale)
+    tracker.save_to_file()
+
     return clienti_puliti
 
 
 # SOSTITUISCI L'INTERA FUNZIONE CON QUESTA
 def pulisci_record_documenti(documenti):
     """
-    Pulisce i record, rimuove spazi, sostituisce i null, assegna una categoria
-    e standardizza i campi di importo in 'importo' e 'tipoValore'.
+    Pulisce i record documenti con logging dettagliato delle esclusioni.
     """
-    print(
-        "Pulizia, categorizzazione e standardizzazione record documenti cliente in corso..."
-    )
+    print("🧹 Pulizia e categorizzazione record documenti cliente in corso...")
+
+    tracker = ExclusionTracker("Documenti Cliente")
     documenti_puliti = []
-    record_scartati = 0
 
     for doc in documenti:
+        tracker.total_processed += 1
         doc_pulito = doc.copy()
 
-        if not doc_pulito.get("_keycliente") or not doc_pulito.get("_keyidtidr"):
-            record_scartati += 1
+        # CONTROLLO 1: ID cliente mancante
+        if not doc_pulito.get("_keycliente"):
+            tracker.add_exclusion(
+                "ID cliente mancante (_keycliente)",
+                {
+                    "_keycliente": None,
+                    "_keyidtidr": doc_pulito.get("_keyidtidr"),
+                    "tipo_documento": doc_pulito.get("tipo_documento"),
+                },
+            )
+            continue
+
+        # CONTROLLO 2: ID riga documento mancante
+        if not doc_pulito.get("_keyidtidr"):
+            tracker.add_exclusion(
+                "ID riga documento mancante (_keyidtidr)",
+                {
+                    "_keycliente": doc_pulito.get("_keycliente"),
+                    "_keyidtidr": None,
+                    "tipo_documento": doc_pulito.get("tipo_documento"),
+                },
+            )
             continue
 
         def clean_str(value):
@@ -359,8 +506,6 @@ def pulisci_record_documenti(documenti):
             doc_pulito["data_documento"] = DEFAULT_VALUES["date"]
 
         # --- LOGICA DI STANDARDIZZAZIONE DEL VALORE ---
-        # Priorità: Fatturato > Bollato > Ordinato
-        # Inizializziamo i nuovi campi
         doc_pulito["importo"] = DEFAULT_VALUES["numeric"]
         doc_pulito["tipoValore"] = "Non Specificato"
 
@@ -378,21 +523,22 @@ def pulisci_record_documenti(documenti):
             doc_pulito["importo"] = val_ordinato
             doc_pulito["tipoValore"] = "Ordinato"
 
-        # Pulizia della quantità (qta_fatturata è la più rilevante per il cliente)
         doc_pulito["quantita"] = (
             doc_pulito.get("qta_fatturata") or DEFAULT_VALUES["numeric"]
         )
 
         documenti_puliti.append(doc_pulito)
+        tracker.total_valid += 1
 
-    print(
-        f"✅ Pulizia completata: {len(documenti_puliti)} validi, {record_scartati} scartati"
-    )
+    # Stampa report
+    tracker.print_report()
+
+    # Salva report su file (opzionale)
+    tracker.save_to_file()
+
     return documenti_puliti
 
 
-# SOSTITUISCI L'INTERA FUNZIONE CON QUESTA
-# SOSTITUISCI L'INTERA FUNZIONE CON QUESTA
 def pulisci_record_documenti_fornitori(documenti_fornitori):
     """
     Pulisce i record dei documenti fornitori, assegna una categoria,
@@ -401,9 +547,11 @@ def pulisci_record_documenti_fornitori(documenti_fornitori):
     print(
         "🧹 Pulizia, categorizzazione e standardizzazione record documenti fornitori in corso..."
     )
+    tracker = ExclusionTracker("Documenti Fornitore")
     documenti_puliti = []
 
     for doc in documenti_fornitori:
+        tracker.total_processed += 1
         doc_pulito = doc.copy()
 
         # Unica funzione per pulire le stringhe
@@ -443,8 +591,11 @@ def pulisci_record_documenti_fornitori(documenti_fornitori):
         )
 
         documenti_puliti.append(doc_pulito)
+        tracker.total_valid += 1
 
     print(f"✅ Pulizia completata: {len(documenti_puliti)} documenti fornitori validi.")
+    # Stampa report
+    tracker.print_report()
     return documenti_puliti
 
 
@@ -515,10 +666,12 @@ def pulisci_record_articoli(articoli):
     """
     Pulisce i record degli articoli, inclusi codici e descrizioni di famiglia e sottofamiglia.
     """
+    tracker = ExclusionTracker("Articoli")
     print("🧹 Pulizia record articoli (con gerarchie) in corso...")
     articoli_puliti = []
 
     for art in articoli:
+        tracker.total_processed += 1
         art_pulito = art.copy()
 
         def clean_str(value):
@@ -552,15 +705,13 @@ def pulisci_record_articoli(articoli):
         # --- FINE NUOVA PARTE ---
 
         articoli_puliti.append(art_pulito)
+        tracker.total_valid += 1
 
-    print(f"✅ Pulizia completata: {len(articoli_puliti)} articoli validi.")
+    tracker.print_report()
+
     return articoli_puliti
 
-    print(f"✅ Pulizia completata: {len(articoli_puliti)} articoli validi.")
-    return articoli_puliti
 
-
-# SOSTITUISCI L'INTERA FUNZIONE CON QUESTA
 # SOSTITUISCI L'INTERA FUNZIONE CON QUESTA
 def carica_articoli_batch(tx, articoli_batch, batch_num, total_batches):
     """
@@ -756,6 +907,44 @@ CREATE FULLTEXT INDEX luoghi_fuzzy FOR (l:Luogo) ON EACH [l.localita];
 """
 
 
+def print_final_summary(trackers_dict):
+    """
+    Stampa un report finale di tutte le entità elaborate.
+
+    Args:
+        trackers_dict: dict con {entity_name: (total_processed, total_valid, total_excluded)}
+    """
+    print("\n" + "=" * 80)
+    print("📊 REPORT FINALE IMPORTAZIONE GRAFO")
+    print("=" * 80)
+    print(
+        f"\n{'Entità':<25} {'Elaborati':<12} {'Validi':<12} {'Esclusi':<12} {'% Esclusi':<10}"
+    )
+    print("-" * 80)
+
+    total_processed = 0
+    total_valid = 0
+    total_excluded = 0
+
+    for entity, stats in trackers_dict.items():
+        processed, valid, excluded = stats
+        total_processed += processed
+        total_valid += valid
+        total_excluded += excluded
+
+        exclusion_rate = (excluded / processed * 100) if processed > 0 else 0
+
+        print(
+            f"{entity:<25} {processed:<12,} {valid:<12,} {excluded:<12,} {exclusion_rate:<10.2f}%"
+        )
+
+    print("-" * 80)
+    print(
+        f"{'TOTALE':<25} {total_processed:<12,} {total_valid:<12,} {total_excluded:<12,} {(total_excluded/total_processed*100) if total_processed > 0 else 0:<10.2f}%"
+    )
+    print("=" * 80 + "\n")
+
+
 # SOSTITUISCI L'INTERA FUNZIONE CON QUESTA
 def crea_indici_e_constraints(driver):
     """
@@ -780,14 +969,27 @@ def crea_indici_e_constraints(driver):
         # --- Documenti ---
         "CREATE CONSTRAINT documento_id IF NOT EXISTS FOR (d:Documento) REQUIRE d.documentoId IS UNIQUE",
         "CREATE CONSTRAINT riga_documento_id IF NOT EXISTS FOR (dr:RigaDocumento) REQUIRE dr.rigaId IS UNIQUE",
+        "CREATE CONSTRAINT doctype_codice IF NOT EXISTS FOR (dt:DocType) REQUIRE dt.codice IS UNIQUE",
         # La gestione DocType verrà modificata nel prossimo passo
     ]
 
     index_queries = [
         # Sostituisci le vecchie righe per DocType con queste:
-        "CREATE CONSTRAINT doctype_codice IF NOT EXISTS FOR (dt:DocType) REQUIRE dt.codice IS UNIQUE",
-        "CREATE INDEX doctype_name IF NOT EXISTS FOR (dt:DocType) ON (dt.name)",  # Lo manteniamo per ricerche testuali
+        # === Già presenti ===
+        "CREATE INDEX doctype_name IF NOT EXISTS FOR (dt:DocType) ON (dt.name)",
         "CREATE INDEX articolo_sku IF NOT EXISTS FOR (a:Articolo) ON (a.sku)",
+        # === Indici Aggiuntivi === Servono per ricerche più veloci su attributi comunemente usati
+        "CREATE INDEX cliente_name IF NOT EXISTS FOR (c:Cliente) ON (c.name)",
+        "CREATE INDEX articolo_descrizione IF NOT EXISTS FOR (a:Articolo) ON (a.descrizione)",
+        "CREATE INDEX famiglia_nome IF NOT EXISTS FOR (f:Famiglia) ON (f.nome)",
+        "CREATE INDEX sottofamiglia_nome IF NOT EXISTS FOR (sf:Sottofamiglia) ON (sf.nome)",
+        "CREATE INDEX fornitore_ragione IF NOT EXISTS FOR (f:Fornitore) ON (f.ragioneSociale)",
+        "CREATE INDEX riga_tipo_valore IF NOT EXISTS FOR (dr:RigaDocumento) ON (dr.tipoValore)",
+        "CREATE INDEX documento_data_emissione IF NOT EXISTS FOR (d:Documento) ON (d.dataEmissione)",
+        "CREATE INDEX documento_tipo_originale IF NOT EXISTS FOR (d:Documento) ON (d.tipoOriginale)",
+        "CREATE INDEX luogo_localita IF NOT EXISTS FOR (l:Luogo) ON (l.localita)",
+        "CREATE INDEX luogo_provincia IF NOT EXISTS FOR (l:Luogo) ON (l.provincia)",
+        "CREATE INDEX luogo_regione IF NOT EXISTS FOR (l:Luogo) ON (l.regione)",
     ]
 
     with driver.session(database="neo4j") as session:
@@ -814,7 +1016,7 @@ def crea_indici_e_constraints(driver):
 def main():
     """Funzione principale per eseguire l'ETL."""
     start_time = time.time()
-
+    stats_trackers = {}
     print(" AVVIO PROCESSO ETL DA SQL SERVER A NEO4J")
     print("=" * 60)
     print(f" Valori di default per dati mancanti:")
@@ -916,6 +1118,7 @@ def main():
                 session.execute_write(carica_articoli, articoli)
                 load_time = time.time() - load_start
                 print(f"✅ Articoli caricati in {load_time:.2f}s\n")
+
                 # --- FINE NUOVO CARICAMENTO ---
 
                 print(" CLIENTI E LUOGHI")

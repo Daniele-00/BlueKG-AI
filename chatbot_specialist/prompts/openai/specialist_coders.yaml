@@ -189,6 +189,7 @@ CROSS_DOMAIN: |
   WHERE NOT (a)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento {{tipoValore:'Fatturato'}})
   RETURN DISTINCT a.descrizione AS prodottoMaiVenduto
   LIMIT 5
+  ORDER BY prodottoMaiVenduto
 
 
   Final Cypher Query:

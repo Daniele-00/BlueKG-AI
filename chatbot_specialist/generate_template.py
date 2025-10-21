@@ -6,6 +6,7 @@ import logging
 from langchain.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
+
 # Usa i tuoi modelli esistenti
 from chatbot_specialist import (
     MODELLI_STRATIFICATI,
@@ -173,7 +174,7 @@ def export_to_yaml(classified: Dict[str, List[Dict]], output_dir: str = "example
 
 
 def main():
-    INPUT_FILE = "validation_set_2.json"
+    INPUT_FILE = "/opt/BlueKG/chatbot_specialist/validation_set/validation_set.json"
     OUTPUT_DIR = "examples"
     GENERATE_VARIANTS = True  # Cambia in False se vuoi solo classificare
 

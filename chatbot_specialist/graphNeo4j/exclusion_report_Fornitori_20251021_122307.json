@@ -1,0 +1,11 @@
+{
+  "entity": "Fornitori",
+  "timestamp": "2025-10-21T12:23:07.288628",
+  "summary": {
+    "total_processed": 5149,
+    "total_valid": 5149,
+    "total_excluded": 0,
+    "exclusion_rate": 0.0
+  },
+  "exclusions_by_reason": {}
+}

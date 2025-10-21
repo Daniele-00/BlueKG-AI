@@ -5,12 +5,12 @@ examples:
     RETURN fam.nome AS famiglia, sum(dr.quantita) AS quantitaTotale ORDER BY quantitaTotale
     DESC LIMIT 1
 - id: purchase_cycle_009_var1
-  question: Quali sono i prodotti più comprati tra le famiglie disponibili?
+  question: Qual è la categoria di prodotti più comprata?
   cypher: MATCH (:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)-[:APPARTIENE_A]->(sf:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia)
     RETURN fam.nome AS famiglia, sum(dr.quantita) AS quantitaTotale ORDER BY quantitaTotale
     DESC LIMIT 1
 - id: purchase_cycle_009_var2
-  question: Quale categoria di prodotti viene acquistata di più?
+  question: Qual è il gruppo di prodotti più venduto?
   cypher: MATCH (:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)-[:APPARTIENE_A]->(sf:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia)
     RETURN fam.nome AS famiglia, sum(dr.quantita) AS quantitaTotale ORDER BY quantitaTotale
     DESC LIMIT 1
@@ -20,7 +20,7 @@ examples:
     RETURN fam.nome AS famiglia, sum(dr.quantita) AS quantitaTotale ORDER BY quantitaTotale
     ASC LIMIT 1
 - id: purchase_cycle_010_var1
-  question: Quale categoria di prodotti viene acquistata di meno?
+  question: Quale famiglia di prodotti viene acquistata di meno?
   cypher: MATCH (:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)-[:APPARTIENE_A]->(sf:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia)
     RETURN fam.nome AS famiglia, sum(dr.quantita) AS quantitaTotale ORDER BY quantitaTotale
     ASC LIMIT 1
@@ -35,12 +35,13 @@ examples:
     WHERE toLower(trim(a.descrizione)) = 'gas freon solstice n40 r448a' RETURN sum(dr.importo)
     AS costoTotaleAcquisto
 - id: purchase_cycle_013_var1
-  question: Variant 1
+  question: 'Variant 1: Qual è stato il prezzo di acquisto del prodotto GAS FREON
+    SOLSTICE N40 R448A?'
   cypher: MATCH (a:Articolo)<-[:RIGUARDA_ARTICOLO]-(dr:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)
     WHERE toLower(trim(a.descrizione)) = 'gas freon solstice n40 r448a' RETURN sum(dr.importo)
     AS costoTotaleAcquisto
 - id: purchase_cycle_013_var2
-  question: A quale prezzo ho comprato il prodotto GAS FREON SOLSTICE N40 R448A?
+  question: 'Variant 2: Quanto ho pagato per il prodotto GAS FREON SOLSTICE N40 R448A?'
   cypher: MATCH (a:Articolo)<-[:RIGUARDA_ARTICOLO]-(dr:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)
     WHERE toLower(trim(a.descrizione)) = 'gas freon solstice n40 r448a' RETURN sum(dr.importo)
     AS costoTotaleAcquisto
@@ -64,11 +65,12 @@ examples:
   cypher: MATCH (:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
     RETURN avg(dr.quantita) AS quantitaMediaAcquisto
 - id: purchase_cycle_037_var1
-  question: Qual è il numero medio di articoli per riga nei documenti di acquisto?
+  question: 'Variant 1: Qual è il numero medio di articoli per riga nei documenti
+    di acquisto?'
   cypher: MATCH (:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
     RETURN avg(dr.quantita) AS quantitaMediaAcquisto
 - id: purchase_cycle_037_var2
-  question: Qual è la media degli articoli per riga nei documenti di acquisto?
+  question: 'Variant 2: Qual è la media degli articoli per riga nei documenti di acquisto?'
   cypher: MATCH (:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
     RETURN avg(dr.quantita) AS quantitaMediaAcquisto
 - id: purchase_cycle_045
@@ -77,12 +79,14 @@ examples:
     RETURN a.descrizione AS articolo, sum(dr.importo) AS costoTotale ORDER BY costoTotale
     DESC LIMIT 5
 - id: purchase_cycle_045_var1
-  question: Variant 1
+  question: 'Variant 1: Quali sono i cinque articoli che hanno il costo complessivo
+    di acquisto più elevato?'
   cypher: MATCH (a:Articolo)<-[:RIGUARDA_ARTICOLO]-(dr:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)
     RETURN a.descrizione AS articolo, sum(dr.importo) AS costoTotale ORDER BY costoTotale
     DESC LIMIT 5
 - id: purchase_cycle_045_var2
-  question: Quali sono i 5 articoli che hanno il costo totale di acquisto più elevato?
+  question: 'Variant 2: Quali sono i cinque prodotti con il più alto costo totale
+    di acquisto?'
   cypher: MATCH (a:Articolo)<-[:RIGUARDA_ARTICOLO]-(dr:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)
     RETURN a.descrizione AS articolo, sum(dr.importo) AS costoTotale ORDER BY costoTotale
     DESC LIMIT 5
@@ -92,13 +96,12 @@ examples:
     RETURN a.descrizione AS articolo, sum(dr.importo) AS costoTotale ORDER BY costoTotale
     ASC LIMIT 5
 - id: purchase_cycle_046_var1
-  question: 'Variant 1: Quali sono i 5 articoli che costano meno in totale da acquistare?'
+  question: Quali sono i 5 articoli che costano meno in totale?
   cypher: MATCH (a:Articolo)<-[:RIGUARDA_ARTICOLO]-(dr:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)
     RETURN a.descrizione AS articolo, sum(dr.importo) AS costoTotale ORDER BY costoTotale
     ASC LIMIT 5
 - id: purchase_cycle_046_var2
-  question: 'Variant 2: Quali sono i 5 articoli con il minor costo complessivo di
-    acquisto?'
+  question: Quali sono i 5 prodotti con il minor costo complessivo di acquisto?
   cypher: MATCH (a:Articolo)<-[:RIGUARDA_ARTICOLO]-(dr:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)
     RETURN a.descrizione AS articolo, sum(dr.importo) AS costoTotale ORDER BY costoTotale
     ASC LIMIT 5
@@ -108,7 +111,7 @@ examples:
     RETURN gf.ragioneSociale AS fornitore, count(DISTINCT a) AS varietaProdotti ORDER
     BY varietaProdotti DESC LIMIT 1
 - id: purchase_cycle_047_var1
-  question: Qual è il fornitore che offre la più vasta selezione di articoli unici?
+  question: Qual è il fornitore che ci offre la più vasta selezione di articoli unici?
   cypher: MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
     RETURN gf.ragioneSociale AS fornitore, count(DISTINCT a) AS varietaProdotti ORDER
     BY varietaProdotti DESC LIMIT 1
@@ -123,16 +126,30 @@ examples:
     RETURN gf.ragioneSociale AS fornitore, count(DISTINCT a) AS varietaProdotti ORDER
     BY varietaProdotti ASC LIMIT 1
 - id: purchase_cycle_048_var1
-  question: Qual è il fornitore che ci offre la selezione più ristretta di articoli
-    unici?
+  question: Quale venditore ci offre la selezione più ristretta di articoli unici?
   cypher: MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
     RETURN gf.ragioneSociale AS fornitore, count(DISTINCT a) AS varietaProdotti ORDER
     BY varietaProdotti ASC LIMIT 1
 - id: purchase_cycle_048_var2
-  question: Chi è il fornitore che ci propone la gamma più limitata di articoli unici?
+  question: Qual è il fornitore che ci propone il minor numero di articoli unici?
   cypher: MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
     RETURN gf.ragioneSociale AS fornitore, count(DISTINCT a) AS varietaProdotti ORDER
     BY varietaProdotti ASC LIMIT 1
+- id: purchase_cycle_050
+  question: Qual è il fornitore con il maggior numero di articoli forniti?
+  cypher: MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    RETURN gf.ragioneSociale AS fornitore, count(DISTINCT a) AS numeroArticoli ORDER
+    BY numeroArticoli DESC LIMIT 1
+- id: purchase_cycle_050_var1
+  question: Quale fornitore ha fornito il maggior numero di articoli?
+  cypher: MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    RETURN gf.ragioneSociale AS fornitore, count(DISTINCT a) AS numeroArticoli ORDER
+    BY numeroArticoli DESC LIMIT 1
+- id: purchase_cycle_050_var2
+  question: Chi è il fornitore che ha consegnato il numero più alto di articoli?
+  cypher: MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
+    RETURN gf.ragioneSociale AS fornitore, count(DISTINCT a) AS numeroArticoli ORDER
+    BY numeroArticoli DESC LIMIT 1
 - id: purchase_cycle_056
   question: Quale fornitore è stato il più attivo (per valore di acquisto) nell'ultimo
     trimestre?
@@ -175,14 +192,15 @@ examples:
     DESC WITH fam, collect({fornitore: gf.ragioneSociale, valore: valoreAcquistato})[0]
     AS fornitoreTop RETURN fam.nome AS famiglia, fornitoreTop.fornitore AS fornitorePrincipale'
 - id: purchase_cycle_084_var1
-  question: Variant 1
+  question: Qual è il fornitore dominante per ciascuna categoria di prodotto, considerando
+    il valore degli acquisti?
   cypher: 'MATCH (fam:Famiglia)<-[:INCLUSA_IN]-(:Sottofamiglia)<-[:APPARTIENE_A]-(:Articolo)<-[:RIGUARDA_ARTICOLO]-(dr:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)-[:RAGGRUPPATO_SOTTO]->(gf:GruppoFornitore)
     WITH fam, gf, sum(dr.importo) AS valoreAcquistato ORDER BY fam.nome, valoreAcquistato
     DESC WITH fam, collect({fornitore: gf.ragioneSociale, valore: valoreAcquistato})[0]
     AS fornitoreTop RETURN fam.nome AS famiglia, fornitoreTop.fornitore AS fornitorePrincipale'
 - id: purchase_cycle_084_var2
-  question: Qual è il fornitore dominante per ciascuna categoria di prodotto, considerando
-    il valore degli acquisti?
+  question: Quale fornitore prevale per ogni tipo di prodotto, in base al valore degli
+    acquisti effettuati?
   cypher: 'MATCH (fam:Famiglia)<-[:INCLUSA_IN]-(:Sottofamiglia)<-[:APPARTIENE_A]-(:Articolo)<-[:RIGUARDA_ARTICOLO]-(dr:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)-[:RAGGRUPPATO_SOTTO]->(gf:GruppoFornitore)
     WITH fam, gf, sum(dr.importo) AS valoreAcquistato ORDER BY fam.nome, valoreAcquistato
     DESC WITH fam, collect({fornitore: gf.ragioneSociale, valore: valoreAcquistato})[0]
@@ -209,13 +227,13 @@ examples:
     RETURN dt.codice AS tipoDocumento, count(doc) AS frequenza ORDER BY frequenza
     DESC LIMIT 1
 - id: purchase_cycle_093_var1
-  question: Qual è il tipo di documento (codice) più comunemente legato al ciclo di
-    acquisto?
+  question: Qual è il tipo di documento (codice) che si associa più spesso al ciclo
+    di acquisto?
   cypher: MATCH (:Fornitore)-[:HA_EMESSO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType)
     RETURN dt.codice AS tipoDocumento, count(doc) AS frequenza ORDER BY frequenza
     DESC LIMIT 1
 - id: purchase_cycle_093_var2
-  question: Che tipo di documento (codice) si associa più spesso al ciclo di acquisto?
+  question: Quale documento (codice) è comunemente legato al ciclo di acquisto?
   cypher: MATCH (:Fornitore)-[:HA_EMESSO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType)
     RETURN dt.codice AS tipoDocumento, count(doc) AS frequenza ORDER BY frequenza
     DESC LIMIT 1

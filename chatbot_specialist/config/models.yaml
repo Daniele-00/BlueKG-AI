@@ -1,10 +1,10 @@
 agent_models:
-  coder: llama3
-  contextualizer: gpt-4o-mini
-  general_conversation: llama3
-  router: gpt-4o-mini
-  synthesizer: gpt-4o-mini
-  translator: gpt-4o-mini
+  coder: gpt-4o
+  contextualizer: gpt-4o
+  general_conversation: gpt-4o
+  router: gpt-4o
+  synthesizer: gpt-4o
+  translator: gpt-4o
 available_models:
   gemini-2.5-flash:
     model_name: gemini-2.5-flash
