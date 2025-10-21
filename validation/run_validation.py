@@ -126,6 +126,14 @@ CONFIGS_SPECIALIST = {
         "synthesizer": "gpt-4o-mini",
         "translator": "gpt-4o-mini",
     },
+    "llama3-groq": {
+        "contextualizer": "llama-70b-groq-versatile",
+        "router": "llama-70b-groq-versatile",
+        "coder": "llama-70b-groq-versatile",
+        "synthesizer": "llama-70b-groq-versatile",
+        "translator": "llama-8b-groq-instant",
+        "general_conversation": "llama-70b-groq-versatile",
+    },
     "gemini-2.5-pro": {
         "contextualizer": "gemini-2.5-pro",
         "router": "gemini-2.5-pro",

@@ -24,6 +24,7 @@ from pathlib import Path
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
+from groqWrapper import ChatGroq
 import yaml
 import os
 from pathlib import Path
@@ -218,6 +219,16 @@ def create_llm_model(agent_name: str):
             google_api_key=api_key,
             temperature=cfg["provider_config"]["temperature"],
             convert_system_message_to_human=False,
+        )
+
+    elif cfg["provider"] == "groq":
+        api_key = config.get_secret(cfg["provider_config"]["api_key_env"])
+        return ChatGroq(
+            model=cfg["model_name"],
+            groq_api_key=api_key,
+            temperature=cfg["provider_config"]["temperature"],
+            max_tokens=cfg.get("max_tokens", 2000),
+            timeout=cfg["provider_config"]["timeout"],
         )
 
     else:

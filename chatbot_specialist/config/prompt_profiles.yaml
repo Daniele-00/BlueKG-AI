@@ -62,6 +62,8 @@ templates:
 
 # Optional model→prompt directory aliases. Keys can be model_name or model_id.
 model_aliases:
+  llama-70b-groq-versatile: llama3
+  llama-8b-groq-instant: llama3
   llama3-8b-vertex: llama3
   gemini-2.5-pro: openai
   gemini-2.5-flash: openai

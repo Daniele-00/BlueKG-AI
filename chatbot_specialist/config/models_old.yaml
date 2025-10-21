@@ -1,0 +1,48 @@
+agent_models:
+  coder: gpt-4o
+  contextualizer: gpt-4o
+  general_conversation: gpt-4o
+  router: gpt-4o
+  synthesizer: gpt-4o
+  translator: gpt-4o
+available_models:
+  gemini-2.5-flash:
+    model_name: gemini-2.5-flash
+    provider: google
+  gemini-2.5-pro:
+    model_name: gemini-2.5-pro
+    provider: google
+  gpt-4o:
+    model_name: gpt-4o
+    provider: openai
+  gpt-4o-mini:
+    model_name: gpt-4o-mini
+    provider: openai
+  llama3:
+    model_name: llama3
+    provider: ollama
+  llama3-8b-vertex:
+    endpoint_id: '3960841105481662464'
+    location: us-east4
+    model_name: llama3-8b-chat-mg-one-click-deploy
+    project_id: gen-lang-client-0561804466
+    provider: vertex_ai
+  mistral:
+    model_name: mistral
+    provider: ollama
+providers:
+  google:
+    api_key_env: GOOGLE_API_KEY
+    fallback_model: gemini-2.5-flash
+    temperature: 0
+    timeout: 120
+  ollama:
+    base_url: http://172.16.30.23:11434
+    timeout: 120
+  openai:
+    api_key_env: OPENAI_API_KEY
+    temperature: 0
+    timeout: 120
+  vertex_ai:
+    temperature: 0
+    timeout: 120
