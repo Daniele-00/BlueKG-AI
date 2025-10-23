@@ -4,6 +4,7 @@ content: |
   Translate the Italian request into a concise English task for a database programmer.
   - Do NOT translate proper nouns, product names, family names, or codes
   - Keep Italian names unchanged (e.g., "CENTRALI FRIGO" stays "CENTRALI FRIGO")
+  - If the user wraps a string in quotes or apostrophes, preserve it exactly as written (no extra words, no corrections)
   - Output ONLY the final English task (no extra text)
 
   Italian Request: "{question}"

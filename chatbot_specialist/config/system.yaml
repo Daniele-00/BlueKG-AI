@@ -1,15 +1,23 @@
+# System configuration for Chatbot Specialist application
+
+# Cache settings to optimize performance
 cache:
+  enabled: true
   max_cache_size: 100
   query_ttl_seconds: 600
+
+# Logging configuration for diagnostics and monitoring
 logging:
   diagnostics_dir: diagnostics
   level: INFO
   save_diagnostics: true
+# File paths for various resources
 paths:
   config_dir: config
   prompts_dir: prompts
   test_results: test_results.json
   validation_set: validation_set.json
+# Query limits and timeouts for external providers  
 query_limits:
   max_results_display: 50
   max_results_for_synthesizer: 10
@@ -18,6 +26,7 @@ query_limits:
       ollama: 8
       openai: 10
   query_timeout_seconds: 30
+# Retry mechanism configuration for error handling  
 retry:
   enabled: true
   hints_files:
@@ -31,6 +40,7 @@ retry:
   - Type mismatch
   retry_on_syntax_error: true
   retry_on_zero_results: false
+# Session management settings  
 sessions:
   cleanup_interval_seconds: 300
   enable_memory: false

@@ -269,6 +269,9 @@ query_cache = TTLCache(
     ttl=config.system["cache"]["query_ttl_seconds"],
 )
 
+# Flag cache/memoria
+ENABLE_CACHE = config.system.get("cache", {}).get("enabled", True)
+
 # Timeout sessioni (da config/system.yaml)
 SESSION_TIMEOUT = timedelta(minutes=config.system["sessions"]["timeout_minutes"])
 
@@ -279,7 +282,7 @@ MAX_RESULTS_FOR_SYNTHESIZER = config.system["query_limits"][
 MAX_MESSAGES_PER_SESSION = config.system["sessions"]["max_messages_per_session"]
 
 logger.info(
-    f"Cache configurata: max_size={config.system['cache']['max_cache_size']}, ttl={config.system['cache']['query_ttl_seconds']}s"
+    f"Cache configurata: enabled={ENABLE_CACHE}, max_size={config.system['cache']['max_cache_size']}, ttl={config.system['cache']['query_ttl_seconds']}s"
 )
 logger.info(f"Session timeout: {config.system['sessions']['timeout_minutes']} minuti")
 logger.info(f"Max risultati per synthesizer: {MAX_RESULTS_FOR_SYNTHESIZER}")
@@ -1097,14 +1100,18 @@ def run_coder_agent(
     prompt_template: str,
     specialist_type: str,
     original_question_it: str,
+    examples_top_k: Optional[int] = None,
 ) -> str:
     """Coder con esempi dinamici RAG"""
     logger.info(f"🤖 Coder: {specialist_type}")
 
     # 1. RECUPERA ESEMPI
     # Usa la domanda originale in IT per il retrieval degli esempi
+    top_k_examples = (
+        examples_top_k if examples_top_k is not None else example_retriever.get_default_top_k()
+    )
     relevant_examples = example_retriever.retrieve(
-        question=original_question_it, specialist=specialist_type, top_k=3
+        question=original_question_it, specialist=specialist_type, top_k=top_k_examples
     )
 
     # 2. FORMATTA ESEMPI (con escape delle graffe)
@@ -1115,7 +1122,9 @@ def run_coder_agent(
                 for ex in relevant_examples
             ]
         )
-        logger.info(f"📚 Recuperati: {[ex['id'] for ex in relevant_examples]}")
+        logger.info(
+            f"📚 Recuperati (top_k={top_k_examples}): {[ex['id'] for ex in relevant_examples]}"
+        )
     else:
         examples_text = ""
 
@@ -1264,6 +1273,7 @@ class UserQuestionWithSession(BaseModel):
     user_id: Optional[str] = (
         "default_user"  # Identificativo utente opzionale per la sessione
     )
+    examples_top_k: Optional[int] = None  # override top-k per RAG (opzionale)
 
 
 # =======================================================================
@@ -1291,6 +1301,9 @@ async def ask_question(user_question: UserQuestionWithSession):
 
     user_id = user_question.user_id or "default_user"
     original_question_text = user_question.question.strip()
+    requested_examples_top_k = (
+        user_question.examples_top_k if user_question.examples_top_k and user_question.examples_top_k > 0 else None
+    )
     session = get_or_create_session(user_id)
 
     logger.info(f"📥 [{user_id}] Domanda: '{original_question_text}'")
@@ -1314,11 +1327,23 @@ async def ask_question(user_question: UserQuestionWithSession):
         english_task = run_translator_agent(question_text)
         logger.info(f"Task tradotto in Inglese: '{english_task}'")
 
+        effective_examples_top_k = (
+            requested_examples_top_k
+            if requested_examples_top_k is not None
+            else example_retriever.get_default_top_k()
+        )
+
         cache_key = None
-        if ENABLE_MEMORY:
-            cache_key = _make_cache_key(user_id, question_text, english_task)
+        if ENABLE_CACHE:
+            cache_scope_user = user_id if ENABLE_MEMORY else "single_turn"
+            scope_token = (
+                f"{cache_scope_user}|k{effective_examples_top_k}"
+                if effective_examples_top_k is not None
+                else cache_scope_user
+            )
+            cache_key = _make_cache_key(scope_token, question_text, english_task)
         cached_entry = None
-        if cache_key and cache_key in query_cache:
+        if ENABLE_CACHE and cache_key and cache_key in query_cache:
             cached_entry = copy.deepcopy(query_cache[cache_key])
             if cached_entry:
                 logger.info(
@@ -1343,6 +1368,8 @@ async def ask_question(user_question: UserQuestionWithSession):
                     "query_generata": cached_entry.get("query_generata"),
                     "risposta": cached_response.get("risposta"),
                     "timing_details": timings_copy,
+                    "specialist": cached_entry.get("specialist"),
+                    "examples_top_k": cached_entry.get("examples_top_k"),
                     "cached": True,
                 }
 
@@ -1377,13 +1404,16 @@ async def ask_question(user_question: UserQuestionWithSession):
                 "query_generata": None,
                 "risposta": conversation_reply,
                 "timing_details": timing_details,
+                "specialist": specialist_route,
+                "examples_top_k": effective_examples_top_k,
             }
-            if cache_key:
+            if ENABLE_CACHE and cache_key:
                 query_cache[cache_key] = {
                     "response": copy.deepcopy(response_payload),
                     "context": [],
                     "query_generata": None,
                     "specialist": specialist_route,
+                    "examples_top_k": response_payload["examples_top_k"],
                 }
                 logger.info("♻️ Cache STORE per conversazione generale")
 
@@ -1411,6 +1441,7 @@ async def ask_question(user_question: UserQuestionWithSession):
             prompt_template=coder_prompt_template,
             specialist_type=specialist_route,
             original_question_it=original_question_text,
+            examples_top_k=effective_examples_top_k,
         )
 
         timing_details["generazione_query"] = time.perf_counter() - start_gen_time
@@ -1602,14 +1633,17 @@ async def ask_question(user_question: UserQuestionWithSession):
             "query_generata": generated_query,
             "risposta": final_answer,
             "timing_details": timing_details,
+            "specialist": specialist_route,
+            "examples_top_k": effective_examples_top_k,
         }
 
-        if cache_key:
+        if ENABLE_CACHE and cache_key:
             query_cache[cache_key] = {
                 "response": copy.deepcopy(response_payload),
                 "context": context_completo,
                 "query_generata": generated_query,
                 "specialist": specialist_route,
+                "examples_top_k": response_payload["examples_top_k"],
             }
             logger.info("♻️ Cache STORE per query specialist")
 
@@ -1707,12 +1741,14 @@ async def debug_rag(request: dict):
     {
         "question": "Chi è il cliente con maggior fatturato?",
         "specialist": "SALES_CYCLE",  # opzionale, se omesso usa router
-        "top_k": 5  # opzionale, default 3
+        "top_k": 5  # opzionale, default configurato (EXAMPLES_TOP_K o 3)
     }
     """
     question = request.get("question")
     specialist = request.get("specialist")
-    top_k = request.get("top_k", 3)
+    top_k = request.get("top_k")
+    if top_k is None:
+        top_k = example_retriever.get_default_top_k()
 
     if not question:
         raise HTTPException(status_code=400, detail="Missing 'question'")

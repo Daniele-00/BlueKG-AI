@@ -71,7 +71,7 @@
     },
     {
         "id": "TEST-15-Genera la query Cypher per rispondere a questo input in italiano",
-        "input": "Attualmente la ditta 2 è in perdita o in crescita?",
+        "input": "Situazione attuale della ditta '2'",
         "output": "MATCH (d:Ditta {dittaId: '2'})<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 AND doc.dataEmissione.year IN [date().year, date().year - 1] RETURN doc.dataEmissione.year AS anno, sum(dr.importo) AS fatturatoAnnuale ORDER BY anno DESC"
     },
     {
@@ -127,7 +127,7 @@
     {
         "id": "TEST-26-Genera la query Cypher per rispondere a questo input in italiano",
         "input": "Elenca 5 prodotti che abbiamo acquistato ma mai venduto",
-        "output": "MATCH (f:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo) WHERE NOT EXISTS { MATCH (a)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(:Cliente) } RETURN DISTINCT a.descrizione AS prodotto ORDER BY prodotto LIMIT 5"
+        "output": "MATCH (a:Articolo)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)\nWHERE NOT (a)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento {tipoValore: 'Fatturato'})\nRETURN DISTINCT a.descrizione AS prodottoMaiVenduto\nORDER BY prodottoMaiVenduto\nLIMIT 5"
     },
     {
         "id": "TEST-27-Genera la query Cypher per rispondere a questo input in italiano",
@@ -252,12 +252,12 @@
     {
         "id": "TEST-51-Genera la query Cypher per rispondere a questo input in italiano",
         "input": "Chi sono i principali fornitori degli articoli venduti al nostro miglior cliente?",
-        "output": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH c, sum(dr.importo) AS fatturato ORDER BY fatturato DESC LIMIT 1 MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo) WITH collect(DISTINCT a) AS articoliTop MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a_check:Articolo) WHERE a_check IN articoliTop RETURN gf.ragioneSociale as fornitore, sum(dr.importo) AS valoreAcquistato ORDER BY valoreAcquistato DESC"
+        "output": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH c, sum(dr.importo) AS fatturatoCliente ORDER BY fatturatoCliente DESC LIMIT 1 WITH c AS topCliente MATCH (topCliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo) WITH topCliente, collect(DISTINCT a) AS articoliDelTopCliente MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo) WHERE a IN articoliDelTopCliente RETURN gf.ragioneSociale AS fornitore, count(DISTINCT a) AS numeroArticoliDiversiForniti ORDER BY numeroArticoliDiversiForniti DESC"
     },
     {
         "id": "TEST-52-Genera la query Cypher per rispondere a questo input in italiano",
         "input": "Quali sono le famiglie di prodotti vendute sia dalla ditta '1' che dalla ditta '2'?",
-        "output": "MATCH (d1:Ditta {ditta: '1'})<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia) WITH collect(DISTINCT fam) AS famiglieDitta1 MATCH (d2:Ditta {ditta: '2'})<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam_check:Famiglia) WHERE fam_check IN famiglieDitta1 RETURN fam_check.nome AS famigliaComune"
+        "output": "MATCH (fam1:Famiglia)<-[:INCLUSA_IN*0..]-(:Sottofamiglia)<-[:APPARTIENE_A]-(:Articolo)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(:Cliente)-[:APPARTIENE_A]->(:Ditta {dittaId: '1'}) WITH collect(DISTINCT fam1) AS famiglieDitta1 MATCH (fam2:Famiglia)<-[:INCLUSA_IN*0..]-(:Sottofamiglia)<-[:APPARTIENE_A]-(:Articolo)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(:Cliente)-[:APPARTIENE_A]->(:Ditta {dittaId: '2'}) WHERE fam2 IN famiglieDitta1 RETURN DISTINCT fam2.nome AS famigliaComune ORDER BY famigliaComune"
     },
     {
         "id": "TEST-53-Genera la query Cypher per rispondere a questo input in italiano",
@@ -327,7 +327,7 @@
     {
         "id": "TEST-66-Genera la query Cypher per rispondere a questo input in italiano",
         "input": "Lista dei clienti il cui fatturato totale è superiore al fatturato medio di tutti i clienti.",
-        "output": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH count(DISTINCT c) AS totalCustomers, sum(dr.importo) AS totalRevenue WITH totalRevenue / totalCustomers AS avgRevenue MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH c, sum(dr.importo) AS customerRevenue, avgRevenue WHERE customerRevenue > avgRevenue RETURN c.name AS cliente, customerRevenue ORDER BY customerRevenue DESC"
+        "output": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH count(DISTINCT c) AS totalCustomers, sum(dr.importo) AS totalRevenue WITH CASE WHEN totalCustomers = 0 THEN null ELSE totalRevenue / totalCustomers END AS avgRevenue WHERE avgRevenue IS NOT NULL MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH c, sum(dr.importo) AS customerRevenue, avgRevenue WHERE customerRevenue > avgRevenue RETURN c.name AS cliente, customerRevenue ORDER BY customerRevenue DESC"
     },
     {
         "id": "TEST-67-Genera la query Cypher per rispondere a questo input in italiano",
@@ -401,13 +401,13 @@
     },
     {
         "id": "TEST-81-Genera la query Cypher per rispondere a questo input in italiano",
-        "input": "Trova i prodotti in comune venduti all'azienda '1' e acquistati dal fornitore 'FORNITORE ESEMPIO SPA'.",
-        "output": "MATCH (d:Ditta {dittaId: '1'})<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo) WITH collect(DISTINCT a) AS prodottiVenduti MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a2:Articolo) WHERE toLower(trim(gf.ragioneSociale)) = 'fornitore esempio spa' AND a2 IN prodottiVenduti RETURN a2.descrizione AS prodottoComune"
+        "input": "Qual è la media del fatturato mensile per il cliente 'ACME SRL' nel 2024?",
+        "output": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE toLower(trim(c.name)) = 'l\\'abbondanza srl' AND dr.tipoValore = 'Fatturato' AND dr.importo > 0 AND doc.dataEmissione.year = 2024 WITH date(doc.dataEmissione).month AS mese, sum(dr.importo) AS fatturatoMensile RETURN avg(fatturatoMensile) AS mediaFatturatoMensile"
     },
     {
         "id": "TEST-82-Genera la query Cypher per rispondere a questo input in italiano",
         "input": "Per i primi 3 clienti per fatturato, mostra il loro prodotto più acquistato per valore.",
-        "output": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH c, sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC LIMIT 3 MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr2:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo) WHERE dr2.tipoValore = 'Fatturato' AND dr2.importo > 0 WITH c, a, sum(dr2.importo) AS valoreProdotto ORDER BY c.name, valoreProdotto DESC WITH c, collect({prodotto: a.descrizione, valore: valoreProdotto})[0] AS prodottoTop RETURN c.name AS cliente, prodottoTop.prodotto AS prodottoPiuAcquistato, prodottoTop.valore"
+        "output": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH c, sum(dr.importo) AS fatturatoCliente ORDER BY fatturatoCliente DESC LIMIT 3 MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr2:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo) WHERE dr2.tipoValore = 'Fatturato' AND dr2.importo > 0 WITH c, a, sum(dr2.importo) AS valoreProdotto ORDER BY c.name, valoreProdotto DESC WITH c, head(collect({prodotto: a.descrizione, valore: valoreProdotto})) AS topProdotto RETURN c.name AS cliente, topProdotto.prodotto AS prodottoTop, topProdotto.valore AS valoreTop ORDER BY c.name"
     },
     {
         "id": "TEST-83-Genera la query Cypher per rispondere a questo input in italiano",
@@ -432,7 +432,7 @@
     {
         "id": "TEST-87-Genera la query Cypher per rispondere a questo input in italiano",
         "input": "Per il prodotto più venduto per quantità, qual è il suo costo medio di acquisto?",
-        "output": "MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo) WITH a, sum(dr.quantita) AS quantitaTotale ORDER BY quantitaTotale DESC LIMIT 1 MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_acq:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore) RETURN a.descrizione AS prodotto, avg(dr_acq.importo / dr_acq.quantita) AS costoMedioUnitario"
+        "output": "MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo) WITH a, sum(dr.quantita) AS quantitaTotale ORDER BY quantitaTotale DESC LIMIT 1 MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_acq:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore) RETURN a.descrizione AS prodotto, avg(CASE WHEN dr_acq.quantita = 0 OR dr_acq.quantita IS NULL THEN null ELSE dr_acq.importo / dr_acq.quantita END) AS costoMedioUnitario"
     },
     {
         "id": "TEST-88-Genera la query Cypher per rispondere a questo input in italiano",
@@ -442,7 +442,7 @@
     {
         "id": "TEST-89-Genera la query Cypher per rispondere a questo input in italiano",
         "input": "Qual è la percentuale di fatturato generata dai clienti nella regione 'Umbria' sul totale?",
-        "output": "MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH l.regione AS regione, sum(dr.importo) AS fatturatoRegione WITH collect({regione: regione, fatturato: fatturatoRegione}) AS fatturatiRegionali, sum(dr.importo) AS fatturatoTotale UNWIND fatturatiRegionali AS r WHERE toLower(trim(r.regione)) = 'umbria' RETURN r.fatturato AS fatturatoUmbria, fatturatoTotale, (r.fatturato / fatturatoTotale) * 100 AS percentuale"
+        "output": "MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo),(c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH sum(dr.importo) AS totaleFatturato,  sum(CASE WHEN toLower(trim(l.regione)) = 'umbria' THEN dr.importo ELSE 0 END) AS fatturatoUmbria RETURN CASE WHEN totaleFatturato = 0 THEN 0.0 ELSE (fatturatoUmbria * 100.0 / totaleFatturato) END AS percentualeUmbria"
     },
     {
         "id": "TEST-90-Genera la query Cypher per rispondere a questo input in italiano",
@@ -457,7 +457,7 @@
     {
         "id": "TEST-92-Genera la query Cypher per rispondere a questo input in italiano",
         "input": "Ci sono prodotti venduti a un prezzo inferiore al loro costo medio di acquisto?",
-        "output": "MATCH (a:Articolo) OPTIONAL MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_acq:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore) WITH a, avg(dr_acq.importo / dr_acq.quantita) AS costoMedio OPTIONAL MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_ven:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(:Cliente) WHERE dr_ven.tipoValore = 'Fatturato' AND dr_ven.importo > 0 WITH a, costoMedio, avg(dr_ven.importo / dr_ven.quantita) AS prezzoMedioVendita WHERE prezzoMedioVendita < costoMedio RETURN a.descrizione AS prodottoInPerdita"
+        "output": "MATCH (a:Articolo) OPTIONAL MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_acq:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore) WITH a, avg(CASE WHEN dr_acq.quantita = 0 OR dr_acq.quantita IS NULL THEN null ELSE dr_acq.importo / dr_acq.quantita END) AS costoMedio OPTIONAL MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_ven:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(:Cliente) WHERE dr_ven.tipoValore = 'Fatturato' AND dr_ven.importo > 0 WITH a, costoMedio, avg(CASE WHEN dr_ven.quantita = 0 OR dr_ven.quantita IS NULL THEN null ELSE dr_ven.importo / dr_ven.quantita END) AS prezzoMedioVendita WHERE prezzoMedioVendita < costoMedio RETURN a.descrizione AS prodottoInPerdita"
     },
     {
         "id": "TEST-93-Genera la query Cypher per rispondere a questo input in italiano",
@@ -467,7 +467,7 @@
     {
         "id": "TEST-94-Genera la query Cypher per rispondere a questo input in italiano",
         "input": "Elenca i fornitori situati in un luogo dove non abbiamo clienti.",
-        "output": "MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) WITH collect(DISTINCT l.localita) AS localitaClienti MATCH (f:Fornitore)-[:SI_TROVA_A]->(lf:Luogo) WHERE NOT lf.localita IN localitaClienti MATCH (f)-[:RAGGRUPPATO_SOTTO]->(gf:GruppoFornitore) RETURN DISTINCT gf.ragioneSociale AS fornitoreIsolato"
+        "output": "MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(f:Fornitore)-[:SI_TROVA_A]->(lf:Luogo) WHERE NOT EXISTS { MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo {localita: lf.localita}) } RETURN DISTINCT gf.ragioneSociale AS fornitore ORDER BY fornitore"
     },
     {
         "id": "TEST-95-Genera la query Cypher per rispondere a questo input in italiano",
@@ -527,9 +527,9 @@
     {
         "id": "TEST-106-Genera la query Cypher per rispondere a questo input in italiano",
         "input": "Mostrami il totale fatturato e il totale ordinato per ciascuna ditta.",
-        "output": "MATCH (d:Ditta)<-[:APPARTIENE_A]-(c:Cliente) OPTIONAL MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr_ord:RigaDocumento {tipoValore: 'Ordinato'}) WITH d, c, sum(dr_ord.importo) AS totaleOrdinato OPTIONAL MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr_fat:RigaDocumento {tipoValore: 'Fatturato'}) WHERE dr_fat.importo > 0 WITH d, sum(totaleOrdinato) AS totaleOrdinatoDitta, sum(dr_fat.importo) AS totaleFatturatoDitta RETURN d.dittaId AS ditta, totaleOrdinatoDitta, totaleFatturatoDitta"
+        "output": "MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) RETURN d.dittaId AS ditta, sum(CASE dr.tipoValore WHEN 'Fatturato' THEN dr.importo ELSE 0 END) AS totaleFatturato, sum(CASE dr.tipoValore WHEN 'Ordinato' THEN dr.importo ELSE 0 END) AS totaleOrdinato ORDER BY ditta ASC"
     }
-]
+        ]
 
 
 

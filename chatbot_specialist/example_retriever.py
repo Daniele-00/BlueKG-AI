@@ -1,19 +1,29 @@
 import yaml
 import pickle
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Optional
 from sentence_transformers import SentenceTransformer
 import numpy as np
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
 
+DEFAULT_TOP_K = int(os.getenv("EXAMPLES_TOP_K", "3"))
+
+
 class ExampleRetriever:
-    def __init__(self, examples_dir: str = "examples", cache_dir: str = "embeddings"):
+    def __init__(
+        self,
+        examples_dir: str = "examples",
+        cache_dir: str = "embeddings",
+        default_top_k: Optional[int] = None,
+    ):
         self.examples_dir = Path(examples_dir)
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(exist_ok=True)
+        self.default_top_k = default_top_k or DEFAULT_TOP_K
 
         logger.info("📦 Caricamento modello embeddings...")
         self.model = SentenceTransformer("all-MiniLM-L6-v2")
@@ -66,9 +76,15 @@ class ExampleRetriever:
             self.examples_by_specialist[specialist] = examples
             logger.info(f"✅ {specialist}: {len(examples)} esempi")
 
-    def retrieve(self, question: str, specialist: str, top_k: int = 3) -> List[Dict]:
+    def retrieve(
+        self, question: str, specialist: str, top_k: Optional[int] = None
+    ) -> List[Dict]:
         examples = self.examples_by_specialist.get(specialist, [])
         if not examples:
+            return []
+
+        k = top_k if top_k is not None else self.default_top_k
+        if k <= 0:
             return []
 
         q_embedding = self.model.encode([question])[0]
@@ -81,10 +97,13 @@ class ExampleRetriever:
             similarities.append((sim, ex))
 
         similarities.sort(key=lambda x: x[0], reverse=True)
-        return [ex for _, ex in similarities[:top_k]]
+        return [ex for _, ex in similarities[:k]]
 
     def get_stats(self) -> Dict:
         return {
             specialist: len(examples)
             for specialist, examples in self.examples_by_specialist.items()
         }
+
+    def get_default_top_k(self) -> int:
+        return self.default_top_k

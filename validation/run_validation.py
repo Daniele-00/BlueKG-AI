@@ -32,7 +32,7 @@ from datetime import datetime
 from pathlib import Path
 import yaml
 import time
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 
 # Neo4j temporal types for JSON serialization safety
 try:
@@ -116,7 +116,7 @@ NEO4J_QUERY_TIMEOUT_SECONDS = _env_float("NEO4J_QUERY_TIMEOUT_SECONDS", 30.0)
 # CONFIGURAZIONI MODELLI
 # =======================================================================
 
-# Config per approccio SPECIALIST (con router)
+# Config per approccio SPECIALIST
 CONFIGS_SPECIALIST = {
     "gpt4o-mini": {
         "contextualizer": "gpt-4o-mini",
@@ -130,7 +130,7 @@ CONFIGS_SPECIALIST = {
         "contextualizer": "llama-70b-groq-versatile",
         "router": "llama-70b-groq-versatile",
         "coder": "llama-70b-groq-versatile",
-        "synthesizer": "llama-70b-groq-versatile",
+        "synthesizer": "llama-8b-groq-instant",
         "translator": "llama-8b-groq-instant",
         "general_conversation": "llama-70b-groq-versatile",
     },
@@ -280,17 +280,20 @@ def explain_mismatch(
     return summary
 
 
-def _normalize_rows(result: List[Dict[str, Any]]) -> set:
-    """Converte righe query in tuple ordinabili per comparazione insiemi."""
-    normalized = set()
+def _normalize_rows_signature(result: List[Dict[str, Any]]) -> set:
+    """Normalizza righe in modo alias-agnostico (ordina per chiave ma salva solo valori)."""
+
+    normalized: set = set()
     for row in result:
         try:
-            items = tuple(
-                sorted(((str(k), _normalize_scalar(v)) for k, v in row.items()))
+            sorted_items = sorted(
+                (str(k), _normalize_scalar(v)) for k, v in row.items()
             )
-            normalized.add(items)
+            values_only = tuple(v for _, v in sorted_items)
+            normalized.add((len(sorted_items), values_only))
         except Exception:
-            normalized.add(tuple(sorted((str(k), str(v)) for k, v in row.items())))
+            fallback_values = tuple(sorted(str(v) for v in row.values()))
+            normalized.add((len(row), fallback_values))
     return normalized
 
 
@@ -312,8 +315,8 @@ def jaccard_similarity(
       combinato a DISTINCT/ORDER BY). Per questo lo usiamo come metrica informativa,
       ma NON per decidere l'attendibilità.
     """
-    set1 = _normalize_rows(result1)
-    set2 = _normalize_rows(result2)
+    set1 = _normalize_rows_signature(result1)
+    set2 = _normalize_rows_signature(result2)
     if not set1 and not set2:
         return 1.0
     union = set1 | set2
@@ -604,15 +607,19 @@ def wait_for_api():
 # =======================================================================
 
 
-def run_validation(approach: str, config_name: str, min_query_sim: float = 0.8):
+def run_validation(
+    approach: str,
+    config_name: str,
+    min_query_sim: float = 0.8,
+    min_jaccard: float = 0.8,
+    examples_top_k: Optional[int] = None,
+):
     """Esegue la validazione.
 
     Criterio di successo:
     - strict: risultati uguali (o equivalenti via fallback).
-    - attendibile: query_string_similarity >= min_query_sim (default 0.80).
-
-    Nota: manteniamo il Jaccard solo come metrica informativa sui set di risultati,
-    ma non lo usiamo per determinare l'attendibilità.
+    - attendibile: jaccard_similarity >= min_jaccard (default 0.80).
+      La query similarity rimane informativa.
     """
     """Esegue validazione."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -643,6 +650,8 @@ def run_validation(approach: str, config_name: str, min_query_sim: float = 0.8):
     # Nuovi contatori: attendibile (threshold) vs strict
     success_attendibile = 0
     success_strict = 0
+    success_similarity = 0
+    success_jaccard = 0
     results = []
 
     print(f"Test totali: {total}\n")
@@ -669,13 +678,20 @@ def run_validation(approach: str, config_name: str, min_query_sim: float = 0.8):
             "time_synthesis": None,
             "jaccard_index": None,
             "query_similarity": None,
+            "specialist": None,
+            "jaccard_success": None,
+            "similarity_success": None,
+            "examples_top_k": examples_top_k,
         }
 
         try:
             # Chiama API
+            payload = {"question": question, "user_id": f"val_{i}_{timestamp}"}
+            if examples_top_k is not None and examples_top_k > 0:
+                payload["examples_top_k"] = examples_top_k
             response = requests.post(
                 f"{API_URL}/ask",
-                json={"question": question, "user_id": f"val_{i}_{timestamp}"},
+                json=payload,
                 timeout=180,
             )
 
@@ -690,12 +706,14 @@ def run_validation(approach: str, config_name: str, min_query_sim: float = 0.8):
             data = response.json()
             generated = data.get("query_generata")
             timing = data.get("timing_details", {})
+            specialist_used = data.get("specialist")
 
             result["generated_cypher"] = generated
             result["time_total"] = timing.get("totale")
             result["time_generation"] = timing.get("generazione_query")
             result["time_db"] = timing.get("esecuzione_db")
             result["time_synthesis"] = timing.get("sintesi_risposta")
+            result["specialist"] = specialist_used
 
             if not generated:
                 raise ValueError("Query mancante")
@@ -715,10 +733,18 @@ def run_validation(approach: str, config_name: str, min_query_sim: float = 0.8):
                 result["jaccard_index"] = jac
                 result["query_similarity"] = qsim
 
-                # Soglia "attendibile": SOLO query similarity
-                attendibile = isinstance(qsim, (int, float)) and qsim >= float(
+                similarity_success = isinstance(qsim, (int, float)) and qsim >= float(
                     min_query_sim
                 )
+                jaccard_success = isinstance(jac, (int, float)) and jac >= float(
+                    min_jaccard
+                )
+                result["similarity_success"] = bool(similarity_success)
+                result["jaccard_success"] = bool(jaccard_success)
+                if similarity_success:
+                    success_similarity += 1
+                if jaccard_success:
+                    success_jaccard += 1
 
                 same = compare_results(gen_res, exp_res)
                 if not same:
@@ -728,18 +754,18 @@ def run_validation(approach: str, config_name: str, min_query_sim: float = 0.8):
                     # Fallback 2: se entrambe sono scalari numerici uguali entro tolleranza, considera PASS
                     same = compare_numeric_scalar(gen_res, exp_res)
                 result["strict_success"] = bool(same)
-                result["attendibile"] = bool(attendibile)
-                if same:
+                result["attendibile"] = bool(same or jaccard_success)
+                if jaccard_success:
+                    result["success"] = True
+                    result["success_reason"] = "jaccard"
+                    success_attendibile += 1
+                    print(f"  ✅ PASS (jaccard>={min_jaccard})")
+                elif same:
                     result["success"] = True
                     result["success_reason"] = "strict"
                     success_strict += 1
                     success_attendibile += 1
                     print("  ✅ PASS (strict)")
-                elif attendibile:
-                    result["success"] = True
-                    result["success_reason"] = "attendibile"
-                    success_attendibile += 1
-                    print(f"  ✅ PASS (attendibile: qsim>={min_query_sim})")
                 else:
                     # Spiega mismatch
                     diff = explain_mismatch(gen_res, exp_res, max_rows=3)
@@ -747,6 +773,7 @@ def run_validation(approach: str, config_name: str, min_query_sim: float = 0.8):
                     result["error"] = "Results mismatch"
                     result["mismatch_missing"] = diff.get("missing")
                     result["mismatch_extra"] = diff.get("extra")
+                    result["attendibile"] = False
                     print("  ❌ MISMATCH")
                     if diff.get("note"):
                         print(f"     diff: {diff['note']}")
@@ -767,10 +794,12 @@ def run_validation(approach: str, config_name: str, min_query_sim: float = 0.8):
 
     # Metriche
     # Accuracy
-    # - attendibile: passa se strict OR query_similarity >= soglia
+    # - attendibile: passa se strict OR jaccard >= soglia
     # - strict: passa solo se i risultati coincidono (o tramite fallback)
     accuracy_att = (success_attendibile / total * 100) if total > 0 else 0
     accuracy_str = (success_strict / total * 100) if total > 0 else 0
+    accuracy_sim = (success_similarity / total * 100) if total > 0 else 0
+    accuracy_jac = (success_jaccard / total * 100) if total > 0 else 0
     avg_time = sum(r["time_total"] for r in results if r["time_total"]) / total
     # Medie indici (solo dove calcolati)
     jac_values = [
@@ -787,7 +816,10 @@ def run_validation(approach: str, config_name: str, min_query_sim: float = 0.8):
     avg_qsim = (sum(qsim_values) / len(qsim_values)) if qsim_values else None
 
     # Salva
-    output_file = RESULTS_DIR / f"{full_config_name}_{timestamp}.json"
+    model_results_dir = RESULTS_DIR / full_config_name
+    model_results_dir.mkdir(exist_ok=True)
+
+    output_file = model_results_dir / f"{timestamp}.json"
     with open(output_file, "w") as f:
         json.dump(
             {
@@ -795,14 +827,20 @@ def run_validation(approach: str, config_name: str, min_query_sim: float = 0.8):
                 "approach": approach,
                 "config_name": config_name,
                 "timestamp": timestamp,
+                "examples_top_k": examples_top_k,
                 "summary": {
                     "total": total,
                     "success_attendibile": success_attendibile,
                     "success_strict": success_strict,
+                    "success_similarity": success_similarity,
+                    "success_jaccard": success_jaccard,
                     "failures": total - success_attendibile,
                     "accuracy": accuracy_att,
                     "accuracy_strict": accuracy_str,
+                    "accuracy_similarity": accuracy_sim,
+                    "accuracy_jaccard": accuracy_jac,
                     "min_query_similarity": float(min_query_sim),
+                    "min_jaccard": float(min_jaccard),
                     "avg_time": avg_time,
                     "avg_jaccard": avg_jaccard,
                     # Manteniamo solo l'avg del Jaccard principale come metrica informativa
@@ -816,7 +854,7 @@ def run_validation(approach: str, config_name: str, min_query_sim: float = 0.8):
         )
 
     # Scrive anche un report testuale/Markdown affiancato al JSON, con le metriche chiave
-    report_md = RESULTS_DIR / f"{full_config_name}_{timestamp}.md"
+    report_md = model_results_dir / f"{timestamp}.md"
     try:
         lines = []
         lines.append(f"# Validation Report — {full_config_name}")
@@ -825,11 +863,22 @@ def run_validation(approach: str, config_name: str, min_query_sim: float = 0.8):
         lines.append(f"- Total: {total}")
         lines.append(f"- Success (attendibile): {success_attendibile}")
         lines.append(f"- Success (strict): {success_strict}")
+        lines.append(f"- Success (query-sim): {success_similarity}")
+        lines.append(f"- Success (jaccard): {success_jaccard}")
         lines.append(f"- Failures: {total - success_attendibile}")
         lines.append(
             f"- Accuracy (attendibile): {accuracy_att:.1f}%  |  Accuracy (strict): {accuracy_str:.1f}%"
         )
-        lines.append(f"- Threshold: min_query_sim={float(min_query_sim):.2f}")
+        lines.append(
+            f"- Accuracy (query-sim): {accuracy_sim:.1f}%  |  Accuracy (jaccard): {accuracy_jac:.1f}%"
+        )
+        lines.append(
+            f"- Thresholds: min_query_sim={float(min_query_sim):.2f} | min_jaccard={float(min_jaccard):.2f}"
+        )
+        if examples_top_k is not None:
+            lines.append(f"- Examples Top-K override: {examples_top_k}")
+        else:
+            lines.append("- Examples Top-K override: default server value")
         lines.append(f"- Avg Time: {avg_time:.2f}s")
         if avg_jaccard is not None:
             lines.append(f"- Avg Jaccard: {avg_jaccard:.3f}")
@@ -871,12 +920,21 @@ def run_validation(approach: str, config_name: str, min_query_sim: float = 0.8):
         f"Accuracy (attendibile): {accuracy_att:.1f}% ({success_attendibile}/{total})"
     )
     print(f"Accuracy (strict):     {accuracy_str:.1f}% ({success_strict}/{total})")
+    print(f"Accuracy (query-sim):  {accuracy_sim:.1f}% ({success_similarity}/{total})")
+    print(f"Accuracy (jaccard):    {accuracy_jac:.1f}% ({success_jaccard}/{total})")
     print(f"Avg Time:  {avg_time:.2f}s")
     if avg_jaccard is not None:
         print(f"Avg Jaccard: {avg_jaccard:.3f}")
     # NOTE: rimosse varianti di Jaccard per semplicità
     if avg_qsim is not None:
         print(f"Avg QuerySim: {avg_qsim:.3f}")
+    print(
+        f"Thresholds → min_query_sim={float(min_query_sim):.2f} | min_jaccard={float(min_jaccard):.2f}"
+    )
+    if examples_top_k is not None:
+        print(f"Examples Top-K override: {examples_top_k}")
+    else:
+        print("Examples Top-K override: default server value")
     print(f"Saved:     {output_file.name}")
 
     return {
@@ -885,10 +943,15 @@ def run_validation(approach: str, config_name: str, min_query_sim: float = 0.8):
         "config_name": config_name,
         "accuracy": accuracy_att,
         "accuracy_strict": accuracy_str,
+        "accuracy_similarity": accuracy_sim,
+        "accuracy_jaccard": accuracy_jac,
         "success": success_attendibile,
         "success_strict": success_strict,
+        "success_similarity": success_similarity,
+        "success_jaccard": success_jaccard,
         "total": total,
         "avg_time": avg_time,
+        "examples_top_k": examples_top_k,
     }
 
 
@@ -932,6 +995,21 @@ def main():
         default=_def_min_qsim,
         help="Soglia minima query similarity per attendibile (default 0.8 o VAL_MIN_QUERY_SIM)",
     )
+    try:
+        _def_min_jaccard = float(os.getenv("VAL_MIN_JACCARD", "0.8"))
+    except Exception:
+        _def_min_jaccard = 0.8
+    parser.add_argument(
+        "--min-jaccard",
+        type=float,
+        default=_def_min_jaccard,
+        help="Soglia minima dell'indice di Jaccard per considerare i risultati equivalenti (default 0.8 o VAL_MIN_JACCARD)",
+    )
+    parser.add_argument(
+        "--examples-top-k",
+        type=int,
+        help="Override del numero di esempi RAG passati al coder (se omesso usa il default del server)",
+    )
 
     args = parser.parse_args()
 
@@ -953,14 +1031,26 @@ def main():
         update_model_config("specialist", "gpt4o-mini")
         prompt_restart_api("specialist")
         wait_for_api()
-        res1 = run_validation("specialist", "gpt4o-mini", args.min_query_sim)
+        res1 = run_validation(
+            "specialist",
+            "gpt4o-mini",
+            args.min_query_sim,
+            args.min_jaccard,
+            args.examples_top_k,
+        )
 
         # Test hybrid
         print("\nTesting HYBRID...")
         update_model_config("hybrid", "gpt4o-mini")
         prompt_restart_api("hybrid")
         wait_for_api()
-        res2 = run_validation("hybrid", "gpt4o-mini", args.min_query_sim)
+        res2 = run_validation(
+            "hybrid",
+            "gpt4o-mini",
+            args.min_query_sim,
+            args.min_jaccard,
+            args.examples_top_k,
+        )
 
         # Confronto
         if res1 and res2:
@@ -991,7 +1081,13 @@ def main():
             update_model_config(approach, config)
             prompt_restart_api(approach)
             wait_for_api()
-            res = run_validation(approach, config, args.min_query_sim)
+            res = run_validation(
+                approach,
+                config,
+                args.min_query_sim,
+                args.min_jaccard,
+                args.examples_top_k,
+            )
             if res:
                 all_results.append(res)
 
@@ -1016,13 +1112,25 @@ def main():
                 update_model_config(args.approach, cfg_name)
                 prompt_restart_api(args.approach)
                 wait_for_api()
-                run_validation(args.approach, cfg_name, args.min_query_sim)
+                run_validation(
+                    args.approach,
+                    cfg_name,
+                    args.min_query_sim,
+                    args.min_jaccard,
+                    args.examples_top_k,
+                )
         else:
             # Singola config
             update_model_config(args.approach, args.config)
             prompt_restart_api(args.approach)
             wait_for_api()
-            run_validation(args.approach, args.config, args.min_query_sim)
+            run_validation(
+                args.approach,
+                args.config,
+                args.min_query_sim,
+                args.min_jaccard,
+                args.examples_top_k,
+            )
         return
 
     # Help

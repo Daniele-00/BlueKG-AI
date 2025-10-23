@@ -360,8 +360,7 @@ examples:
   cypher: MATCH (dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo
     > 0 RETURN max(dr.importo) AS importoMassimo
 - id: sales_cycle_040
-  question: Calcola il fatturato totale per il secondo trimestre del 2024 (aprile,
-    maggio, giugno).
+  question: Calcola il fatturato totale per il secondo trimestre del 2024 (aprile, maggio, giugno).
   cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
     WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 AND doc.dataEmissione.year
     = 2024 AND doc.dataEmissione.month IN [4, 5, 6] RETURN sum(dr.importo) AS fatturatoTrimestre

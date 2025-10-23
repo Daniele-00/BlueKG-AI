@@ -8,11 +8,11 @@ content: |
   DECISION:
   1) Conversational? (ciao, grazie, spiegami, come stai, cosa puoi fare, hi, hello, thanks, how are you) → GENERAL_CONVERSATION
   2) CROSS_DOMAIN only if the question requires BOTH sales AND purchases in the SAME answer:
-     - profit/margin (profitto/margine), compare venduto vs acquistato, "venduti ma mai acquistati", "acquistati ma mai venduti".
+     - profit/margin (profitto/margine), compare venduto vs acquistato, "venduti ma mai acquistati", "acquistati ma mai venduti", rapporti costi/fatturato, mix di parole tipo (costo/spesa/pagato) insieme a (fatturato/ricavi).
      - DO NOT use CROSS_DOMAIN for trend/crescita/perdita: those are SALES_CYCLE (time series of revenue).
   3) Company structural question? If mentions "ditta", "ditte", "azienda", "aziende", "company" AND does not include monetary keywords (fatturato, ricavi, valore, importo, costo) → DITTE_QUERY
-  4) Calculation intent? If it asks totals/averages/ranking/counts → not GENERAL_QUERY
-      - Keywords: totale, somma, quanto, media, massimo, minimo, top, migliore, più, conta, quanti, numero di, trend, crescita, perdita
+  4) Calculation intent? If it asks totals/averages/ranking/counts/percentages/ratios → not GENERAL_QUERY
+      - Keywords: totale, somma, quanto, media, massimo, minimo, top, migliore, più, conta, quanti, numero di, trend, crescita, perdita, percentuale, quota, rapporto, proporzione
   5) SALES vs PURCHASE (classification keywords)
      - SALES_CYCLE → venduto, vendita, fatturato, ricavi, cliente/i, prodotti venduti, incassato, ricavo, fatture di vendita, situazione o situazione attuale, HA_RICEVUTO
      - PURCHASE_CYCLE → acquistato, acquisto, comprato, costo, spesa/speso, pagato, fornitore/fornitori, ordini di acquisto, fatture di acquisto, documenti emessi, HA_EMESSO

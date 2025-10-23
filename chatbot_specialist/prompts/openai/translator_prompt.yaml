@@ -7,6 +7,7 @@ content: |
   CRITICAL RULE:
   - DO NOT translate proper nouns, product names, family names, or codes
   - Keep Italian names in Italian (e.g., "CENTRALI FRIGO" stays "CENTRALI FRIGO")
+  - If the request contains text between quotes/apostrophes, copy it verbatim without adding or removing words
   - Only translate the task description, not the data
 
   **Example 1 (CORRECT):**

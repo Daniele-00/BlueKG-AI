@@ -9,6 +9,7 @@ SALES_CYCLE: |
   ---
   RULES:
   - Start from customer path: (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+  - When you need to reuse documents or rows later, bind them explicitly once (es. MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)) and keep those alias names consistent across WITH/RETURN.
   - VALUE vs QUANTITY:
     - Value-based (fatturato, valore venduto, ricavi): filter `WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0` and aggregate `sum(dr.importo)`.
     - Quantity-based (quantità, pezzi, unità): aggregate `sum(dr.quantita)` and DO NOT filter by `dr.tipoValore` unless explicitly requested in the question.
@@ -18,6 +19,7 @@ SALES_CYCLE: |
   - Date: use doc.dataEmissione.year when needed
   - Trend questions ("attualmente", crescita/perdita): restrict to the last two years only using `doc.dataEmissione.year IN [date().year, date().year-1]`.
   - Product filters: ALWAYS join via (dr)-[:RIGUARDA_ARTICOLO]->(a:Articolo) and filter a.descrizione
+  - Preserve verbatim any literal in the question (especially strings between quotes/apostrophes). Do NOT invent prefixes/suffixes for product names.
   - Family filters: ALWAYS join via (a)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia) and filter toLower(trim(fam.nome)). NEVER filter a.descrizione when the question mentions "famiglia".
   - If the question contains "quanti", "numero di", "conta", "unici" → use count(DISTINCT ...), do NOT return lists
   - Avoid unnecessary WITH: if a single MATCH + RETURN suffices, do not insert a WITH. Use WITH only to pass aggregated values or limit variables for the next stage.
@@ -47,20 +49,44 @@ SALES_CYCLE: |
   WHERE toLower(trim(a.descrizione)) = 'x' AND dr.tipoValore='Fatturato' AND dr.importo>0
   RETURN sum(dr.importo) AS totaleVenduto
 
+  // Turnover by month in the current year
+  MATCH (:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+  WHERE dr.tipoValore='Fatturato' AND dr.importo>0 AND doc.dataEmissione.year = date().year
+  RETURN doc.dataEmissione.month AS mese, sum(dr.importo) AS fatturatoMensile
+  ORDER BY mese
 
-  // Percentage of revenue from region 'Umbria'
-  Qual è la percentuale di fatturato generata dai clienti della regione 'Umbria' sul totale?
-    MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo)
-    MATCH (c)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
-    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0
-    WITH toLower(trim(l.regione)) AS regione, sum(dr.importo) AS fatturatoRegione
-    WITH collect({{regione: regione, fatturato: fatturatoRegione}}) AS fatturatiPerRegione, sum(dr.importo) AS fatturatoTotale
-    UNWIND fatturatiPerRegione AS voce
-    WITH voce.regione AS regione, voce.fatturato AS fatturatoRegione, fatturatoTotale
-    WHERE regione = 'umbria'
-    RETURN (fatturatoRegione / fatturatoTotale) * 100.0 AS percentualeFatturatoUmbria
+  // Best year per company 
+  MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+  WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0
+  WITH d, doc.dataEmissione.year AS anno, sum(dr.importo) AS fatturatoAnnuale
+  ORDER BY d.dittaId, fatturatoAnnuale DESC
+  WITH d, collect({{anno: anno, fatturato: fatturatoAnnuale}}) AS fatturatiOrdinati
+  RETURN d.dittaId AS ditta, fatturatiOrdinati[0].anno AS annoTop, fatturatiOrdinati[0].fatturato AS fatturatoMassimo
+  // Do NOT add LIMIT here: return all companies
+
+  // Compare turnover between two specific years
+  MATCH (:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+  WHERE dr.tipoValore='Fatturato' AND dr.importo>0 AND doc.dataEmissione.year IN [2023, 2024]
+  RETURN doc.dataEmissione.year AS anno, sum(dr.importo) AS fatturatoTotale
+  ORDER BY anno
+
+  // Companies that sell product of family X
+  MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia)
+  WHERE toLower(trim(fam.nome)) = 'x'
+  RETURN DISTINCT d.dittaId AS ditta
+  ORDER BY ditta
+
+  // Revenue for family X
+  MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia)
+  WHERE toLower(trim(fam.nome)) = 'elettrodomestici' AND dr.tipoValore='Fatturato' AND dr.importo>0
+  RETURN sum(dr.importo) AS fatturatoFamiglia
   
-
+  // Locality with most customers
+  MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo)
+  WHERE l.localita IS NOT NULL
+  RETURN l.localita AS localita, count(DISTINCT c) AS numeroClientiUnici
+  ORDER BY numeroClientiUnici DESC 
+  LIMIT 1
 PURCHASE_CYCLE: |
   You generate Cypher for PURCHASES/COST questions.
 
@@ -70,6 +96,7 @@ PURCHASE_CYCLE: |
   ---
   RULES:
   - Start from supplier path: (f:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+  - When reusing document/row aliases later, match them explicitly (MATCH (f:Fornitore)-[:HA_EMESSO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)) and keep the same alias names across WITH/RETURN.
   - Group suppliers by GruppoFornitore: (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(f:Fornitore)
   - VALUE vs QUANTITY:
     - Value-based (costo, speso, pagato, valore acquistato): aggregate `sum(dr.importo)`; no `tipoValore` filter unless explicitly requested.
@@ -78,6 +105,7 @@ PURCHASE_CYCLE: |
   - Avoid re-matching after an aggregation that may multiply rows; prefer single MATCH + RETURN or proper scoping
   - When counting documents by supplier or supplier group, prefer count(DISTINCT doc) to avoid duplicates due to joins.
   - Avoid unnecessary WITH: prefer one-stage MATCH + RETURN if possible; use WITH only when you need to pass aggregates/variables to a following stage.
+  - Preserve verbatim any literal text coming from the question (strings in quotes/apostrophes). Do not invent new prefixes or translate product names.
 
   Examples:
   // Total bought from supplier X
@@ -91,15 +119,35 @@ PURCHASE_CYCLE: |
   ORDER BY quantitaTotale DESC
   LIMIT 1
 
+  // Locality with most suppliers
+  MATCH (f:Fornitore)-[:SI_TROVA_A]->(l:Luogo)
+  WHERE l.localita IS NOT NULL
+  RETURN l.localita AS localita, count(DISTINCT f) AS numeroFornitori
+  ORDER BY numeroFornitori DESC LIMIT 1
+
   // Total cost for a specific product 
   MATCH (a:Articolo)<-[:RIGUARDA_ARTICOLO]-(dr:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)
   WHERE toLower(trim(a.descrizione)) = 'gas freon solstice n40 r448a'
   RETURN sum(dr.importo) AS costoTotaleAcquisto
 
+  // Supplier with most documents
+  MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(doc:Documento)
+  RETURN gf.ragioneSociale AS fornitore, count(DISTINCT doc) AS numeroDocumenti
+  ORDER BY numeroDocumenti DESC
+  LIMIT 1
+
   // Purchase price of the product X
   MATCH (a:Articolo)<-[:RIGUARDA_ARTICOLO]-(dr:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)
   WHERE toLower(trim(a.descrizione)) = 'gas freon solstice n40 r448a'
   RETURN sum(dr.importo) AS prezzoAcquisto
+
+  // Supplier most active in the last quarter (by value)
+  WITH date() - duration({{months: 3}}) AS dataInizio
+  MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
+  WHERE doc.dataEmissione >= dataInizio
+  RETURN gf.ragioneSociale AS fornitore, sum(dr.importo) AS valoreAcquistato
+  ORDER BY valoreAcquistato DESC
+  LIMIT 1
 
   Final Cypher Query:
 
@@ -137,6 +185,8 @@ GENERAL_QUERY: |
   RETURN DISTINCT doc.documentoId AS documento
   LIMIT 10
 
+
+
   Final Cypher Query:
 
 DITTE_QUERY: |
@@ -163,17 +213,25 @@ DITTE_QUERY: |
   MATCH (d:Ditta)
   RETURN d.dittaId AS ditta
   ORDER BY ditta
+  LIMIT 20
 
   // Sort companies by number of sales documents
   MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(doc:Documento)
   RETURN d.dittaId AS ditta, count(doc) AS numeroDocumenti
   ORDER BY numeroDocumenti DESC
 
+  // Companies that sell family Y 
+  MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia)
+  WHERE toLower(trim(fam.nome)) = 'y'
+  RETURN DISTINCT d.dittaId AS ditta
+  ORDER BY ditta
+
   //Companies that purchase family Y
   MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia)
   WHERE toLower(trim(fam.nome)) = 'y'
   RETURN DISTINCT d.dittaId AS ditta
   ORDER BY ditta
+
 
   Final Cypher Query:
 
@@ -193,6 +251,9 @@ CROSS_DOMAIN: |
   WHERE a IN articoliVenduti
   RETURN DISTINCT gf.ragioneSociale AS fornitore ORDER BY fornitore
 
+  
+  // Trend belongs to SALES_CYCLE (see SALES_CYCLE section)
+
   // Sold but never purchased
   MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
   WHERE NOT (a)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)
@@ -203,6 +264,7 @@ CROSS_DOMAIN: |
   WHERE NOT (a)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento {{tipoValore:'Fatturato'}})
   RETURN DISTINCT a.descrizione AS prodottoMaiVenduto
   LIMIT 5
+  ORDER BY prodottoMaiVenduto
 
   // Suppliers of items sold to the best customer
   MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)

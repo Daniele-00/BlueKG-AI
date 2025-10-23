@@ -16,6 +16,7 @@ content: |
   {error}
 
   Guidelines:
+  - Preserve verbatim any literal values that appear in the question/bad query (e.g., strings within quotes/apostrophes). Do NOT invent or expand product names.
   - Keep variables alive across WITH (include them in WITH)
   - Remove unnecessary WITH: merge into a single MATCH + RETURN when possible
   - Use a.descrizione for product filters (join via RIGUARDA_ARTICOLO)
@@ -36,6 +37,7 @@ content: |
   - Use the correct direction for cycles:
       SALES: (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr)
       PURCHASE: (f:Fornitore)-[:HA_EMESSO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr)
+  - If you reference a label/alias (doc, dr, l, etc.) in WHERE/RETURN, ensure it is introduced in the most recent MATCH (no implicit aliases). Never write conditions like `WHERE doc.-[:REL]`.
   - For PURCHASE totals by quantity/value, join the article and family as usual and aggregate:
       MATCH (f:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
       MATCH (a)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia)
