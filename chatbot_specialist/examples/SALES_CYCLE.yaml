@@ -33,22 +33,22 @@ examples:
     sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC LIMIT 1
 - id: sales_cycle_003
   question: Elenca i 5 clienti che hanno fatturato di più che si trovano a Perugia
-  cypher: MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) WHERE toLower(trim(l.provincia))
-    = 'pg' MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
-    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN c.name AS cliente,
-    sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC LIMIT 5
+  cypher: MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) WHERE toLower(trim(l.localita)) = 'perugia'
+    MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) 
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN c.name AS cliente, sum(dr.importo) AS fatturatoTotale 
+    ORDER BY fatturatoTotale DESC LIMIT 5
 - id: sales_cycle_003_var1
   question: Variant 1
-  cypher: MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) WHERE toLower(trim(l.provincia))
-    = 'pg' MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
-    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN c.name AS cliente,
-    sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC LIMIT 5
+  cypher: MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) WHERE toLower(trim(l.localita)) = 'perugia'
+    MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) 
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN c.name AS cliente, sum(dr.importo) AS fatturatoTotale 
+    ORDER BY fatturatoTotale DESC LIMIT 5
 - id: sales_cycle_003_var2
   question: Quali sono i 5 clienti con il fatturato più alto situati a Perugia?
-  cypher: MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) WHERE toLower(trim(l.provincia))
-    = 'pg' MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
-    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN c.name AS cliente,
-    sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC LIMIT 5
+  cypher: MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) WHERE toLower(trim(l.localita)) = 'perugia'
+    MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) 
+    WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN c.name AS cliente, sum(dr.importo) AS fatturatoTotale 
+    ORDER BY fatturatoTotale DESC LIMIT 5
 - id: sales_cycle_004
   question: Mostrami i 5 prodotti più popolari in termini di quantità venduta
   cypher: MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)
@@ -278,23 +278,23 @@ examples:
     date('2024-01-01') AND doc.dataEmissione <= date('2024-03-31') RETURN sum(dr.importo)
     AS fatturatoPeriodo
 - id: sales_cycle_031
-  question: Elenca i clienti con fatturato superiore a 50000 euro
+  question: Elenca 20 clienti con fatturato superiore a 50000 euro
   cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
     WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH c, sum(dr.importo) AS
     fatturatoTotale WHERE fatturatoTotale > 50000 RETURN c.name AS cliente, fatturatoTotale
-    ORDER BY fatturatoTotale DESC
+    ORDER BY fatturatoTotale DESC LIMIT 20
 - id: sales_cycle_031_var1
-  question: Variant 1
+  question: 'Variant 1: Quali sono 20 clienti con fatturato superiore a 50000 euro'
   cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
     WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH c, sum(dr.importo) AS
     fatturatoTotale WHERE fatturatoTotale > 50000 RETURN c.name AS cliente, fatturatoTotale
-    ORDER BY fatturatoTotale DESC
+    ORDER BY fatturatoTotale DESC LIMIT 20
 - id: sales_cycle_031_var2
-  question: Mostra i clienti che hanno un fatturato oltre i 50000 euro
+  question: 'Variant 2: Mostra 20 clienti che hanno un fatturato oltre i 50000 euro'
   cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
     WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH c, sum(dr.importo) AS
     fatturatoTotale WHERE fatturatoTotale > 50000 RETURN c.name AS cliente, fatturatoTotale
-    ORDER BY fatturatoTotale DESC
+    ORDER BY fatturatoTotale DESC LIMIT 20
 - id: sales_cycle_032
   question: Quali sono i 3 prodotti più venduti al cliente 'BARONE DI FERRANTE EZIO'?
   cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)

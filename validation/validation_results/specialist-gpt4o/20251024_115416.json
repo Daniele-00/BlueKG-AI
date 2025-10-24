@@ -1,0 +1,638 @@
+{
+  "config": "specialist-gpt4o",
+  "approach": "specialist",
+  "config_name": "gpt4o",
+  "timestamp": "20251024_115416",
+  "examples_top_k": 2,
+  "summary": {
+    "total": 17,
+    "success_strict": 2,
+    "success_similarity": 0,
+    "success_jaccard": 2,
+    "failures": 15,
+    "accuracy": 11.76470588235294,
+    "accuracy_strict": 11.76470588235294,
+    "accuracy_similarity": 0.0,
+    "accuracy_jaccard": 11.76470588235294,
+    "min_query_similarity": 0.8,
+    "min_jaccard": 0.8,
+    "avg_time": 9.734017786925987,
+    "avg_jaccard": 0.17857142857142858,
+    "avg_query_similarity": 0.43729084685992387
+  },
+  "results": [
+    {
+      "config": "specialist-gpt4o",
+      "test_id": "TEST-107-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Quali sono i 5 articoli con il margine di profitto percentuale pi\u00f9 alto?",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (a:Articolo)<-[:RIGUARDA_ARTICOLO]-(dr:RigaDocumento)-[:CONTIENE_RIGA]-(:Documento)-[:IS_TYPE]->(dt:DocType)\nWITH a, \n     sum(CASE WHEN dr.tipoValore = 'Fatturato' AND dr.importo > 0 THEN dr.importo ELSE 0 END) AS totaleVendite,\n     sum(CASE WHEN dr.tipoValore = 'Acquisto' AND dr.importo > 0 THEN dr.importo ELSE 0 END) AS totaleAcquisti\nWHERE totaleAcquisti > 0\nWITH a.descrizione AS articolo, \n     CASE WHEN totaleAcquisti = 0 THEN null ELSE (totaleVendite - totaleAcquisti) / totaleAcquisti * 100 END AS marginePercentuale\nRETURN articolo, marginePercentuale\nORDER BY marginePercentuale DESC\nLIMIT 5",
+      "expected_cypher": "MATCH (a:Articolo)<-[:RIGUARDA_ARTICOLO]-(dr_acq:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore) WITH a, sum(dr_acq.importo) AS costoTotale MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_ven:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(:Cliente) WHERE dr_ven.tipoValore = 'Fatturato' AND dr_ven.importo > 0 WITH a, costoTotale, sum(dr_ven.importo) AS fatturatoTotale WHERE costoTotale > 0 RETURN a.descrizione AS prodotto, ((fatturatoTotale - costoTotale) * 100.0 / costoTotale) AS marginePercentuale ORDER BY marginePercentuale DESC LIMIT 5",
+      "time_total": 9.618684781715274,
+      "time_generation": 2.5413422100245953,
+      "time_db": 1.1305132489651442,
+      "time_synthesis": 2.515023190062493,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.3065068493150685,
+      "specialist": "CROSS_DOMAIN",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": 2,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "prodotto": "PISTONE",
+          "marginePercentuale": 11628.865164096484
+        },
+        {
+          "prodotto": "CONTATT.TELEMEC LC1D6511M7",
+          "marginePercentuale": 6594.55330967443
+        },
+        {
+          "prodotto": "NASTRO ARMAFLEX",
+          "marginePercentuale": 6215.8700288545815
+        }
+      ],
+      "mismatch_extra": []
+    },
+    {
+      "config": "specialist-gpt4o",
+      "test_id": "TEST-108-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Mostrami la crescita del fatturato mese su mese per il 2024",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType),\n      (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 AND doc.dataEmissione.year = 2024\nWITH doc.dataEmissione.month AS mese, sum(dr.importo) AS fatturato\nORDER BY mese\nWITH collect({mese: mese, fatturato: fatturato}) AS dati\nUNWIND range(0, size(dati) - 1) AS i\nWITH dati[i] AS corrente, (CASE WHEN i = 0 THEN null ELSE dati[i - 1].fatturato END) AS fatturatoPrecedente\nRETURN corrente.mese AS mese, \n       CASE \n         WHEN fatturatoPrecedente IS NULL THEN null\n         WHEN fatturatoPrecedente = 0 THEN null\n         ELSE (corrente.fatturato - fatturatoPrecedente) / fatturatoPrecedente * 100 \n       END AS crescitaPercentuale\nORDER BY mese",
+      "expected_cypher": "MATCH (:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 AND doc.dataEmissione.year = 2024 WITH doc.dataEmissione.month AS mese, sum(dr.importo) AS fatturatoMensile ORDER BY mese WITH collect({mese: mese, fatturato: fatturatoMensile}) AS datiMensili UNWIND range(0, size(datiMensili)-2) AS i RETURN datiMensili[i].mese AS mese, datiMensili[i].fatturato AS fatturatoCorrente, datiMensili[i+1].fatturato AS fatturatoPrecedente, ((datiMensili[i].fatturato - datiMensili[i+1].fatturato) * 100.0 / datiMensili[i+1].fatturato) AS crescitaPercentuale",
+      "time_total": 11.802575123962015,
+      "time_generation": 3.069899662863463,
+      "time_db": 3.3584128748625517,
+      "time_synthesis": 3.3790693199262023,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.612184249628529,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": 2,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "mese": 8,
+          "fatturatoCorrente": 900933.2500000008,
+          "fatturatoPrecedente": 1033233.540000001,
+          "crescitaPercentuale": -12.804490454307167
+        },
+        {
+          "mese": 2,
+          "fatturatoCorrente": 719102.9900000009,
+          "fatturatoPrecedente": 1063607.1100000003,
+          "crescitaPercentuale": -32.390167079646474
+        },
+        {
+          "mese": 5,
+          "fatturatoCorrente": 1526355.780000001,
+          "fatturatoPrecedente": 1019968.1500000012,
+          "crescitaPercentuale": 49.647396342719055
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "mese": 1,
+          "crescitaPercentuale": null
+        },
+        {
+          "mese": 2,
+          "crescitaPercentuale": -33.588394642845216
+        },
+        {
+          "mese": 9,
+          "crescitaPercentuale": 14.684804895368222
+        }
+      ]
+    },
+    {
+      "config": "specialist-gpt4o",
+      "test_id": "TEST-109-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Dammi 10 clienti hanno ridotto il loro fatturato di almeno il 20% rispetto all'anno precedente?",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 AND doc.dataEmissione.year IN [date().year, date().year-1]\nWITH c, doc.dataEmissione.year AS year, sum(dr.importo) AS annualRevenue\nORDER BY year\nWITH c, collect(annualRevenue) AS revenues\nWHERE size(revenues) = 2 AND revenues[0] > 0 AND (revenues[1] / revenues[0]) <= 0.8\nRETURN c.name AS cliente, revenues[0] AS revenueLastYear, revenues[1] AS revenueThisYear\nORDER BY revenueThisYear DESC\nLIMIT 10",
+      "expected_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 AND doc.dataEmissione.year IN [date().year - 1, date().year - 2] WITH c, doc.dataEmissione.year AS anno, sum(dr.importo) AS fatturatoAnnuale WITH c, collect({anno: anno, fatturato: fatturatoAnnuale}) AS fatturatiAnni WHERE size(fatturatiAnni) = 2 WITH c, fatturatiAnni[0].fatturato AS annoCorrente, fatturatiAnni[1].fatturato AS annoPrecedente WHERE annoPrecedente > 0 AND ((annoPrecedente - annoCorrente) * 100.0 / annoPrecedente) >= 20 RETURN c.name AS cliente, annoPrecedente AS fatturatoAnnoPrec, annoCorrente AS fatturatoAnnoCorr, ((annoPrecedente - annoCorrente) * 100.0 / annoPrecedente) AS calosPercentuale ORDER BY calosPercentuale DESC LIMIT 10",
+      "time_total": 11.117497087921947,
+      "time_generation": 2.2971313782036304,
+      "time_db": 0.5394358281046152,
+      "time_synthesis": 6.056892897002399,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.37631184407796103,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": 2,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "cliente": "GPS 2016 SRL",
+          "fatturatoAnnoPrec": 31309.9,
+          "fatturatoAnnoCorr": 694.1,
+          "calosPercentuale": 97.78312929776206
+        },
+        {
+          "cliente": "BARLEWAY SRL",
+          "fatturatoAnnoPrec": 14209.52,
+          "fatturatoAnnoCorr": 206.0,
+          "calosPercentuale": 98.55026770784657
+        },
+        {
+          "cliente": "3F TECNOSYSTEM SRL",
+          "fatturatoAnnoPrec": 58000.0,
+          "fatturatoAnnoCorr": 2217.0,
+          "calosPercentuale": 96.17758620689655
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "cliente": "PAC 2000 A Societ\u00e0 Cooperativa",
+          "revenueLastYear": 645906.6400000001,
+          "revenueThisYear": 56671.69999999998
+        },
+        {
+          "cliente": "L'ABBONDANZA SRL",
+          "revenueLastYear": 1878052.9900000019,
+          "revenueThisYear": 66286.23999999999
+        },
+        {
+          "cliente": "UMBRIAFRIGO SRL",
+          "revenueLastYear": 547085.0599999998,
+          "revenueThisYear": 43897.759999999995
+        }
+      ]
+    },
+    {
+      "config": "specialist-gpt4o",
+      "test_id": "TEST-110-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Trova 10 prodotti che sono stati acquistati da almeno 3 fornitori diversi",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(f:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)\nWITH a, count(DISTINCT gf) AS numeroFornitori\nWHERE numeroFornitori >= 3\nRETURN a.descrizione AS prodotto\nORDER BY prodotto\nLIMIT 10",
+      "expected_cypher": "MATCH (a:Articolo)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)-[:RAGGRUPPATO_SOTTO]->(gf:GruppoFornitore) WITH a, count(DISTINCT gf) AS numeroFornitori WHERE numeroFornitori >= 3 RETURN a.descrizione AS prodotto, numeroFornitori ORDER BY numeroFornitori DESC LIMIT 10",
+      "time_total": 6.277929036878049,
+      "time_generation": 1.7147154128178954,
+      "time_db": 0.28706408897414804,
+      "time_synthesis": 3.098463944159448,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.36482084690553745,
+      "specialist": "PURCHASE_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": 2,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "prodotto": "RICARICA OSSIGENO TURBOSET G-TEC",
+          "numeroFornitori": 4
+        },
+        {
+          "prodotto": "CABLE AWG 3 WIRES L 5M",
+          "numeroFornitori": 3
+        },
+        {
+          "prodotto": "GAS REFRIGERANTE PERFORMAX R407F",
+          "numeroFornitori": 4
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "prodotto": "BOBINA GMC KMA6"
+        },
+        {
+          "prodotto": "MOTOVENTILATORE 16W"
+        },
+        {
+          "prodotto": "MOTOVENTILATORE EVAP NERI PAPST"
+        }
+      ]
+    },
+    {
+      "config": "specialist-gpt4o",
+      "test_id": "TEST-111-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Qual \u00e8 il tempo medio tra l'emissione di un ordine cliente e la relativa fattura?",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(order:Documento)-[:IS_TYPE]->(dtOrder:DocType {codice: 'ORDINE'}), \n      (c)-[:HA_RICEVUTO]->(invoice:Documento)-[:IS_TYPE]->(dtInvoice:DocType {codice: 'FATTURA'})\nWHERE order.dataEmissione < invoice.dataEmissione\nWITH order, invoice, duration.between(order.dataEmissione, invoice.dataEmissione).days AS daysBetween\nRETURN avg(daysBetween) AS averageDaysBetweenOrderAndInvoice",
+      "expected_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(docOrd:Documento)-[:IS_TYPE]->(dtOrd:DocType {codice: 'OC'}) MATCH (c)-[:HA_RICEVUTO]->(docFat:Documento)-[:IS_TYPE]->(dtFat:DocType {codice: 'FVC'}) WHERE docFat.dataEmissione > docOrd.dataEmissione AND duration.between(docOrd.dataEmissione, docFat.dataEmissione).days <= 90 RETURN avg(duration.between(docOrd.dataEmissione, docFat.dataEmissione).days) AS giorniMedi",
+      "time_total": 7.5002392013557255,
+      "time_generation": 2.6469027772545815,
+      "time_db": 0.21928657731041312,
+      "time_synthesis": 3.1657370291650295,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.4207920792079208,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": 2,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "giorniMedi": 14.511059038181342
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "averageDaysBetweenOrderAndInvoice": null
+        }
+      ]
+    },
+    {
+      "config": "specialist-gpt4o",
+      "test_id": "TEST-112-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Elenca le sottofamiglie che non hanno avuto vendite negli ultimi 6 mesi",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (sf:Sottofamiglia)\nWITH sf\nMATCH (sf)<-[:APPARTIENE_A]-(a:Articolo)<-[:RIGUARDA_ARTICOLO]-(dr:RigaDocumento)<-[:CONTIENE_RIGA]-(doc:Documento)-[:IS_TYPE]->(dt:DocType)\nWHERE dt.codice = 'Fatturato' AND dr.importo > 0 AND doc.dataEmissione >= date() - duration({months: 6})\nWITH sf, count(dr) AS salesCount\nWHERE salesCount = 0\nRETURN sf.nome AS sottofamigliaSenzaVendite\nORDER BY sottofamigliaSenzaVendite",
+      "expected_cypher": "MATCH (sf:Sottofamiglia) WHERE NOT EXISTS { MATCH (sf)<-[:APPARTIENE_A]-(:Articolo)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento {tipoValore: 'Fatturato'})<-[:CONTIENE_RIGA]-(doc:Documento) WHERE doc.dataEmissione >= date() - duration({months: 6}) } RETURN sf.nome AS sottofamigliaSenzaVendite ORDER BY sottofamigliaSenzaVendite",
+      "time_total": 6.4393644570373,
+      "time_generation": 1.952987132128328,
+      "time_db": 0.32517646811902523,
+      "time_synthesis": 1.668156834319234,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.680327868852459,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": false,
+      "examples_top_k": 2,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gpt4o",
+      "test_id": "TEST-113-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Qual \u00e8 la concentrazione del fatturato? (percentuale generata dai top 10 clienti)",
+      "success": false,
+      "error": "{code: Neo.ClientError.Statement.SyntaxError} {message: Aggregation column contains implicit grouping expressions. For example, in 'RETURN n.a, n.a + n.b + count(*)' the aggregation expression 'n.a + ",
+      "generated_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0\nWITH c, sum(dr.importo) AS fatturatoCliente\nORDER BY fatturatoCliente DESC\nLIMIT 10\nWITH sum(fatturatoCliente) AS top10Fatturato\nMATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0\nWITH top10Fatturato, sum(dr.importo) AS totalFatturato\nRETURN CASE \n  WHEN totalFatturato = 0 THEN 0.0 \n  ELSE (top10Fatturato * 100.0 / totalFatturato) \nEND AS percentualeConcentrazione",
+      "expected_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH sum(dr.importo) AS fatturatoTotale MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH c, sum(dr.importo) AS fatturatoCliente, fatturatoTotale ORDER BY fatturatoCliente DESC LIMIT 10 RETURN (sum(fatturatoCliente) * 100.0 / fatturatoTotale) AS concentrazioneTop10",
+      "time_total": 11.364615607075393,
+      "time_generation": 3.3084254590794444,
+      "time_db": 3.0533517017029226,
+      "time_synthesis": 3.567105751018971,
+      "jaccard_index": null,
+      "query_similarity": null,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": null,
+      "similarity_success": null,
+      "examples_top_k": 2,
+      "success_reason": null
+    },
+    {
+      "config": "specialist-gpt4o",
+      "test_id": "TEST-114-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Mostrami 10 clienti che acquistano solo prodotti di una singola famiglia",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia)\nWITH c, count(DISTINCT fam) AS numeroFamiglie\nWHERE numeroFamiglie = 1\nRETURN DISTINCT c.name AS clienteMonoFamiglia\nLIMIT 10",
+      "expected_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia) WITH c, count(DISTINCT fam) AS numeroFamiglie WHERE numeroFamiglie = 1 MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia) RETURN c.name AS cliente, collect(DISTINCT fam.nome)[0] AS famigliaUnica LIMIT 10",
+      "time_total": 13.261153003200889,
+      "time_generation": 6.506955330725759,
+      "time_db": 2.8964848699979484,
+      "time_synthesis": 2.2752368389628828,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.6650185414091471,
+      "specialist": "GENERAL_QUERY",
+      "jaccard_success": true,
+      "similarity_success": false,
+      "examples_top_k": 2,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gpt4o",
+      "test_id": "TEST-115-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Qual \u00e8 il tasso di conversione da ordini a fatture per valore?",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr_ord:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)\nMATCH (doc)-[:IS_TYPE]->(dt_ord:DocType)\nWHERE dt_ord.codice = 'ORDINE'\nWITH sum(dr_ord.importo) AS totaleOrdinato\nMATCH (c)-[:HA_RICEVUTO]->(doc_fat:Documento)-[:CONTIENE_RIGA]->(dr_fat:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a)\nMATCH (doc_fat)-[:IS_TYPE]->(dt_fat:DocType)\nWHERE dt_fat.codice = 'FATTURA' AND dr_fat.importo > 0\nWITH totaleOrdinato, sum(dr_fat.importo) AS totaleFatturato\nRETURN CASE \n  WHEN totaleOrdinato = 0 THEN null\n  ELSE totaleFatturato / totaleOrdinato \nEND AS conversionRate",
+      "expected_cypher": "MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore IN ['Ordinato', 'Fatturato'] WITH sum(CASE WHEN dr.tipoValore = 'Ordinato' THEN dr.importo ELSE 0 END) AS totaleOrdinato, sum(CASE WHEN dr.tipoValore = 'Fatturato' THEN dr.importo ELSE 0 END) AS totaleFatturato WHERE totaleOrdinato > 0 RETURN (totaleFatturato * 100.0 / totaleOrdinato) AS tassoConversionePercentuale",
+      "time_total": 7.670255501754582,
+      "time_generation": 3.8875976782292128,
+      "time_db": 0.3375296862795949,
+      "time_synthesis": 1.8881209092214704,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.2524084778420039,
+      "specialist": "CROSS_DOMAIN",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": 2,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "tassoConversionePercentuale": 1873.513169388628
+        }
+      ],
+      "mismatch_extra": []
+    },
+    {
+      "config": "specialist-gpt4o",
+      "test_id": "TEST-116-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Quali sono i 3 giorni della settimana con pi\u00f9 fatturato nel 2024?",
+      "success": false,
+      "error": "API error 500: {'detail': \"Errore durante l'elaborazione: {code: Neo.ClientError.Statement.TypeError} {message: Epoch not supported.}\"}",
+      "generated_cypher": null,
+      "expected_cypher": "MATCH (:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 AND doc.dataEmissione.year = 2024 WITH doc.dataEmissione.dayOfWeek AS giornoSettimana, sum(dr.importo) AS fatturatoGiorno RETURN giornoSettimana, fatturatoGiorno ORDER BY fatturatoGiorno DESC LIMIT 3",
+      "time_total": null,
+      "time_generation": null,
+      "time_db": null,
+      "time_synthesis": null,
+      "jaccard_index": null,
+      "query_similarity": null,
+      "specialist": null,
+      "jaccard_success": null,
+      "similarity_success": null,
+      "examples_top_k": 2,
+      "success_reason": null
+    },
+    {
+      "config": "specialist-gpt4o",
+      "test_id": "TEST-117-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Trova 10 prodotti con rotazione lenta (venduti meno di 5 volte in totale)",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)\nWITH a.descrizione AS prodotto, count(dr) AS numeroVendite\nWHERE numeroVendite < 5\nRETURN prodotto\nORDER BY numeroVendite ASC\nLIMIT 10",
+      "expected_cypher": "MATCH (a:Articolo)<-[:RIGUARDA_ARTICOLO]-(dr:RigaDocumento)<-[:CONTIENE_RIGA]-(doc:Documento)<-[:HA_RICEVUTO]-(:Cliente) WHERE dr.tipoValore = 'Fatturato' WITH a, count(DISTINCT doc) AS numeroVendite WHERE numeroVendite < 5 RETURN a.descrizione AS prodottoRotazioneLenta, numeroVendite ORDER BY numeroVendite ASC LIMIT 10",
+      "time_total": 9.243728222325444,
+      "time_generation": 3.1744199790991843,
+      "time_db": 0.49163097608834505,
+      "time_synthesis": 3.863445620983839,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.34554973821989526,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": 2,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "prodottoRotazioneLenta": "EVAPORATORE FHA 28 E 80 EC",
+          "numeroVendite": 1
+        },
+        {
+          "prodottoRotazioneLenta": "RUBINETTO D.18 BVM18AMP xco2",
+          "numeroVendite": 1
+        },
+        {
+          "prodottoRotazioneLenta": "SONDA NTC CAREL CAVO L=1,5M",
+          "numeroVendite": 1
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "prodotto": "UGELLO+FILTRO 068-2094 04"
+        },
+        {
+          "prodotto": "ELETTROVALVOLA ACQUA DOPPIA PER FABBR"
+        },
+        {
+          "prodotto": "PCO3 MEDIUM BOARD + PGDO"
+        }
+      ]
+    },
+    {
+      "config": "specialist-gpt4o",
+      "test_id": "TEST-120-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Qual \u00e8 la stagionalit\u00e0 delle vendite? Mostra il fatturato per trimestre negli ultimi 2 anni",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 AND doc.dataEmissione.year IN [date().year, date().year - 1]\nWITH doc.dataEmissione.year AS year, CASE\n    WHEN doc.dataEmissione.month IN [1, 2, 3] THEN 'Q1'\n    WHEN doc.dataEmissione.month IN [4, 5, 6] THEN 'Q2'\n    WHEN doc.dataEmissione.month IN [7, 8, 9] THEN 'Q3'\n    ELSE 'Q4'\nEND AS quarter, sum(dr.importo) AS fatturato\nRETURN year, quarter, fatturato\nORDER BY year DESC, quarter",
+      "expected_cypher": "MATCH (:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 AND doc.dataEmissione.year >= date().year - 2 WITH doc.dataEmissione.year AS anno, CASE WHEN doc.dataEmissione.month <= 3 THEN 'Q1' WHEN doc.dataEmissione.month <= 6 THEN 'Q2' WHEN doc.dataEmissione.month <= 9 THEN 'Q3' ELSE 'Q4' END AS trimestre, sum(dr.importo) AS fatturatoTrimestrale RETURN anno, trimestre, fatturatoTrimestrale ORDER BY anno DESC, trimestre",
+      "time_total": 21.46435361681506,
+      "time_generation": 7.710279647726566,
+      "time_db": 0.5460795322433114,
+      "time_synthesis": 11.378514676820487,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.7120315581854043,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": 2,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "anno": 2023,
+          "trimestre": "Q3",
+          "fatturatoTrimestrale": 4330319.27
+        },
+        {
+          "anno": 2023,
+          "trimestre": "Q1",
+          "fatturatoTrimestrale": 2904809.7899999963
+        },
+        {
+          "anno": 2023,
+          "trimestre": "Q4",
+          "fatturatoTrimestrale": 2904948.160000002
+        }
+      ],
+      "mismatch_extra": []
+    },
+    {
+      "config": "specialist-gpt4o",
+      "test_id": "TEST-121-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Trova i clienti che hanno acquistato tutti i prodotti di una specifica famiglia",
+      "success": false,
+      "error": "API error 500: {'detail': \"Errore durante l'elaborazione: {code: Neo.TransientError.General.MemoryPoolOutOfMemoryError} {message: The allocation of an extra 2.0 MiB would use more than the limit 11.0 ",
+      "generated_cypher": null,
+      "expected_cypher": "MATCH (fam:Famiglia {nome: 'CENTRALI FRIGO'})<-[:INCLUSA_IN]-(:Sottofamiglia)<-[:APPARTIENE_A]-(a:Articolo) WITH collect(DISTINCT a) AS tuttiArticoliFamiglia, count(DISTINCT a) AS totaleArticoliFamiglia MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo) WHERE a IN tuttiArticoliFamiglia WITH c, count(DISTINCT a) AS articoliAcquistati, totaleArticoliFamiglia WHERE articoliAcquistati = totaleArticoliFamiglia RETURN c.name AS clienteCompletista",
+      "time_total": null,
+      "time_generation": null,
+      "time_db": null,
+      "time_synthesis": null,
+      "jaccard_index": null,
+      "query_similarity": null,
+      "specialist": null,
+      "jaccard_success": null,
+      "similarity_success": null,
+      "examples_top_k": 2,
+      "success_reason": null
+    },
+    {
+      "config": "specialist-gpt4o",
+      "test_id": "TEST-122-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Qual \u00e8 la distribuzione geografica del fatturato per regione?",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo), (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0\nRETURN l.regione AS regione, sum(dr.importo) AS totaleFatturato\nORDER BY totaleFatturato DESC",
+      "expected_cypher": "MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 AND l.regione IS NOT NULL WITH l.regione AS regione, sum(dr.importo) AS fatturatoRegionale, sum(dr.importo) AS totaleVendite WITH regione, fatturatoRegionale, sum(totaleVendite) AS fatturatoTotaleGlobale RETURN regione, fatturatoRegionale, (fatturatoRegionale * 100.0 / fatturatoTotaleGlobale) AS percentualeFatturato ORDER BY fatturatoRegionale DESC",
+      "time_total": 10.188601937144995,
+      "time_generation": 4.285838474985212,
+      "time_db": 0.5116615318693221,
+      "time_synthesis": 4.1308554210700095,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.5918367346938775,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": 2,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "regione": "CAMPANIA",
+          "fatturatoRegionale": 43900.969999999994,
+          "percentualeFatturato": 99.99999999999999
+        },
+        {
+          "regione": "SICILIA",
+          "fatturatoRegionale": 161334.81,
+          "percentualeFatturato": 100.0
+        },
+        {
+          "regione": "LAZIO",
+          "fatturatoRegionale": 13258193.120000146,
+          "percentualeFatturato": 100.0
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "regione": "PIEMONTE",
+          "totaleFatturato": 2220.0
+        },
+        {
+          "regione": "SICILIA",
+          "totaleFatturato": 161334.81
+        },
+        {
+          "regione": "SARDEGNA",
+          "totaleFatturato": 553400.0
+        }
+      ]
+    },
+    {
+      "config": "specialist-gpt4o",
+      "test_id": "TEST-123-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Mostrami 10 prodotti che hanno avuto un incremento di vendita superiore al 50% nell'ultimo anno",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 AND doc.dataEmissione.year IN [date().year, date().year - 1]\nWITH a.descrizione AS prodotto, doc.dataEmissione.year AS anno, sum(dr.importo) AS fatturatoAnnuale\nWITH prodotto, collect({anno: anno, fatturatoAnnuale: fatturatoAnnuale}) AS fatturati\nWHERE size(fatturati) = 2\nWITH prodotto, fatturati[0] AS annoCorrente, fatturati[1] AS annoPrecedente\nWHERE annoCorrente.fatturatoAnnuale > 1.5 * annoPrecedente.fatturatoAnnuale\nRETURN prodotto, annoCorrente.fatturatoAnnuale AS fatturatoCorrente, annoPrecedente.fatturatoAnnuale AS fatturatoPrecedente\nORDER BY fatturatoCorrente DESC\nLIMIT 10",
+      "expected_cypher": "MATCH (a:Articolo)<-[:RIGUARDA_ARTICOLO]-(dr:RigaDocumento)<-[:CONTIENE_RIGA]-(doc:Documento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 AND doc.dataEmissione.year IN [date().year - 1, date().year - 2] WITH a, doc.dataEmissione.year AS anno, sum(dr.importo) AS venditeAnnuali WITH a, collect({anno: anno, vendite: venditeAnnuali}) AS venditePerAnno WHERE size(venditePerAnno) = 2 WITH a, venditePerAnno[0].vendite AS venditaAnnoPrec, venditePerAnno[1].vendite AS venditaAnnoCorr WHERE venditaAnnoPrec > 0 AND ((venditaAnnoCorr - venditaAnnoPrec) * 100.0 / venditaAnnoPrec) > 50 RETURN a.descrizione AS prodotto, ((venditaAnnoCorr - venditaAnnoPrec) * 100.0 / venditaAnnoPrec) AS crescitaPercentuale ORDER BY crescitaPercentuale DESC LIMIT 10",
+      "time_total": 15.080421925056726,
+      "time_generation": 8.594028470572084,
+      "time_db": 0.6134757190011442,
+      "time_synthesis": 4.522411714307964,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.36303630363036304,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": 2,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "prodotto": "STAFFA",
+          "crescitaPercentuale": 1479.8461538461538
+        },
+        {
+          "prodotto": "GUARNIZIONE",
+          "crescitaPercentuale": 710.8176739461655
+        },
+        {
+          "prodotto": "SEZIONATORE PER CENTRALE",
+          "crescitaPercentuale": 948.2466063348415
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "prodotto": "Articolo placeholder: ID_NON_DISPONIBILE",
+          "fatturatoCorrente": 8919479.860000005,
+          "fatturatoPrecedente": 1137900.4699999997
+        },
+        {
+          "prodotto": "Alessio Suriano",
+          "fatturatoCorrente": 23423.0,
+          "fatturatoPrecedente": 2349.0
+        },
+        {
+          "prodotto": "Costantini Massimiliano",
+          "fatturatoCorrente": 27919.0,
+          "fatturatoPrecedente": 3625.0
+        }
+      ]
+    },
+    {
+      "config": "specialist-gpt4o",
+      "test_id": "TEST-124-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Quali fornitori hanno avuto il miglior rapporto qualit\u00e0-prezzo (minor costo medio per articolo)?",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (f:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)\nWITH f, avg(CASE WHEN dr.quantita = 0 OR dr.quantita IS NULL THEN null ELSE dr.importo / dr.quantita END) AS costoMedio\nRETURN f.ragioneSociale AS fornitore, costoMedio\nORDER BY costoMedio ASC\nLIMIT 10",
+      "expected_cypher": "MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.quantita > 0 WITH gf, avg(dr.importo / dr.quantita) AS costoMedioUnitario RETURN gf.ragioneSociale AS fornitore, costoMedioUnitario ORDER BY costoMedioUnitario ASC LIMIT 5",
+      "time_total": 6.91598106129095,
+      "time_generation": 2.070532542653382,
+      "time_db": 0.40443800389766693,
+      "time_synthesis": 3.3108881432563066,
+      "jaccard_index": 0.5,
+      "query_similarity": 0.34824281150159747,
+      "specialist": "CROSS_DOMAIN",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": 2,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [],
+      "mismatch_extra": [
+        {
+          "fornitore": "NIPPON GASES REFRIGERANTS SRL",
+          "costoMedio": 4.279999999999999
+        },
+        {
+          "fornitore": "HL DISPLAY ITALIA SRL",
+          "costoMedio": 2.7683333333333335
+        },
+        {
+          "fornitore": "NUOVA TICCHIONI SRL",
+          "costoMedio": 1.212
+        }
+      ]
+    },
+    {
+      "config": "specialist-gpt4o",
+      "test_id": "TEST-126-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Qual \u00e8 il prodotto con il ciclo di riordino pi\u00f9 breve (tempo medio tra acquisti successivi)?",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (f:Fornitore)-[:HA_EMESSO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)\nWITH a.descrizione AS prodotto, collect(doc.dataEmissione) AS dateList\nWITH prodotto, apoc.coll.pairsMin(dateList) AS datePairs\nWITH prodotto, [pair IN datePairs | duration.between(pair[0], pair[1]).days] AS reorderCycles\nUNWIND reorderCycles AS cycle\nRETURN prodotto, avg(cycle) AS cicloMedio\nORDER BY cicloMedio ASC\nLIMIT 1",
+      "expected_cypher": "MATCH (a:Articolo)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(doc:Documento)<-[:HA_EMESSO]-(:Fornitore) WITH a, doc.dataEmissione AS dataAcquisto ORDER BY a, dataAcquisto WITH a, collect(dataAcquisto) AS dateAcquisti WHERE size(dateAcquisti) >= 3 UNWIND range(0, size(dateAcquisti)-2) AS i WITH a, duration.between(dateAcquisti[i], dateAcquisti[i+1]).days AS giorniTraAcquisti WHERE giorniTraAcquisti > 0 WITH a, avg(giorniTraAcquisti) AS cicloMedioRiordino RETURN a.descrizione AS prodotto, cicloMedioRiordino ORDER BY cicloMedioRiordino ASC LIMIT 1",
+      "time_total": 17.532901814207435,
+      "time_generation": 2.9468172187916934,
+      "time_db": 11.902956566307694,
+      "time_synthesis": 1.445085845887661,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.08300395256916997,
+      "specialist": "PURCHASE_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": 2,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "prodotto": "TUBO NEON 36 W LED",
+          "cicloMedioRiordino": 1.0
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "prodotto": "PROFILO BERNER",
+          "cicloMedio": -27.0
+        }
+      ]
+    }
+  ]
+}

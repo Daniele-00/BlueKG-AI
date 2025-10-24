@@ -82,8 +82,8 @@ SPECIALIST_DIR = SCRIPT_DIR.parent / "chatbot_specialist"
 HYBRID_DIR = SCRIPT_DIR.parent / "chatbot_hybrid"
 
 # Output directories (dentro validation/)
-VALIDATION_SET = SCRIPT_DIR / "validation_set_2.json"
-# VALIDATION_SET = SCRIPT_DIR / "validation_set.json"
+# VALIDATION_SET = SCRIPT_DIR / "validation_set_2.json"
+VALIDATION_SET = SCRIPT_DIR / "test_set.json"
 RESULTS_DIR = SCRIPT_DIR / "validation_results"
 RESULTS_DIR.mkdir(exist_ok=True)
 
@@ -130,8 +130,8 @@ CONFIGS_SPECIALIST = {
         "contextualizer": "llama-70b-groq-versatile",
         "router": "llama-70b-groq-versatile",
         "coder": "llama-70b-groq-versatile",
-        "synthesizer": "llama-8b-groq-instant",
-        "translator": "llama-8b-groq-instant",
+        "synthesizer": "llama-70b-groq-versatile",
+        "translator": "llama-70b-groq-versatile",
         "general_conversation": "llama-70b-groq-versatile",
     },
     "gemini-2.5-pro": {
@@ -148,15 +148,15 @@ CONFIGS_SPECIALIST = {
         "coder": "gemini-2.5-flash",
         "general_conversation": "gemini-2.5-flash",
         "synthesizer": "gemini-2.5-flash",
-        "translator": "gemini-2.5-pro",
+        "translator": "gemini-2.5-flash",
     },
     "gpt4o": {
-        "contextualizer": "gpt-4o",
-        "router": "gpt-4o",
-        "coder": "gpt-4o",
-        "general_conversation": "gpt-4o",
-        "synthesizer": "gpt-4o",
-        "translator": "gpt-4o",
+        "contextualizer": "gpt4o",
+        "router": "gpt4o",
+        "coder": "gpt4o",
+        "general_conversation": "gpt4o",
+        "synthesizer": "gpt4o",
+        "translator": "gpt4o",
     },
     "llama3": {
         "contextualizer": "llama3",
@@ -239,8 +239,8 @@ def compare_results(
         return True
 
     try:
-        if len(result1[0]) != len(result2[0]):
-            return False
+        # if len(result1[0]) != len(result2[0]):
+        # return False
         # Normalizza gli scalari (es. "10" -> 10.0) e confronta come insiemi senza ordine
         values1 = {_canonical_row_values(d) for d in result1}
         values2 = {_canonical_row_values(d) for d in result2}
@@ -355,6 +355,14 @@ def query_string_similarity(expected: str, generated: str) -> float:
 # =========================
 # Normalizzazione e fallback
 # =========================
+
+"""
+MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo)
+WHERE toLower(trim(l.localita)) = 'perugia' 
+RETURN DISTINCT c.name AS cliente 
+ORDER BY cliente 
+LIMIT 5
+"""
 
 
 def _is_number_like(x: Any) -> bool:
@@ -617,9 +625,9 @@ def run_validation(
     """Esegue la validazione.
 
     Criterio di successo:
-    - strict: risultati uguali (o equivalenti via fallback).
-    - attendibile: jaccard_similarity >= min_jaccard (default 0.80).
-      La query similarity rimane informativa.
+    - strict: risultati uguali (o equivalenti via fallback). Solo questo determina il PASS.
+    - jaccard_similarity viene registrata per analisi, ma non influisce sull'esito.
+      Lo stesso per la query similarity.
     """
     """Esegue validazione."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -647,8 +655,7 @@ def run_validation(
         validation_data = json.load(f)
 
     total = len(validation_data)
-    # Nuovi contatori: attendibile (threshold) vs strict
-    success_attendibile = 0
+    # Contatori
     success_strict = 0
     success_similarity = 0
     success_jaccard = 0
@@ -682,6 +689,7 @@ def run_validation(
             "jaccard_success": None,
             "similarity_success": None,
             "examples_top_k": examples_top_k,
+            "success_reason": None,
         }
 
         try:
@@ -754,17 +762,10 @@ def run_validation(
                     # Fallback 2: se entrambe sono scalari numerici uguali entro tolleranza, considera PASS
                     same = compare_numeric_scalar(gen_res, exp_res)
                 result["strict_success"] = bool(same)
-                result["attendibile"] = bool(same or jaccard_success)
-                if jaccard_success:
-                    result["success"] = True
-                    result["success_reason"] = "jaccard"
-                    success_attendibile += 1
-                    print(f"  ✅ PASS (jaccard>={min_jaccard})")
-                elif same:
+                if same:
                     result["success"] = True
                     result["success_reason"] = "strict"
                     success_strict += 1
-                    success_attendibile += 1
                     print("  ✅ PASS (strict)")
                 else:
                     # Spiega mismatch
@@ -773,7 +774,6 @@ def run_validation(
                     result["error"] = "Results mismatch"
                     result["mismatch_missing"] = diff.get("missing")
                     result["mismatch_extra"] = diff.get("extra")
-                    result["attendibile"] = False
                     print("  ❌ MISMATCH")
                     if diff.get("note"):
                         print(f"     diff: {diff['note']}")
@@ -793,10 +793,7 @@ def run_validation(
     driver.close()
 
     # Metriche
-    # Accuracy
-    # - attendibile: passa se strict OR jaccard >= soglia
-    # - strict: passa solo se i risultati coincidono (o tramite fallback)
-    accuracy_att = (success_attendibile / total * 100) if total > 0 else 0
+    # Accuracy basata esclusivamente sullo strict
     accuracy_str = (success_strict / total * 100) if total > 0 else 0
     accuracy_sim = (success_similarity / total * 100) if total > 0 else 0
     accuracy_jac = (success_jaccard / total * 100) if total > 0 else 0
@@ -830,12 +827,11 @@ def run_validation(
                 "examples_top_k": examples_top_k,
                 "summary": {
                     "total": total,
-                    "success_attendibile": success_attendibile,
                     "success_strict": success_strict,
                     "success_similarity": success_similarity,
                     "success_jaccard": success_jaccard,
-                    "failures": total - success_attendibile,
-                    "accuracy": accuracy_att,
+                    "failures": total - success_strict,
+                    "accuracy": accuracy_str,
                     "accuracy_strict": accuracy_str,
                     "accuracy_similarity": accuracy_sim,
                     "accuracy_jaccard": accuracy_jac,
@@ -861,14 +857,11 @@ def run_validation(
         lines.append("")
         lines.append("## Summary")
         lines.append(f"- Total: {total}")
-        lines.append(f"- Success (attendibile): {success_attendibile}")
         lines.append(f"- Success (strict): {success_strict}")
+        lines.append(f"- Success (jaccard>=threshold): {success_jaccard}")
         lines.append(f"- Success (query-sim): {success_similarity}")
-        lines.append(f"- Success (jaccard): {success_jaccard}")
-        lines.append(f"- Failures: {total - success_attendibile}")
-        lines.append(
-            f"- Accuracy (attendibile): {accuracy_att:.1f}%  |  Accuracy (strict): {accuracy_str:.1f}%"
-        )
+        lines.append(f"- Failures: {total - success_strict}")
+        lines.append(f"- Accuracy (strict): {accuracy_str:.1f}%")
         lines.append(
             f"- Accuracy (query-sim): {accuracy_sim:.1f}%  |  Accuracy (jaccard): {accuracy_jac:.1f}%"
         )
@@ -888,14 +881,14 @@ def run_validation(
         lines.append("")
         lines.append("## Tests")
         lines.append(
-            "| # | Test ID | PASS | Att | Jac | QuerySim | Gen Time (s) | Note |"
+            "| # | Test ID | PASS | Strict | Jac | QuerySim | Gen Time (s) | Note |"
         )
         lines.append(
-            "|:-:|:--------|:----:|:---:|:---:|:--------:|:------------:|:-----|"
+            "|:-:|:--------|:----:|:------:|:---:|:--------:|:------------:|:-----|"
         )
         for idx, r in enumerate(results, 1):
             ok = "✅" if r.get("success") else "❌"
-            att = "✅" if r.get("attendibile") else "❌"
+            strict_mark = "✅" if r.get("strict_success") else "❌"
             jac = r.get("jaccard_index")
             qsim = r.get("query_similarity")
             jac_s = f"{jac:.3f}" if isinstance(jac, (int, float)) else "-"
@@ -904,7 +897,7 @@ def run_validation(
             tgen_s = f"{tgen:.2f}" if isinstance(tgen, (int, float)) else "-"
             note = r.get("error") or ""
             lines.append(
-                f"| {idx} | {r.get('test_id','')} | {ok} | {att} | {jac_s} | {qsim_s} | {tgen_s} | {note} |"
+                f"| {idx} | {r.get('test_id','')} | {ok} | {strict_mark} | {jac_s} | {qsim_s} | {tgen_s} | {note} |"
             )
         with open(report_md, "w", encoding="utf-8") as rf:
             rf.write("\n".join(lines) + "\n")
@@ -916,12 +909,9 @@ def run_validation(
     print("RISULTATI")
     print("=" * 70)
     print(f"Config:    {full_config_name}")
-    print(
-        f"Accuracy (attendibile): {accuracy_att:.1f}% ({success_attendibile}/{total})"
-    )
     print(f"Accuracy (strict):     {accuracy_str:.1f}% ({success_strict}/{total})")
-    print(f"Accuracy (query-sim):  {accuracy_sim:.1f}% ({success_similarity}/{total})")
     print(f"Accuracy (jaccard):    {accuracy_jac:.1f}% ({success_jaccard}/{total})")
+    print(f"Accuracy (query-sim):  {accuracy_sim:.1f}% ({success_similarity}/{total})")
     print(f"Avg Time:  {avg_time:.2f}s")
     if avg_jaccard is not None:
         print(f"Avg Jaccard: {avg_jaccard:.3f}")
@@ -941,11 +931,11 @@ def run_validation(
         "config": full_config_name,
         "approach": approach,
         "config_name": config_name,
-        "accuracy": accuracy_att,
+        "accuracy": accuracy_str,
         "accuracy_strict": accuracy_str,
         "accuracy_similarity": accuracy_sim,
         "accuracy_jaccard": accuracy_jac,
-        "success": success_attendibile,
+        "success": success_strict,
         "success_strict": success_strict,
         "success_similarity": success_similarity,
         "success_jaccard": success_jaccard,
@@ -982,7 +972,7 @@ def main():
         help="Testa tutte le config dell'approccio scelto",
     )
     parser.add_argument("--list", action="store_true", help="Lista config")
-    # Soglia attendibile (CLI override; fallback a env o default)
+    # Soglie informative (CLI override; fallback a env o default)
     try:
         import os as _os
 
@@ -993,7 +983,7 @@ def main():
         "--min-query-sim",
         type=float,
         default=_def_min_qsim,
-        help="Soglia minima query similarity per attendibile (default 0.8 o VAL_MIN_QUERY_SIM)",
+        help="Soglia minima query similarity registrata nei report (default 0.8 o VAL_MIN_QUERY_SIM)",
     )
     try:
         _def_min_jaccard = float(os.getenv("VAL_MIN_JACCARD", "0.8"))

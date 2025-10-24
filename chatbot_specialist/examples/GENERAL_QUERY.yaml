@@ -197,21 +197,21 @@ examples:
   cypher: MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) WHERE toLower(trim(l.localita))
     = 'perugia' RETURN DISTINCT c.name AS cliente ORDER BY cliente LIMIT 5
 - id: general_query_088
-  question: Elenca i fornitori che trattano solo prodotti di una singola famiglia.
+  question: Elenca 20 fornitori che trattano solo prodotti di una singola famiglia.
   cypher: MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia)
     WITH gf, count(DISTINCT fam) AS numeroFamiglie WHERE numeroFamiglie = 1 RETURN
-    gf.ragioneSociale AS fornitoreMonoFamiglia
+    gf.ragioneSociale AS fornitoreMonoFamiglia LIMIT 20
 - id: general_query_088_var1
   question: Variant 1
   cypher: MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia)
     WITH gf, count(DISTINCT fam) AS numeroFamiglie WHERE numeroFamiglie = 1 RETURN
-    gf.ragioneSociale AS fornitoreMonoFamiglia
+    gf.ragioneSociale AS fornitoreMonoFamiglia LIMIT 20
 - id: general_query_088_var2
-  question: Quali sono i fornitori che si occupano esclusivamente di prodotti di una
+  question: Quali sono i 20 fornitori che si occupano esclusivamente di prodotti di una
     sola famiglia?
   cypher: MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia)
     WITH gf, count(DISTINCT fam) AS numeroFamiglie WHERE numeroFamiglie = 1 RETURN
-    gf.ragioneSociale AS fornitoreMonoFamiglia
+    gf.ragioneSociale AS fornitoreMonoFamiglia LIMIT 20
 - id: general_query_094
   question: Elenca i fornitori situati in un luogo dove non abbiamo clienti.
   cypher: 'MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(f:Fornitore)-[:SI_TROVA_A]->(lf:Luogo)

@@ -1,10 +1,10 @@
 agent_models:
-  coder: llama-70b-groq-versatile
-  contextualizer: llama-70b-groq-versatile
-  general_conversation: llama-70b-groq-versatile
-  router: llama-70b-groq-versatile
-  synthesizer: llama-8b-groq-instant
-  translator: llama-8b-groq-instant
+  coder: gpt4o
+  contextualizer: gpt4o
+  general_conversation: gpt4o
+  router: gpt4o
+  synthesizer: gpt4o
+  translator: gpt4o
 available_models:
   gemini-2.5-flash:
     description: Google Gemini 2.5 Flash - 1M token context
@@ -13,7 +13,7 @@ available_models:
     provider: google
   gemini-2.5-pro:
     description: Google Gemini 2.5 Pro - Ottimo per reasoning
-    max_tokens: 2000
+    max_tokens: 4000
     model_name: gemini-2.5-pro
     provider: google
   gpt-4o-mini:

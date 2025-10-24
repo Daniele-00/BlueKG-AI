@@ -12,7 +12,7 @@
     {
         "id": "TEST-03-Genera la query Cypher per rispondere a questo input in italiano",
         "input": "Elenca i 5 clienti che hanno fatturato di più che si trovano a Perugia",
-        "output": "MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) WHERE toLower(trim(l.provincia)) = 'pg' MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN c.name AS cliente, sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC LIMIT 5"
+        "output": "MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) WHERE toLower(trim(l.localita)) = 'perugia' MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN c.name AS cliente, sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC LIMIT 5"
     },
     {
         "id": "TEST-04-Genera la query Cypher per rispondere a questo input in italiano",
@@ -151,8 +151,8 @@
     },
     {
         "id": "TEST-31-Genera la query Cypher per rispondere a questo input in italiano",
-        "input": "Elenca i clienti con fatturato superiore a 50000 euro",
-        "output": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH c, sum(dr.importo) AS fatturatoTotale WHERE fatturatoTotale > 50000 RETURN c.name AS cliente, fatturatoTotale ORDER BY fatturatoTotale DESC"
+        "input": "Elenca 20 clienti con fatturato superiore a 50000 euro",
+        "output": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH c, sum(dr.importo) AS fatturatoTotale WHERE fatturatoTotale > 50000 RETURN c.name AS cliente, fatturatoTotale ORDER BY fatturatoTotale DESC LIMIT 20"
     },
     {
         "id": "TEST-32-Genera la query Cypher per rispondere a questo input in italiano",
@@ -436,8 +436,8 @@
     },
     {
         "id": "TEST-88-Genera la query Cypher per rispondere a questo input in italiano",
-        "input": "Elenca i fornitori che trattano solo prodotti di una singola famiglia.",
-        "output": "MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia) WITH gf, count(DISTINCT fam) AS numeroFamiglie WHERE numeroFamiglie = 1 RETURN gf.ragioneSociale AS fornitoreMonoFamiglia"
+        "input": "Elenca 20 fornitori che trattano solo prodotti di una singola famiglia.",
+        "output": "MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia) WITH gf, count(DISTINCT fam) AS numeroFamiglie WHERE numeroFamiglie = 1 RETURN gf.ragioneSociale AS fornitoreMonoFamiglia LIMIT 20"
     },
     {
         "id": "TEST-89-Genera la query Cypher per rispondere a questo input in italiano",
