@@ -36,7 +36,7 @@ def classify_questions(input_file: str) -> Dict[str, List[Dict]]:
         "CROSS_DOMAIN": [],
     }
 
-    logger.info(f"📊 Classificazione di {len(questions)} domande...")
+    logger.info(f"Classificazione di {len(questions)} domande...")
 
     for i, q in enumerate(questions, 1):
         # Traduci (il router vuole inglese)
@@ -56,11 +56,11 @@ def classify_questions(input_file: str) -> Dict[str, List[Dict]]:
             classified[route].append(example)
             logger.info(f"  [{i}/{len(questions)}] {route}: {q['input'][:60]}...")
         else:
-            logger.warning(f"  ⚠️ Route sconosciuto: {route}")
+            logger.warning(f"  Route sconosciuto: {route}")
             classified["GENERAL_QUERY"].append(example)  # Fallback
 
     # Stats
-    logger.info("\n📊 Risultati classificazione:")
+    logger.info("\nRisultati classificazione:")
     for specialist, examples in classified.items():
         logger.info(f"  {specialist}: {len(examples)} esempi")
 
@@ -131,7 +131,7 @@ def expand_examples_with_variants(
             logger.info(f"    {ex['id']}: +{len(variants)} varianti")
 
     # Stats
-    logger.info("\n📊 Esempi totali (con varianti):")
+    logger.info("\nEsempi totali (con varianti):")
     for specialist, examples in expanded.items():
         logger.info(f"  {specialist}: {len(examples)} esempi")
 
@@ -153,7 +153,7 @@ def export_to_yaml(classified: Dict[str, List[Dict]], output_dir: str = "example
 
     for specialist, examples in classified.items():
         if not examples:
-            logger.warning(f"  ⚠️ {specialist}: nessun esempio, skip")
+            logger.warning(f"  {specialist}: nessun esempio, skip")
             continue
 
         file_path = output_path / f"{specialist}.yaml"
@@ -163,9 +163,9 @@ def export_to_yaml(classified: Dict[str, List[Dict]], output_dir: str = "example
         with open(file_path, "w", encoding="utf-8") as f:
             yaml.dump(data, f, allow_unicode=True, sort_keys=False)
 
-        logger.info(f"  ✅ {file_path}: {len(examples)} esempi")
+        logger.info(f"  {file_path}: {len(examples)} esempi")
 
-    logger.info("\n✅ Esportazione completata!")
+    logger.info("\nEsportazione completata!")
 
 
 # ============================================================================
@@ -178,7 +178,7 @@ def main():
     OUTPUT_DIR = "examples"
     GENERATE_VARIANTS = True  # Cambia in False se vuoi solo classificare
 
-    logger.info("🚀 Inizio organizzazione esempi\n")
+    logger.info("Inizio organizzazione esempi\n")
 
     # STEP 1: Classifica
     classified = classify_questions(INPUT_FILE)

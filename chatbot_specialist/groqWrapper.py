@@ -104,7 +104,7 @@ if __name__ == "__main__":
     result = llm.invoke(
         [HumanMessage(content="Translate to English: Qual è il fatturato totale?")]
     )
-    print(f"   ✅ Risposta: {result.content}\n")
+    print(f"   Risposta: {result.content}\n")
 
     # Test 2: Llama 8B
     print("2. Test Llama 3.1 8B (instant)...")
@@ -116,6 +116,6 @@ if __name__ == "__main__":
     )
 
     result = llm.invoke([HumanMessage(content="Say 'Hello' in Italian")])
-    print(f"   ✅ Risposta: {result.content}\n")
+    print(f"   Risposta: {result.content}\n")
 
-    print("✅ Wrapper funziona perfettamente!")
+    print("Wrapper funziona perfettamente!")

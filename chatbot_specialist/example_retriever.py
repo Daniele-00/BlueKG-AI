@@ -25,7 +25,7 @@ class ExampleRetriever:
         self.cache_dir.mkdir(exist_ok=True)
         self.default_top_k = default_top_k or DEFAULT_TOP_K
 
-        logger.info("📦 Caricamento modello embeddings...")
+        logger.info("Caricamento modello embeddings...")
         self.model = SentenceTransformer("all-MiniLM-L6-v2")
 
         self.examples_by_specialist = {}
@@ -45,7 +45,7 @@ class ExampleRetriever:
             cache_path = self.cache_dir / f"{specialist}_vectors.pkl"
 
             if not yaml_path.exists():
-                logger.warning(f"⚠️ {yaml_path} mancante")
+                logger.warning(f"{yaml_path} mancante")
                 self.examples_by_specialist[specialist] = []
                 continue
 
@@ -59,11 +59,11 @@ class ExampleRetriever:
 
             # Cache embeddings
             if cache_path.exists():
-                logger.info(f"📂 Cache {specialist}")
+                logger.info(f"Cache {specialist}")
                 with open(cache_path, "rb") as f:
                     embeddings = pickle.load(f)
             else:
-                logger.info(f"🔄 Embedding {specialist} ({len(examples)} esempi)")
+                logger.info(f"Embedding {specialist} ({len(examples)} esempi)")
                 questions = [ex["question"] for ex in examples]
                 embeddings = self.model.encode(questions, show_progress_bar=False)
 
@@ -74,7 +74,7 @@ class ExampleRetriever:
                 ex["embedding"] = emb
 
             self.examples_by_specialist[specialist] = examples
-            logger.info(f"✅ {specialist}: {len(examples)} esempi")
+            logger.info(f"{specialist}: {len(examples)} esempi")
 
     def retrieve(
         self, question: str, specialist: str, top_k: Optional[int] = None
