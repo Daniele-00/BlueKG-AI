@@ -19,11 +19,16 @@ class ExampleRetriever:
         examples_dir: str = "examples",
         cache_dir: str = "embeddings",
         default_top_k: Optional[int] = None,
+        min_similarity: Optional[float] = None,
     ):
         self.examples_dir = Path(examples_dir)
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(exist_ok=True)
         self.default_top_k = default_top_k or DEFAULT_TOP_K
+        self.min_similarity = (
+            float(min_similarity) if min_similarity is not None else None
+        )
+        self.last_similarity: Optional[float] = None
 
         logger.info("Caricamento modello embeddings...")
         self.model = SentenceTransformer("all-MiniLM-L6-v2")
@@ -77,7 +82,11 @@ class ExampleRetriever:
             logger.info(f"{specialist}: {len(examples)} esempi")
 
     def retrieve(
-        self, question: str, specialist: str, top_k: Optional[int] = None
+        self,
+        question: str,
+        specialist: str,
+        top_k: Optional[int] = None,
+        allow_low_similarity: bool = False,
     ) -> List[Dict]:
         examples = self.examples_by_specialist.get(specialist, [])
         if not examples:
@@ -88,16 +97,51 @@ class ExampleRetriever:
             return []
 
         q_embedding = self.model.encode([question])[0]
+        q_norm = np.linalg.norm(q_embedding)
+        if q_norm == 0:
+            logger.warning("Embedding domanda con norma nulla; nessun esempio restituito.")
+            self.last_similarity = None
+            return []
 
         similarities = []
         for ex in examples:
-            sim = np.dot(q_embedding, ex["embedding"]) / (
-                np.linalg.norm(q_embedding) * np.linalg.norm(ex["embedding"])
-            )
+            emb = ex.get("embedding")
+            if emb is None:
+                continue
+            emb_norm = np.linalg.norm(emb)
+            if emb_norm == 0:
+                continue
+            sim = np.dot(q_embedding, emb) / (q_norm * emb_norm)
             similarities.append((sim, ex))
 
         similarities.sort(key=lambda x: x[0], reverse=True)
-        return [ex for _, ex in similarities[:k]]
+        if not similarities:
+            self.last_similarity = None
+            return []
+
+        best_score = float(similarities[0][0])
+        self.last_similarity = best_score
+
+        if (
+            not allow_low_similarity
+            and self.min_similarity is not None
+            and best_score < self.min_similarity
+        ):
+            logger.info(
+                "Soglia esempi non raggiunta (%.3f < %.3f) per specialist %s. Nessun esempio usato.",
+                best_score,
+                self.min_similarity,
+                specialist,
+            )
+            return []
+
+        selected = []
+        for score, ex in similarities[:k]:
+            item = dict(ex)
+            item.pop("embedding", None)
+            item["similarity"] = float(score)
+            selected.append(item)
+        return selected
 
     def get_stats(self) -> Dict:
         return {

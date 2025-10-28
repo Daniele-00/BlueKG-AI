@@ -11,6 +11,8 @@
 /chatbot_hybrid/__pycache__
 /chatbot_hybrid/.env
 /chatbot_singleAgent/__pycache__
+/chatbot_specialist/graphNeo4j/__pycache__
+/chatbot_specialist/validation_set/__pycache__
 /chatbot_singleAgent/.env
 /.svnignore
 /.svn

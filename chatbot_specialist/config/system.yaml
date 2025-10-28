@@ -40,9 +40,160 @@ retry:
   - Type mismatch
   retry_on_syntax_error: true
   retry_on_zero_results: false
+  semantic_expansion:
+    enabled: true
+    max_attempts: 1
+    prompt: query_expansion_prompt.yaml
+    top_k_examples: 3
+# Example retrieval settings
+examples:
+  min_similarity: 0.45
 # Session management settings  
 sessions:
   cleanup_interval_seconds: 300
-  enable_memory: false
+  enable_memory: true
   max_messages_per_session: 15
   timeout_minutes: 30
+  memory:
+    scope_reset_keywords:
+      - "in generale"
+      - "nel complesso"
+      - "complessivamente"
+      - "overall"
+      - "in general"
+      - "globalmente"
+      - "su tutti"
+      - "per tutti"
+      - "considerando tutti"
+      - "senza filtri"
+      - "tutti i clienti"
+      - "tutte le ditte"
+      - "tutti i fornitori"
+    explicit_reset_keywords:
+      - "nuova domanda"
+      - "nuovo argomento"
+      - "ricomincia"
+      - "ricomincia da capo"
+      - "partiamo da capo"
+      - "resetta"
+      - "reset conversazione"
+      - "cambia argomento"
+      - "ignora la conversazione precedente"
+    followup_keywords:
+      - "questo"
+      - "questa"
+      - "questi"
+      - "queste"
+      - "quello"
+      - "quella"
+      - "precedente"
+      - "prima"
+      - "di prima"
+      - "continua"
+      - "continuare"
+      - "approfondisci"
+      - "fammi vedere"
+      - "ancora"
+      - "stesso"
+      - "stessa"
+      - "per lo stesso"
+    confirm_keywords:
+      - "stesso perimetro"
+      - "stesso ambito"
+      - "stesso"
+      - "sì"
+      - "si"
+      - "ok"
+      - "va bene"
+      - "esatto"
+      - "esatta"
+      - "vabene"
+      - "giusto"
+      - "confermo"
+      - "perfetto"
+    reject_keywords:
+      - "no"
+      - "no grazie"
+      - "non"
+      - "cambia"
+      - "diverso"
+      - "nuovo"
+      - "differente"
+      - "altre"
+      - "altro"
+      - "tutti"
+      - "tutte"
+      - "tutto"
+      - "generale"
+      - "global"
+      - "complessivo"
+    pronoun_starts:
+      - "e"
+      - "ed"
+      - "poi"
+      - "allora"
+      - "inoltre"
+      - "anche"
+    short_question_token_threshold: 8
+    recency_minutes: 10
+    embedding_similarity:
+      enabled: true
+      reuse_example_retriever: true
+      model_name: "all-MiniLM-L6-v2"
+      history_size: 10
+      threshold: 0.75
+small_talk:
+  keywords:
+    - "ciao"
+    - "ciaoo"
+    - "salve"
+    - "buongiorno"
+    - "buonasera"
+    - "hey"
+    - "ehi"
+    - "come stai"
+    - "come va"
+    - "chi sei"
+    - "cosa puoi fare"
+    - "di cosa ti occupi"
+    - "aiutami"
+    - "puoi aiutarmi"
+    - "grazie"
+    - "help"
+    - "sei li"
+dangerous_operations:
+  keywords:
+    - "delete"
+    - "drop"
+    - "truncate"
+    - "update"
+    - "insert"
+    - "merge"
+    - "create record"
+    - "remove"
+    - "destroy"
+    - "wipe"
+    - "elimina"
+    - "eliminare"
+    - "cancella"
+    - "cancellare"
+    - "cancellami"
+    - "modifica"
+    - "modificare"
+    - "aggiorna"
+    - "aggiungi"
+    - "inserisci"
+    - "inserire"
+    - "crea"
+cypher_write_blocklist:
+  - "delete"
+  - "detach"
+  - "remove"
+  - "set"
+  - "create"
+  - "merge"
+  - "drop"
+  - "truncate"
+  - "load csv"
+  - "call dbms"
+  - "call apoc.write"

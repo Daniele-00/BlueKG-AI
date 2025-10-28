@@ -1,10 +1,10 @@
 agent_models:
-  coder: gpt4o
-  contextualizer: gpt4o
-  general_conversation: gpt4o
-  router: gpt4o
-  synthesizer: gpt4o
-  translator: gpt4o
+  coder: gpt-4o-mini
+  contextualizer: gpt-4o-mini
+  general_conversation: gpt-4o-mini
+  router: gpt-4o-mini
+  synthesizer: gpt-4o-mini
+  translator: gpt-4o-mini
 available_models:
   gemini-2.5-flash:
     description: Google Gemini 2.5 Flash - 1M token context

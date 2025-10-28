@@ -1,11 +1,14 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import requests
 import json
 import logging
 import base64
 from pathlib import Path
 from datetime import datetime
-import io
+import pandas as pd
+import uuid
+from typing import Optional, Dict, Any
 
 
 # --- FUNZIONE PER CODIFICARE L'IMMAGINE IN BASE64 ---
@@ -721,10 +724,32 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+query_params = st.query_params
+is_debug_mode = query_params.get("debug", "false").lower() == "false"
+
+# 2. Se NON siamo in debug, nascondi la sidebar con il CSS
+if not is_debug_mode:
+    st.markdown(
+        """
+        <style>
+            [data-testid="stSidebar"] {
+                display: none;
+            }
+            /* Espande il container principale per prendere tutto lo spazio */
+            .main .block-container {
+                max-width: 100%; 
+                padding: 2.5rem 4rem; /* Aggiungi un po' di padding laterale */
+            }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
 # URL del backend
 API_URL = "http://localhost:8000/ask"
 HEALTH_URL = "http://localhost:8000/health"
 CACHE_URL = "http://localhost:8000/cache"
+CONVERSATION_URL = "http://localhost:8000/conversation"
 
 # --- INIZIALIZZAZIONE STATO SESSIONE ---
 if "messages" not in st.session_state:
@@ -742,6 +767,17 @@ if "conversation_stats" not in st.session_state:
         "successful_queries": 0,
         "start_time": datetime.now().isoformat(),
     }
+
+if "user_id" not in st.session_state:
+    st.session_state.user_id = f"user-{datetime.now().strftime('%H%M%S')}"
+
+# Flag di visualizzazione (valori di default, sovrascritti dalla sidebar)
+debug_mode = False
+show_context = False
+show_query = False
+show_graph = True
+show_table = True
+show_suggestions = True
 
 
 # --- FUNZIONI UTILITY ---
@@ -803,6 +839,10 @@ def clear_conversation():
         "successful_queries": 0,
         "start_time": datetime.now().isoformat(),
     }
+    try:
+        requests.delete(f"{CONVERSATION_URL}/{st.session_state.user_id}", timeout=5)
+    except Exception as exc:
+        logger.warning(f"Impossibile cancellare la memoria lato server: {exc}")
 
 
 def add_to_favorites(query):
@@ -845,6 +885,288 @@ def suggest_related_queries(last_response):
     return suggestions[:3]
 
 
+def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
+    """Mostra un grafo interattivo con pan/zoom, controlli e legenda automatica."""
+    if not graph_data:
+        st.info("Nessun grafo da visualizzare")
+        return
+
+    nodes = graph_data.get("nodes") or []
+    edges = graph_data.get("edges") or []
+
+    if not nodes:
+        st.info("La query non ha restituito nodi visualizzabili")
+        return
+
+    nodes_json = json.dumps(nodes, ensure_ascii=False)
+    edges_json = json.dumps(edges, ensure_ascii=False)
+    element_id = element_id or f"neo4j-graph-{uuid.uuid4().hex[:8]}"
+
+    html = f"""
+    <div id="{element_id}" style="width:100%;height:640px;position:relative;">
+
+      <!-- CONTROLLI ZOOM -->
+      <div style="position:absolute; right:12px; top:12px; z-index:1001; display:flex; gap:8px;">
+        <button id="{element_id}-zoom-in"  class="btn">＋</button>
+        <button id="{element_id}-zoom-out" class="btn">－</button>
+        <button id="{element_id}-fit"      class="btn">Adatta</button>
+        <button id="{element_id}-reset"    class="btn">Reset</button>
+        <button id="{element_id}-back"     class="btn">Indietro</button>
+      </div>
+
+      <!-- TOOLTIP -->
+      <div id="{element_id}-tooltip" style="
+          position:absolute; display:none; background:rgba(15,23,42,0.95); color:#e2e8f0;
+          padding:12px 16px; border-radius:8px; font-size:13px; pointer-events:none;
+          z-index:1000; border:1px solid #334155; box-shadow:0 4px 12px rgba(0,0,0,0.3);
+          max-width:300px; font-family:'Inter', sans-serif;"></div>
+
+      <!-- SVG -->
+      <svg id="{element_id}-svg"></svg>
+
+      <!-- LEGENDA -->
+      <div id="{element_id}-legend" style="
+          position:absolute; top:12px; left:12px;
+          background:rgba(15,23,42,0.85); border:1px solid #334155;
+          border-radius:8px; padding:8px 12px; color:#e2e8f0;
+          font-size:12px; font-family:'Inter',sans-serif;
+          z-index:1001; max-width:300px;"></div>
+    </div>
+
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script>
+    (function() {{
+      const rawNodes = {nodes_json};
+      const rawEdges = {edges_json};
+      const width = 780, height = 580;
+
+      const svg = d3.select("#{element_id}-svg")
+        .attr("viewBox", [0, 0, width, height])
+        .style("width","100%")
+        .style("height","100%")
+        .style("background","#0b1220")
+        .style("border-radius","12px");
+
+      const viewport = svg.append("g").attr("class", "viewport");
+      viewport.append("rect")
+        .attr("x",-5000).attr("y",-5000).attr("width",10000).attr("height",10000)
+        .attr("fill","transparent").style("cursor","grab");
+
+      const linkGroup = viewport.append("g").attr("class","links");
+      const nodeGroup = viewport.append("g").attr("class","nodes");
+      const labelGroup = viewport.append("g").attr("class","labels");
+      const edgeLabelGroup = viewport.append("g").attr("class","edge-labels");
+
+      const tooltip = d3.select("#{element_id}-tooltip");
+      const color = d3.scaleOrdinal(d3.schemeCategory10);
+
+      // --- NODI E ARCHI ---
+      const nodes = rawNodes.map(n => ({{...n, id:String(n.id)}}));
+      const nodeMap = new Map(nodes.map(n => [n.id, n]));
+      const links = rawEdges.map(e => {{
+        const s=nodeMap.get(String(e.source)), t=nodeMap.get(String(e.target));
+        if(!s||!t) return null;
+        return {{...e, id:String(e.id), source:s, target:t}};
+      }}).filter(Boolean);
+
+      // --- SIMULAZIONE ---
+      const simulation = d3.forceSimulation(nodes)
+        .force("link", d3.forceLink(links).id(d=>d.id).distance(150))
+        .force("charge", d3.forceManyBody().strength(-400))
+        .force("center", d3.forceCenter(width/2, height/2))
+        .force("collision", d3.forceCollide().radius(50));
+
+      // --- FRECCE ---
+      svg.append("defs").append("marker")
+        .attr("id","arrowhead").attr("viewBox","0 -5 10 10")
+        .attr("refX",28).attr("refY",0)
+        .attr("markerWidth",6).attr("markerHeight",6)
+        .attr("orient","auto")
+        .append("path").attr("d","M0,-5L10,0L0,5").attr("fill","#475569");
+
+      const link = linkGroup.selectAll("line")
+        .data(links).enter().append("line")
+        .attr("stroke","#475569").attr("stroke-opacity",0.6)
+        .attr("stroke-width",2).attr("marker-end","url(#arrowhead)");
+
+      const edgeLabel = edgeLabelGroup.selectAll("text")
+        .data(links).enter().append("text")
+        .attr("fill","#94a3b8").attr("font-size",10)
+        .attr("text-anchor","middle").attr("font-family","Inter, monospace")
+        .attr("font-weight","500").text(d=>d.type||"REL");
+
+      const drag = d3.drag()
+        .on("start",(ev,d)=>{{if(!ev.active)simulation.alphaTarget(0.3).restart();d.fx=d.x;d.fy=d.y;}})
+        .on("drag",(ev,d)=>{{d.fx=ev.x;d.fy=ev.y;}})
+        .on("end",(ev,d)=>{{if(!ev.active)simulation.alphaTarget(0);d.fx=null;d.fy=null;}});
+
+      const node = nodeGroup.selectAll("circle")
+        .data(nodes).enter().append("circle")
+        .attr("r",20)
+        .attr("fill", d => color((d.labels && d.labels[0]) || "Node"))
+        .attr("stroke","#0f172a").attr("stroke-width",2)
+        .style("cursor","pointer")
+        .call(drag)
+        .on("mouseover", showTooltip)
+        .on("mousemove", moveTooltip)
+        .on("mouseout", hideTooltip)
+        .on("click", focusNode)
+        .on("dblclick", expandNode);
+
+      const label = labelGroup.selectAll("text")
+        .data(nodes).enter().append("text")
+        .attr("fill","#f1f5f9").attr("font-size",12).attr("text-anchor","middle")
+        .attr("font-family","Inter, sans-serif").attr("font-weight","600")
+        .attr("pointer-events","none")
+        .text(d => {{
+          const p=d.properties||{{}};
+          return p.nome||p.name||p.title||
+                 (p.descrizione?String(p.descrizione).substring(0,15):null)||
+                 (d.labels&&d.labels[0])||String(d.id).substring(0,8);
+        }});
+
+      simulation.on("tick",()=>{{
+        link.attr("x1",d=>d.source.x).attr("y1",d=>d.source.y)
+            .attr("x2",d=>d.target.x).attr("y2",d=>d.target.y);
+        node.attr("cx",d=>d.x).attr("cy",d=>d.y);
+        label.attr("x",d=>d.x).attr("y",d=>d.y-28);
+        edgeLabel.attr("x",d=>(d.source.x+d.target.x)/2)
+                 .attr("y",d=>(d.source.y+d.target.y)/2-8);
+      }});
+
+      // --- ZOOM & PAN ---
+      const zoom = d3.zoom().scaleExtent([0.1,4])
+        .on("zoom", e => viewport.attr("transform", e.transform));
+      svg.call(zoom).on("dblclick.zoom", null);
+
+      const camStack = [];
+      function pushCam(t){{camStack.push(t);}}
+      function popCam(){{return camStack.pop();}}
+      function smooth(t){{svg.transition().duration(300).call(zoom.transform,t);}}
+      function zoomBy(k){{svg.transition().duration(250).call(zoom.scaleBy,k);}}
+      function reset(){{smooth(d3.zoomIdentity);}}
+      function fit() {{
+        if(!nodes.length)return reset();
+        const xs=nodes.map(n=>n.x), ys=nodes.map(n=>n.y);
+        const minX=Math.min(...xs), maxX=Math.max(...xs);
+        const minY=Math.min(...ys), maxY=Math.max(...ys);
+        const pad=40;
+        const boxW=(maxX-minX)||1, boxH=(maxY-minY)||1;
+        const scale=Math.min((width-pad)/boxW,(height-pad)/boxH,4);
+        const tx=(width - scale*(minX+maxX))/2;
+        const ty=(height - scale*(minY+maxY))/2;
+        smooth(d3.zoomIdentity.translate(tx,ty).scale(scale));
+      }}
+      function focusNode(ev,d){{
+        pushCam(d3.zoomTransform(svg.node()));
+        const k=1.5;
+        const tx=width/2 - k*d.x;
+        const ty=height/2 - k*d.y;
+        smooth(d3.zoomIdentity.translate(tx,ty).scale(k));
+      }}
+
+      function showTooltip(ev,d){{
+        const labels=(d.labels&&d.labels.join(', '))||'Nodo';
+        const props=d.properties||{{}};
+        let html=`<strong style='color:#38bdf8;font-size:14px;'>${{labels}}</strong><br/>`;
+        html+=`<span style='color:#94a3b8;font-size:11px;'>ID: ${{String(d.id).substring(0,12)}}</span><br/><br/>`;
+        for(const [k,v] of Object.entries(props)){{
+          const s=typeof v==='object'?JSON.stringify(v):String(v);
+          html+=`<div style='margin:2px 0;'><span style='color:#cbd5e1;'>${{k}}:</span> <span style='color:#e2e8f0;'>${{s.length>50?s.substring(0,50)+'...':s}}</span></div>`;
+        }}
+        tooltip.html(html).style('display','block');
+        moveTooltip(ev);
+      }}
+      function moveTooltip(ev){{
+        const [mx,my]=d3.pointer(ev, document.getElementById("{element_id}"));
+        tooltip.style('left',(mx+15)+'px').style('top',(my-15)+'px');
+      }}
+      function hideTooltip(){{tooltip.style('display','none');}}
+      function expandNode(ev,d){{
+        ev.stopPropagation();
+        alert("Espansione nodo (todo) — "+((d.labels&&d.labels[0])||d.id));
+      }}
+
+      document.getElementById("{element_id}-zoom-in").onclick=()=>zoomBy(1.2);
+      document.getElementById("{element_id}-zoom-out").onclick=()=>zoomBy(1/1.2);
+      document.getElementById("{element_id}-reset").onclick=()=>reset();
+      document.getElementById("{element_id}-fit").onclick=()=>fit();
+      document.getElementById("{element_id}-back").onclick=()=>{{const p=popCam();if(p)smooth(p);}};
+
+      simulation.on("end", fit) 
+
+      // --- LEGENDA AUTOMATICA ---
+      const uniqueLabels = Array.from(new Set(nodes.flatMap(n => n.labels || ["Node"])));
+      const legend = d3.select("#{element_id}-legend");
+      legend.html("<strong style='color:#38bdf8; font-size: 1.1rem;'>Legenda nodi:</strong><br/>" +
+        uniqueLabels.map(lbl => {{
+          const col = color(lbl);
+          return `<span style='display:inline-flex;align-items:center;margin-right:14px; font-size: 1.1rem;'>
+                    <span style='width:12px;height:12px;background:${{col}};
+                    border-radius:50%;display:inline-block;margin-right:6px;border:1px solid #334155;'></span>
+                    ${{lbl}}
+                  </span>`;
+        }}).join("<br/>"));
+    }})();
+    </script>
+    """
+
+    components.html(html, height=660)
+
+
+def render_table(context) -> bool:
+    """Mostra i risultati in una tabella stilizzata (molto più carina)."""
+    if not context or not isinstance(context, list):
+        return False
+
+    rows = []
+    for item in context:
+        if isinstance(item, dict):
+            row = {}
+            for key, value in item.items():
+                if isinstance(value, (dict, list)):
+                    row[key] = json.dumps(value, ensure_ascii=False)
+                else:
+                    row[key] = value
+            if row:
+                rows.append(row)
+
+    if not rows:
+        return False
+
+    # --- MODIFICHE QUI ---
+
+    # 1. Converti la tua lista di dict in un DataFrame Pandas
+    df = pd.DataFrame(rows)
+
+    # 2. Crea un oggetto "Styler" per definire la formattazione
+    styler = (
+        df.style.hide(axis="index")
+        .format(precision=2, na_rep="-")
+        .set_properties(**{"text-align": "left"})
+        .set_table_styles(
+            [
+                dict(
+                    selector="th",
+                    props=[("text-align", "left"), ("font-weight", "bold")],
+                ),
+                dict(selector="tr:hover", props=[("background-color", "#f5f5f5")]),
+            ]
+        )
+    )
+
+    # 3. Mostra la tabella stilizzata in HTML
+    # (Questo è il modo migliore per assicurarsi che tutti gli stili vengano applicati)
+    # st.write(styler.to_html(), unsafe_allow_html=True)
+
+    # In alternativa, se vuoi ancora la griglia interattiva ma con stili:
+    st.dataframe(styler, width="stretch")
+
+    # -----------------------
+
+    return True
+
+
 # --- FUNZIONE PRINCIPALE PER PROCESSARE QUERY ---
 def process_query(prompt):
     """Processa una query e gestisce la risposta dall'API."""
@@ -877,7 +1199,8 @@ def process_query(prompt):
             logger.info(f" Query: {prompt}")
 
             # Chiamata API
-            response = requests.post(API_URL, json={"question": prompt}, timeout=300)
+            payload = {"question": prompt, "user_id": st.session_state.user_id}
+            response = requests.post(API_URL, json=payload, timeout=300)
 
             status_placeholder.empty()
 
@@ -891,7 +1214,10 @@ def process_query(prompt):
                 )
                 query_generata = data.get("query_generata", "")
                 context = data.get("context", [])
+                graph_data = data.get("graph_data") or {}
                 success = data.get("success", False)
+                timing_details = data.get("timing_details", {})
+                graph_origin = timing_details.get("graph_origin")
 
                 # Aggiorna statistiche
                 if success:
@@ -910,8 +1236,10 @@ def process_query(prompt):
                         else None
                     ),
                     "context": context if context else None,
+                    "graph_data": graph_data if graph_data else None,
                     "success": success,
                     "timestamp": datetime.now().isoformat(),
+                    "timing_details": timing_details,
                 }
 
                 # Mostra query Cypher se presente e richiesto
@@ -932,6 +1260,8 @@ def process_query(prompt):
                         ),
                         "context_items": len(context) if context else 0,
                         "timestamp": assistant_message["timestamp"],
+                        "graph_origin": timing_details.get("graph_origin"),
+                        "examples_used": data.get("examples_used"),
                     }
                     with st.expander(" Debug Info"):
                         st.json(debug_info)
@@ -940,6 +1270,27 @@ def process_query(prompt):
                 if show_context and context:
                     with st.expander(" Dati Raw dal Grafo"):
                         st.json(context)
+
+                if show_table and context:
+                    with st.expander(" Tabella risultati", expanded=False):
+                        if not render_table(context):
+                            st.info("Contenuto non tabellare")
+
+                if show_graph and graph_data and graph_data.get("nodes"):
+                    with st.expander(" Visualizzazione Grafo", expanded=False):
+                        render_graph(graph_data)
+                elif show_graph:
+                    with st.expander(" Visualizzazione Grafo", expanded=False):
+                        if graph_origin == "reconstructed_from_query":
+                            st.info(
+                                "Grafo ricostruito ma vuoto (nessun nodo distinto trovato)."
+                            )
+                        elif graph_origin == "context_results":
+                            st.info(
+                                "La query non ha restituito nodi Neo4j da visualizzare."
+                            )
+                        else:
+                            st.info("Nessun grafo disponibile per questa risposta.")
 
                 # Suggerimenti intelligenti
                 if show_suggestions and success:
@@ -1019,206 +1370,230 @@ def process_query(prompt):
 
 
 # --- SIDEBAR ULTRA AVANZATA ---
-with st.sidebar:
-    st.markdown("### Centro di Controllo")
+if is_debug_mode:
+    with st.sidebar:
+        st.markdown("### Centro di Controllo")
 
-    # Test connessione con badge status
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        if st.button(" Verifica API", use_container_width=True, key="test_api"):
-            with st.spinner("Connessione..."):
-                if check_api_health():
-                    st.success("✅ Online!")
-                    st.balloons()
-                else:
-                    st.error(" Offline")
+        # Test connessione con badge status
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            if st.button(" Verifica API", width="stretch", key="test_api"):
+                with st.spinner("Connessione..."):
+                    if check_api_health():
+                        st.success("✅ Online!")
+                        st.balloons()
+                    else:
+                        st.error(" Offline")
 
-    # with col2:
-    # if st.session_state.api_status == "online":
-    # st.markdown('<span class="status-badge status-online">●</span>', unsafe_allow_html=True)
-    # else:
-    # st.markdown('<span class="status-badge status-offline">●</span>', unsafe_allow_html=True)
-
-    st.markdown("---")
-
-    # Tabs per organizzare funzionalità
-    tab1, tab2, tab3 = st.tabs(["Impostazioni", " Preferiti", " Stats"])
-
-    with tab1:
-        st.markdown("#### Visualizzazione")
-        debug_mode = st.checkbox(" Debug Mode", help="Mostra dettagli tecnici")
-        show_context = st.checkbox(" Dati Raw", help="Visualizza dati dal grafo")
-        show_query = st.checkbox(
-            " Query Cypher", value=False, help="Mostra query generate"
-        )
-        show_suggestions = st.checkbox(
-            " Suggerimenti Smart", value=True, help="Suggerimenti automatici"
-        )
+        # with col2:
+        # if st.session_state.api_status == "online":
+        # st.markdown('<span class="status-badge status-online">●</span>', unsafe_allow_html=True)
+        # else:
+        # st.markdown('<span class="status-badge status-offline">●</span>', unsafe_allow_html=True)
 
         st.markdown("---")
-        st.markdown("#### Azioni Rapide")
 
-        if st.button("Cancella Chat", use_container_width=True, type="secondary"):
-            if st.session_state.messages:
-                clear_conversation()
-                st.success("Chat cancellata!")
-                st.rerun()
-            else:
-                st.info("Chat già vuota")
+        # Tabs per organizzare funzionalità
+        tab1, tab2, tab3 = st.tabs(["Impostazioni", " Preferiti", " Stats"])
 
-        # Aggiorna il testo di aiuto per spiegare che il reset è completo
-        if st.button(
-            "Reset Completo del Chatbot",
-            use_container_width=True,
-            type="primary",
-            help="Resetta completamente il chatbot, cancellando sia la cache delle risposte che la memoria delle conversazioni.",
-        ):
-            with st.spinner("Reset del server in corso..."):
-                try:
-                    # La chiamata API rimane la stessa
-                    response = requests.delete(CACHE_URL, timeout=10)
-                    if response.status_code == 200:
-                        data = response.json()
+        with tab1:
+            st.markdown("#### Sessione")
+            st.text_input(
+                "ID Utente",
+                key="user_id",
+                help="Personalizza l'identificativo per mantenere conversazioni distinte.",
+            )
+            st.markdown("---")
+            st.markdown("#### Visualizzazione")
+            debug_mode = st.checkbox(" Debug Mode", help="Mostra dettagli tecnici")
+            show_context = st.checkbox(" Dati Raw", help="Visualizza dati dal grafo")
+            show_query = st.checkbox(
+                " Query Cypher", value=False, help="Mostra query generate"
+            )
+            show_graph = st.checkbox(
+                " Visualizza Grafo",
+                value=True,
+                help="Mostra il sottografo estratto dalla query Cypher",
+            )
+            show_table = st.checkbox(
+                " Tabella risultati",
+                value=True,
+                help="Mostra i risultati in formato tabellare quando disponibile",
+            )
+            show_suggestions = st.checkbox(
+                " Suggerimenti Smart", value=True, help="Suggerimenti automatici"
+            )
 
-                        # Pulisci la conversazione locale
-                        # Estrai i due nuovi valori dalla risposta JSON
-                        risposte_rimosse = data.get("risposte_rimosse", 0)
-                        sessioni_rimosse = data.get("sessioni_rimosse", 0)
+            st.markdown("---")
+            st.markdown("#### Azioni Rapide")
 
-                        # Mostra un messaggio di successo più dettagliato
-                        st.success(
-                            f"Reset completato! Rimosse {risposte_rimosse} risposte e {sessioni_rimosse} sessioni di memoria."
-                        )
+            if st.button("Cancella Chat", width="stretch", type="secondary"):
+                if st.session_state.messages:
+                    clear_conversation()
+                    st.success("Chat cancellata!")
+                    st.rerun()
+                else:
+                    st.info("Chat già vuota")
 
-                    else:
-                        st.error(f"Errore API ({response.status_code})")
-                except Exception as e:
-                    st.error(f"Errore di connessione: {e}")
+            # Aggiorna il testo di aiuto per spiegare che il reset è completo
+            if st.button(
+                "Reset Completo del Chatbot",
+                width="stretch",
+                type="primary",
+                help="Resetta completamente il chatbot, cancellando sia la cache delle risposte che la memoria delle conversazioni.",
+            ):
+                with st.spinner("Reset del server in corso..."):
+                    try:
+                        # La chiamata API rimane la stessa
+                        response = requests.delete(CACHE_URL, timeout=10)
+                        if response.status_code == 200:
+                            data = response.json()
 
-        if st.button("Esporta JSON", use_container_width=True):
-            if st.session_state.messages:
-                json_data = export_conversation_json()
-                st.download_button(
-                    "Download JSON",
-                    json_data,
-                    file_name=f"blueai_chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                    mime="application/json",
-                    use_container_width=True,
-                )
-            else:
-                st.info("Nessuna conversazione da esportare")
+                            # Pulisci la conversazione locale
+                            # Estrai i due nuovi valori dalla risposta JSON
+                            risposte_rimosse = data.get("risposte_rimosse", 0)
+                            sessioni_rimosse = data.get("sessioni_rimosse", 0)
 
-        if st.button("Esporta TXT", use_container_width=True):
-            if st.session_state.messages:
-                txt_data = export_conversation_txt()
-                st.download_button(
-                    "Download TXT",
-                    txt_data,
-                    file_name=f"blueai_chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-                    mime="text/plain",
-                    use_container_width=True,
-                )
-            else:
-                st.info("Nessuna conversazione da esportare")
+                            # Mostra un messaggio di successo più dettagliato
+                            st.success(
+                                f"Reset completato! Rimosse {risposte_rimosse} risposte e {sessioni_rimosse} sessioni di memoria."
+                            )
 
-    with tab2:
-        st.markdown("#### Query Preferite")
+                        else:
+                            st.error(f"Errore API ({response.status_code})")
+                    except Exception as e:
+                        st.error(f"Errore di connessione: {e}")
 
-        # Aggiungi query predefinite se la lista è vuota
-        if not st.session_state.favorite_queries:
-            st.session_state.favorite_queries = [
-                "Mostrami tutti i clienti",
-                "Qual è il fatturato totale?",
-                "Lista delle ditte",
-            ]
+            if st.button("Esporta JSON", width="stretch"):
+                if st.session_state.messages:
+                    json_data = export_conversation_json()
+                    st.download_button(
+                        "Download JSON",
+                        json_data,
+                        file_name=f"blueai_chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                        mime="application/json",
+                        width="stretch",
+                    )
+                else:
+                    st.info("Nessuna conversazione da esportare")
 
-        for idx, fav_query in enumerate(st.session_state.favorite_queries):
-            col1, col2 = st.columns([4, 1])
+            if st.button("Esporta TXT", width="stretch"):
+                if st.session_state.messages:
+                    txt_data = export_conversation_txt()
+                    st.download_button(
+                        "Download TXT",
+                        txt_data,
+                        file_name=f"blueai_chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                        mime="text/plain",
+                        width="stretch",
+                    )
+                else:
+                    st.info("Nessuna conversazione da esportare")
+
+        with tab2:
+            st.markdown("#### Query Preferite")
+
+            # Aggiungi query predefinite se la lista è vuota
+            if not st.session_state.favorite_queries:
+                st.session_state.favorite_queries = [
+                    "Mostrami tutti i clienti",
+                    "Qual è il fatturato totale?",
+                    "Lista delle ditte",
+                ]
+
+            for idx, fav_query in enumerate(st.session_state.favorite_queries):
+                col1, col2 = st.columns([4, 1])
+                with col1:
+                    if st.button(f"{fav_query}", key=f"fav_{idx}", width="stretch"):
+                        st.session_state.pending_query = fav_query
+                        st.rerun()
+                with col2:
+                    if st.button("🗑️", key=f"del_fav_{idx}"):
+                        st.session_state.favorite_queries.pop(idx)
+                        st.rerun()
+
+            # Aggiungi nuova query preferita
+            with st.expander("Aggiungi Preferito"):
+                new_fav = st.text_input("Nuova query", key="new_favorite")
+                if st.button("Salva", key="save_fav"):
+                    if new_fav and add_to_favorites(new_fav):
+                        st.success(" Aggiunto!")
+                        st.rerun()
+                    elif new_fav:
+                        st.warning("Già presente")
+
+        with tab3:
+            st.markdown("#### Statistiche Sessione")
+
+            total = st.session_state.conversation_stats["total_queries"]
+            successful = st.session_state.conversation_stats["successful_queries"]
+            success_rate = (successful / total * 100) if total > 0 else 0
+
+            col1, col2 = st.columns(2)
             with col1:
-                if st.button(
-                    f"{fav_query}", key=f"fav_{idx}", use_container_width=True
-                ):
-                    st.session_state.pending_query = fav_query
-                    st.rerun()
+                st.metric("Query Totali", total)
             with col2:
-                if st.button("🗑️", key=f"del_fav_{idx}"):
-                    st.session_state.favorite_queries.pop(idx)
-                    st.rerun()
+                st.metric("Successo", f"{success_rate:.0f}%")
 
-        # Aggiungi nuova query preferita
-        with st.expander("Aggiungi Preferito"):
-            new_fav = st.text_input("Nuova query", key="new_favorite")
-            if st.button("Salva", key="save_fav"):
-                if new_fav and add_to_favorites(new_fav):
-                    st.success(" Aggiunto!")
-                    st.rerun()
-                elif new_fav:
-                    st.warning("Già presente")
+            st.metric("Messaggi", len(st.session_state.messages))
 
-    with tab3:
-        st.markdown("#### Statistiche Sessione")
+            start_time = datetime.fromisoformat(
+                st.session_state.conversation_stats["start_time"]
+            )
+            duration = datetime.now() - start_time
+            minutes = int(duration.total_seconds() / 60)
+            st.caption(f"⏱️ Sessione: {minutes} minuti")
 
-        total = st.session_state.conversation_stats["total_queries"]
-        successful = st.session_state.conversation_stats["successful_queries"]
-        success_rate = (successful / total * 100) if total > 0 else 0
+        st.markdown("---")
 
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Query Totali", total)
-        with col2:
-            st.metric("Successo", f"{success_rate:.0f}%")
+        # Query rapide
+        st.markdown("### 🚀 Query Veloci")
 
-        st.metric("Messaggi", len(st.session_state.messages))
+        quick_queries = [
+            ("Lista Clienti", "Mostrami tutti i clienti"),
+            ("Fatturato Totale", "Qual è il fatturato totale?"),
+            ("Lista Ditte", "Mostra tutte le ditte"),
+            ("Top Cliente", "Chi è il cliente con più fatturato?"),
+            ("Statistiche", "Dammi delle statistiche generali"),
+            ("Analisi Rapida", "Fai un'analisi generale dei dati"),
+        ]
 
-        start_time = datetime.fromisoformat(
-            st.session_state.conversation_stats["start_time"]
-        )
-        duration = datetime.now() - start_time
-        minutes = int(duration.total_seconds() / 60)
-        st.caption(f"⏱️ Sessione: {minutes} minuti")
+        for icon_label, query in quick_queries:
+            if st.button(icon_label, width="stretch", key=f"quick_{query}"):
+                st.session_state.pending_query = query
+                st.rerun()
 
-    st.markdown("---")
+        st.markdown("---")
 
-    # Query rapide
-    st.markdown("### 🚀 Query Veloci")
-
-    quick_queries = [
-        ("Lista Clienti", "Mostrami tutti i clienti"),
-        ("Fatturato Totale", "Qual è il fatturato totale?"),
-        ("Lista Ditte", "Mostra tutte le ditte"),
-        ("Top Cliente", "Chi è il cliente con più fatturato?"),
-        ("Statistiche", "Dammi delle statistiche generali"),
-        ("Analisi Rapida", "Fai un'analisi generale dei dati"),
-    ]
-
-    for icon_label, query in quick_queries:
-        if st.button(icon_label, use_container_width=True, key=f"quick_{query}"):
-            st.session_state.pending_query = query
-            st.rerun()
-
-    st.markdown("---")
-
-    # Tips
-    with st.expander("💡 Tips & Tricks"):
-        st.markdown(
+        # Tips
+        with st.expander("💡 Tips & Tricks"):
+            st.markdown(
+                """
+            **Performance:**
+            - Domande chiare = risposte veloci
+            - Cache attiva per query ripetute
+            - Esempi: *"clienti ditta X"*, *"fatturato Y"*
+            
+            **Funzionalità:**
+            - Salva query preferite
+            - Esporta conversazioni
+            - Suggerimenti automatici
+            - Statistiche in tempo reale
+            
+            **Shortcut:**
+            - Query veloci nella sidebar
+            - Click su suggerimenti correlati
+            - Export JSON/TXT disponibile
             """
-        **Performance:**
-        - Domande chiare = risposte veloci
-        - Cache attiva per query ripetute
-        - Esempi: *"clienti ditta X"*, *"fatturato Y"*
-        
-        **Funzionalità:**
-        - Salva query preferite
-        - Esporta conversazioni
-        - Suggerimenti automatici
-        - Statistiche in tempo reale
-        
-        **Shortcut:**
-        - Query veloci nella sidebar
-        - Click su suggerimenti correlati
-        - Export JSON/TXT disponibile
-        """
-        )
+            )
+else:
+    # Modalità Cliente: tutto spento, tranne i suggerimenti
+    debug_mode = False
+    show_context = False
+    show_query = False
+    show_graph = True  # Puoi decidere se tenerlo True per i clienti
+    show_table = True  # Puoi decidere se tenerlo True per i clienti
+    show_suggestions = True  # Puoi decidere se tenerlo True per i clienti
 
 # --- AREA PRINCIPALE CHAT ---
 
@@ -1277,6 +1652,30 @@ for i, message in enumerate(st.session_state.messages):
         if show_context and message["role"] == "assistant" and message.get("context"):
             with st.expander("Dati Raw dal Grafo"):
                 st.json(message["context"])
+
+        if show_table and message["role"] == "assistant" and message.get("context"):
+            with st.expander("Tabella risultati"):
+                if not render_table(message["context"]):
+                    st.info("Contenuto non tabellare")
+
+        if show_graph and message["role"] == "assistant" and message.get("graph_data"):
+            with st.expander("Visualizzazione Grafo"):
+                render_graph(
+                    message["graph_data"], element_id=f"neo4j-graph-history-{i}"
+                )
+        elif show_graph and message["role"] == "assistant":
+            with st.expander("Visualizzazione Grafo"):
+                origin = None
+                if isinstance(message.get("timing_details"), dict):
+                    origin = message["timing_details"].get("graph_origin")
+                if origin == "reconstructed_from_query":
+                    st.info(
+                        "Grafo ricostruito ma vuoto (nessun nodo distinto trovato)."
+                    )
+                elif origin == "context_results":
+                    st.info("La query non ha restituito nodi Neo4j da visualizzare.")
+                else:
+                    st.info("Nessun grafo disponibile per questa risposta.")
 
 # Gestione query pendenti (da bottoni)
 if "pending_query" in st.session_state:

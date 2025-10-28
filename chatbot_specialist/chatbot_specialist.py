@@ -6,7 +6,7 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.prompts import ChatPromptTemplate
 from cachetools import TTLCache
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple, Set, Literal, Pattern
 from pydantic import BaseModel
 import re
 import logging
@@ -15,8 +15,10 @@ import json
 from datetime import date
 import copy
 import hashlib
+import numpy as np
 from neo4j.time import Date, DateTime, Time, Duration
 from neo4j.exceptions import Neo4jError
+from neo4j.graph import Node, Relationship, Path
 from pathlib import Path
 
 
@@ -272,19 +274,177 @@ query_cache = TTLCache(
 # Flag cache/memoria
 ENABLE_CACHE = config.system.get("cache", {}).get("enabled", True)
 
-# Timeout sessioni (da config/system.yaml)
-SESSION_TIMEOUT = timedelta(minutes=config.system["sessions"]["timeout_minutes"])
+SESSION_CFG = config.system.get("sessions", {}) or {}
+ENABLE_MEMORY = bool(SESSION_CFG.get("enable_memory", False))
+SESSION_TIMEOUT = timedelta(minutes=SESSION_CFG.get("timeout_minutes", 30))
+MAX_MESSAGES_PER_SESSION = int(SESSION_CFG.get("max_messages_per_session", 15))
+
+MEMORY_CFG = SESSION_CFG.get("memory", {}) or {}
+
+EXAMPLES_CFG = config.system.get("examples", {}) or {}
+EXAMPLES_MIN_SIMILARITY = EXAMPLES_CFG.get("min_similarity")
+
+RETRY_DEFAULT_CFG = config.system.get("retry", {}) or {}
+SEMANTIC_EXPANSION_CFG = RETRY_DEFAULT_CFG.get("semantic_expansion", {}) or {}
+SEMANTIC_EXPANSION_ENABLED = bool(SEMANTIC_EXPANSION_CFG.get("enabled", False))
+SEMANTIC_EXPANSION_MAX_ATTEMPTS_DEFAULT = int(
+    SEMANTIC_EXPANSION_CFG.get("max_attempts", 0) or 0
+)
+SEMANTIC_EXPANSION_TOP_K_DEFAULT = int(
+    SEMANTIC_EXPANSION_CFG.get("top_k_examples", 0) or 0
+)
+SEMANTIC_EXPANSION_PROMPT_NAME = SEMANTIC_EXPANSION_CFG.get(
+    "prompt", "query_expansion_prompt.yaml"
+)
+
+
+def _normalize_keyword_list(values) -> List[str]:
+    collection = values or []
+    return [str(item).strip().lower() for item in collection if str(item).strip()]
+
+
+def _contains_keyword(lowered: str, tokens: List[str], keywords: Set[str]) -> bool:
+    """Verifica se la frase contiene una delle keyword (single word o multi-word)."""
+
+    if not keywords:
+        return False
+
+    token_set = set(tokens)
+    for keyword in keywords:
+        if not keyword:
+            continue
+        if " " in keyword:
+            if keyword in lowered:
+                return True
+        else:
+            if keyword in token_set:
+                return True
+    return False
+
+
+SMALL_TALK_CFG = config.system.get("small_talk", {}) or {}
+SMALL_TALK_KEYWORDS = set(_normalize_keyword_list(SMALL_TALK_CFG.get("keywords")))
+DANGEROUS_CFG = config.system.get("dangerous_operations", {}) or {}
+DANGEROUS_KEYWORDS = set(_normalize_keyword_list(DANGEROUS_CFG.get("keywords")))
+CYPHER_WRITE_BLOCKLIST = [
+    str(item).strip()
+    for item in config.system.get("cypher_write_blocklist", []) or []
+    if str(item).strip()
+]
+
+_CYPHER_WRITE_PATTERNS: List[Tuple[str, Pattern[str]]] = []
+for kw in CYPHER_WRITE_BLOCKLIST:
+    lowered = kw.lower()
+    if not lowered:
+        continue
+    if any(ch in lowered for ch in (" ", ".", "_")):
+        pattern = re.compile(re.escape(lowered), re.IGNORECASE)
+    else:
+        pattern = re.compile(rf"\b{re.escape(lowered)}\b", re.IGNORECASE)
+    _CYPHER_WRITE_PATTERNS.append((kw, pattern))
+
+
+def _is_small_talk(question: str) -> bool:
+    """Riconosce scambi di cortesia o domande generiche da trattare come conversazione."""
+
+    if not question:
+        return False
+
+    lowered = question.strip().lower()
+    tokens = re.findall(r"\w+", lowered)
+
+    if SMALL_TALK_KEYWORDS and _contains_keyword(lowered, tokens, SMALL_TALK_KEYWORDS):
+        return True
+
+    # fallback: frasi brevissime prive di cifre e con pochi token
+    if len(tokens) <= 2 and not any(char.isdigit() for char in lowered):
+        return True
+
+    return False
+
+
+def _contains_dangerous_intent(question: str) -> bool:
+    """Intercetta richieste di inserimento/modifica/cancellazione da bloccare a monte."""
+
+    if not question:
+        return False
+
+    lowered = question.strip().lower()
+    tokens = re.findall(r"\w+", lowered)
+
+    if DANGEROUS_KEYWORDS and _contains_keyword(lowered, tokens, DANGEROUS_KEYWORDS):
+        return True
+
+    return False
+
+
+def _detect_write_operation(query: Optional[str]) -> Optional[str]:
+    """Ritorna la keyword vietata trovata nella query, se presente."""
+
+    if not query:
+        return None
+
+    for keyword, pattern in _CYPHER_WRITE_PATTERNS:
+        if pattern.search(query):
+            return keyword
+    return None
+
+
+def _ensure_read_only_query(query: str) -> None:
+    """Solleva un'eccezione se la query contiene operazioni di scrittura."""
+
+    keyword = _detect_write_operation(query)
+    if keyword:
+        raise UnsafeCypherError(keyword)
+
+
+SCOPE_RESET_KEYWORDS = set(
+    _normalize_keyword_list(MEMORY_CFG.get("scope_reset_keywords"))
+)
+EXPLICIT_RESET_KEYWORDS = set(
+    _normalize_keyword_list(MEMORY_CFG.get("explicit_reset_keywords"))
+)
+FOLLOW_UP_KEYWORDS = set(_normalize_keyword_list(MEMORY_CFG.get("followup_keywords")))
+PRONOUN_STARTS = tuple(_normalize_keyword_list(MEMORY_CFG.get("pronoun_starts")))
+CONFIRMATION_KEYWORDS = set(_normalize_keyword_list(MEMORY_CFG.get("confirm_keywords")))
+REJECTION_KEYWORDS = set(_normalize_keyword_list(MEMORY_CFG.get("reject_keywords")))
+
+if not SCOPE_RESET_KEYWORDS:
+    logger.warning(
+        "sessions.memory.scope_reset_keywords non configurato: le domande generiche non resetteranno automaticamente lo scope."
+    )
+SHORT_QUESTION_TOKEN_THRESHOLD = int(
+    MEMORY_CFG.get("short_question_token_threshold", 6) or 0
+)
+RECENCY_MINUTES_LIMIT = MEMORY_CFG.get("recency_minutes")
+RECENCY_WINDOW = (
+    timedelta(minutes=float(RECENCY_MINUTES_LIMIT))
+    if RECENCY_MINUTES_LIMIT and float(RECENCY_MINUTES_LIMIT) > 0
+    else None
+)
+
+EMBEDDING_CFG = MEMORY_CFG.get("embedding_similarity", {}) or {}
+EMBEDDING_ACTIVE = bool(EMBEDDING_CFG.get("enabled", False))
+EMBEDDING_HISTORY_SIZE = int(EMBEDDING_CFG.get("history_size", 3) or 0)
+EMBEDDING_THRESHOLD = float(EMBEDDING_CFG.get("threshold", 0.75))
+EMBEDDING_REUSE_EXAMPLES = bool(EMBEDDING_CFG.get("reuse_example_retriever", True))
+EMBEDDING_MODEL_NAME = EMBEDDING_CFG.get("model_name", "all-MiniLM-L6-v2")
+MEMORY_EMBEDDER = None
+
+if EMBEDDING_ACTIVE and EMBEDDING_HISTORY_SIZE <= 0:
+    logger.warning(
+        "sessions.memory.embedding_similarity.history_size <= 0: la similarità embedding verrà ignorata."
+    )
 
 # Limiti query (da config/system.yaml)
 MAX_RESULTS_FOR_SYNTHESIZER = config.system["query_limits"][
     "max_results_for_synthesizer"
 ]
-MAX_MESSAGES_PER_SESSION = config.system["sessions"]["max_messages_per_session"]
 
 logger.info(
     f"Cache configurata: enabled={ENABLE_CACHE}, max_size={config.system['cache']['max_cache_size']}, ttl={config.system['cache']['query_ttl_seconds']}s"
 )
-logger.info(f"Session timeout: {config.system['sessions']['timeout_minutes']} minuti")
+logger.info(f"Session timeout: {SESSION_TIMEOUT.total_seconds() / 60:.0f} minuti")
 logger.info(f"Max risultati per synthesizer: {MAX_RESULTS_FOR_SYNTHESIZER}")
 
 
@@ -400,6 +560,297 @@ def _suggest_unnecessary_with_hints(cypher: str) -> str:
     return ""
 
 
+def _compose_repair_task(original_question_it: str, english_task: str) -> str:
+    """
+    Prepara un blocco di testo che combina domanda originale e task inglese
+    per aiutare l'agente di repair a conservare l'intento.
+    """
+    if not english_task:
+        return original_question_it
+    if not original_question_it:
+        return english_task
+    return (
+        "Original user question (IT): "
+        + original_question_it.strip()
+        + "\nEnglish task: "
+        + english_task.strip()
+    )
+
+
+def _error_matches_patterns(error_msg: str, patterns: List[str]) -> bool:
+    """Verifica se il messaggio di errore combacia con i pattern configurati."""
+    if not error_msg or not patterns:
+        return False
+    special_chars = set(".*?[]()^$|+{}\\")
+    for pattern in patterns:
+        if not pattern:
+            continue
+        is_regex = any(ch in special_chars for ch in pattern)
+        try:
+            if is_regex:
+                if re.search(pattern, error_msg):
+                    return True
+            elif pattern in error_msg:
+                return True
+        except re.error:
+            # In caso di regex mal formata ripiega sulla ricerca semplice
+            if pattern in error_msg:
+                return True
+    return False
+
+
+def _invoke_query_repair(
+    *,
+    english_task: str,
+    original_question_it: str,
+    relevant_schema: str,
+    bad_query: str,
+    error_msg: str,
+    base_hints: str,
+    recent_repairs: str,
+) -> str:
+    """Richiama l'agente LLM per correggere la query fallita."""
+    if not QUERY_REPAIR_PROMPT:
+        return bad_query
+
+    task_block = _compose_repair_task(original_question_it, english_task)
+    try:
+        fixed = _invoke_with_profile(
+            agent_name="coder",
+            prompt_text=QUERY_REPAIR_PROMPT,
+            variables={
+                "question": task_block,
+                "schema": relevant_schema,
+                "bad_query": bad_query,
+                "error": error_msg,
+                "hints": base_hints,
+                "recent_repairs": recent_repairs,
+            },
+        )
+        candidate = extract_cypher(fixed)
+        return candidate or bad_query
+    except Exception as exc:
+        logger.error(f"Errore durante il tentativo di query repair: {exc}")
+        return bad_query
+
+
+def _apply_preflight_sql_guard(
+    *,
+    current_query: str,
+    english_task: str,
+    original_question_it: str,
+    relevant_schema: str,
+    base_hints: str,
+    recent_repairs: str,
+) -> str:
+    """Esegue un controllo preflight per intercettare sintassi SQL-like prima dell'esecuzione."""
+    if not current_query or not QUERY_REPAIR_PROMPT:
+        return current_query
+
+    sql_like = re.compile(
+        r"\b(GROUP\s+BY|HAVING|OVER\b|PARTITION\s+BY|ROW_NUMBER\s*\(|RANK\s*\(|WINDOW\b)",
+        re.IGNORECASE,
+    )
+    if not sql_like.search(current_query or ""):
+        return current_query
+
+    logger.info(
+        "Preflight Repair: rilevata sintassi SQL-like (GROUP BY/HAVING/OVER). Avvio correzione preventiva."
+    )
+    auto_hints = _suggest_unnecessary_with_hints(current_query)
+    preflight_hints = (
+        "SQL-like keywords are invalid in Cypher (GROUP BY, HAVING, OVER).\n"
+        "Use Cypher aggregation with WITH/RETURN instead of SQL GROUP BY.\n"
+        "Per ranking o finestre, usa WITH + collect(...) e ORDER BY, non funzioni OVER.\n"
+    )
+    hints_parts = [part for part in [base_hints, preflight_hints, auto_hints] if part]
+    combined_hints = "\n\n".join(hints_parts).strip()
+    fixed_query = _invoke_query_repair(
+        english_task=english_task,
+        original_question_it=original_question_it,
+        relevant_schema=relevant_schema,
+        bad_query=current_query,
+        error_msg="Detected SQL-like syntax (GROUP BY/HAVING/OVER) not valid in Cypher.",
+        base_hints=combined_hints,
+        recent_repairs=recent_repairs,
+    )
+    if fixed_query and fixed_query != current_query:
+        logger.info(f"Query corretta (preflight) proposta:\n{fixed_query}")
+        _append_repair_event(
+            english_task,
+            current_query,
+            "Preflight SQL-like syntax",
+            fixed_query,
+        )
+        return fixed_query
+    return current_query
+
+
+def execute_query_with_iterative_improvement(
+    *,
+    initial_query: str,
+    english_task: str,
+    original_question_it: str,
+    relevant_schema: str,
+    retry_cfg: Dict[str, Any],
+    base_hints_text: str,
+    recent_repairs: str,
+    semantic_cfg: Optional[Dict[str, Any]] = None,
+    semantic_examples: Optional[List[Dict[str, Any]]] = None,
+    contextualized_question: Optional[str] = None,
+) -> Tuple[str, List[Dict[str, Any]], List[Dict[str, str]]]:
+    """
+    Esegue la query su Neo4j provando a correggerla iterativamente.
+
+    Ritorna la query finale, il contesto completo e un audit trail dei tentativi.
+    """
+    attempts = max(1, int(retry_cfg.get("max_attempts", 1)))
+    patterns = retry_cfg.get("repairable_error_patterns", [])
+    current_query = initial_query
+    audit_trail: List[Dict[str, str]] = []
+    last_error_msg: Optional[str] = None
+
+    semantic_cfg = semantic_cfg or {}
+    semantic_enabled = bool(semantic_cfg.get("enabled", False)) and bool(
+        QUERY_EXPANSION_PROMPT
+    )
+    semantic_max_attempts = int(
+        semantic_cfg.get("max_attempts", SEMANTIC_EXPANSION_MAX_ATTEMPTS_DEFAULT) or 0
+    )
+    semantic_top_k = int(
+        semantic_cfg.get("top_k_examples", SEMANTIC_EXPANSION_TOP_K_DEFAULT) or 0
+    )
+    semantic_attempts = 0
+
+    # Preflight per sintassi SQL
+    current_query = _apply_preflight_sql_guard(
+        current_query=current_query,
+        english_task=english_task,
+        original_question_it=original_question_it,
+        relevant_schema=relevant_schema,
+        base_hints=base_hints_text,
+        recent_repairs=recent_repairs,
+    )
+    _ensure_read_only_query(current_query)
+
+    for attempt_idx in range(1, attempts + 1):
+        try:
+            logger.info(f"Esecuzione attempt {attempt_idx}/{attempts} su Neo4j.")
+            _ensure_read_only_query(current_query)
+            context = execute_cypher_with_timeout(current_query)
+            return current_query, context, audit_trail
+        except QueryTimeoutError as timeout_exc:
+            last_error_msg = str(timeout_exc)
+            logger.error(
+                f"Tentativo {attempt_idx}/{attempts} fallito per timeout: {last_error_msg}"
+            )
+            raise
+        except Exception as exc:
+            error_msg = str(exc)
+            last_error_msg = error_msg
+            logger.warning(
+                f"Tentativo {attempt_idx}/{attempts} fallito con errore: {error_msg[:200]}"
+            )
+
+            audit_entry = {
+                "attempt": attempt_idx,
+                "bad_query": current_query,
+                "error": error_msg,
+            }
+
+            # Ultimo tentativo: uscita
+            if attempt_idx >= attempts:
+                audit_trail.append(audit_entry)
+                break
+
+            if not QUERY_REPAIR_PROMPT:
+                audit_trail.append(audit_entry)
+                break
+
+            if not _error_matches_patterns(error_msg, patterns):
+                audit_trail.append(audit_entry)
+                break
+
+            auto_hints = _suggest_unnecessary_with_hints(current_query)
+            hints_parts = [part for part in [base_hints_text, auto_hints] if part]
+            combined_hints = "\n\n".join(hints_parts).strip()
+
+            fixed_query = _invoke_query_repair(
+                english_task=english_task,
+                original_question_it=original_question_it,
+                relevant_schema=relevant_schema,
+                bad_query=current_query,
+                error_msg=error_msg,
+                base_hints=combined_hints,
+                recent_repairs=recent_repairs,
+            )
+            audit_entry["fixed_query"] = fixed_query
+            audit_trail.append(audit_entry)
+
+            if not fixed_query or fixed_query.strip() == current_query.strip():
+                logger.info("Repair agent non ha proposto cambiamenti significativi.")
+                break
+
+            logger.info(f"Query corretta proposta:\n{fixed_query}")
+            _append_repair_event(
+                english_task,
+                current_query,
+                error_msg,
+                fixed_query,
+            )
+            _ensure_read_only_query(fixed_query)
+            current_query = fixed_query
+
+    # Tentativo finale di espansione semantica se abilitato
+    if semantic_enabled and semantic_max_attempts > 0:
+        semantic_examples = semantic_examples or []
+        if semantic_top_k > 0:
+            semantic_examples = semantic_examples[:semantic_top_k]
+        semantic_attempts = 0
+        while semantic_attempts < semantic_max_attempts:
+            semantic_query = _semantic_expansion_attempt(
+                question_it=original_question_it,
+                contextualized_question=contextualized_question,
+                english_task=english_task,
+                relevant_schema=relevant_schema,
+                bad_query=current_query,
+                error_msg=last_error_msg or "",
+                semantic_examples=semantic_examples,
+                base_hints=base_hints_text,
+                recent_repairs=recent_repairs,
+                top_k=semantic_top_k,
+            )
+
+            semantic_attempts += 1
+            if not semantic_query or semantic_query.strip() == current_query.strip():
+                logger.info("Semantic expansion non ha prodotto una nuova query utile.")
+                continue
+
+            audit_entry = {
+                "attempt": f"semantic-{semantic_attempts}",
+                "bad_query": current_query,
+                "error": last_error_msg or "",
+                "semantic_expansion": True,
+                "fixed_query": semantic_query,
+            }
+
+            try:
+                logger.info("Esecuzione query dopo espansione semantica.")
+                _ensure_read_only_query(semantic_query)
+                context = execute_cypher_with_timeout(semantic_query)
+                audit_trail.append(audit_entry)
+                return semantic_query, context, audit_trail
+            except Exception as semantic_exc:
+                last_error_msg = str(semantic_exc)
+                audit_entry["semantic_error"] = last_error_msg
+                audit_trail.append(audit_entry)
+                current_query = semantic_query
+                _ensure_read_only_query(current_query)
+
+    # se siamo qui tutti i tentativi sono falliti
+    raise Exception(last_error_msg or "Query execution failed without error message.")
+
+
 # CONNESSIONE NEO4J (DA CONFIG + SECRETS DA .ENV)
 try:
     graph = Neo4jGraph(
@@ -415,6 +866,14 @@ except Exception as e:
 
 class QueryTimeoutError(RuntimeError):
     """Raised when a Neo4j query exceeds the configured timeout."""
+
+
+class UnsafeCypherError(RuntimeError):
+    """Raised when a generated Cypher query contiene operazioni di scrittura non permesse."""
+
+    def __init__(self, keyword: str) -> None:
+        self.keyword = keyword
+        super().__init__(f"Operazione Cypher non consentita rilevata: {keyword}")
 
 
 def _parse_positive_float(value: Optional[float]) -> Optional[float]:
@@ -476,6 +935,43 @@ def execute_cypher_with_timeout(
         raise
 
 
+def execute_cypher_with_records(
+    query: str,
+    params: Optional[Dict[str, Any]] = None,
+    timeout_seconds: Optional[float] = None,
+) -> List[Dict[str, Any]]:
+    """Execute a Cypher query enforcing the configured timeout."""
+
+    effective_timeout = timeout_seconds
+    if effective_timeout is None:
+        effective_timeout = get_query_timeout_seconds()
+
+    timeout_ms = None
+    if effective_timeout:
+        timeout_ms = max(1, int(effective_timeout * 1000))
+
+    run_kwargs = {}
+    if timeout_ms:
+        run_kwargs["timeout"] = timeout_ms
+
+    try:
+        with graph._driver.session() as session:  # type: ignore[attr-defined]
+            result = session.run(query, params or {}, **run_kwargs)
+            return list(result)
+    except Neo4jError as exc:
+        code = getattr(exc, "code", "") or ""
+        message = str(exc)
+        if "Timeout" in code or "timed out" in message.lower():
+            if effective_timeout:
+                human_msg = (
+                    f"Neo4j query exceeded the {effective_timeout:.0f}s timeout limit."
+                )
+            else:
+                human_msg = "Neo4j query timed out during execution."
+            raise QueryTimeoutError(human_msg) from exc
+        raise
+
+
 # Definizione degli schemi per le richieste e le risposte
 class ConversationMessage(BaseModel):
     timestamp: datetime
@@ -485,38 +981,31 @@ class ConversationMessage(BaseModel):
     query_generated: str = ""
 
 
+class PendingMemoryConfirmation(BaseModel):
+    status: Literal["awaiting_user", "resolved"]
+    original_question: str
+    prompt: str
+    reason: str = "ambiguous_followup"
+    entity_label: Optional[str] = None
+    entity_value: Optional[str] = None
+    created_at: datetime
+
+
 class ConversationSession(BaseModel):
     user_id: str
     messages: List[ConversationMessage] = []
     created_at: datetime
     last_activity: datetime
+    pending_confirmation: Optional[PendingMemoryConfirmation] = None
 
 
-# Cache globale per le sessioni di conversazione (scade dopo 30 minuti di inattività)
+# Cache globale per le sessioni di conversazione (scade dopo timeout configurato)
 conversation_sessions: Dict[str, ConversationSession] = {}
-SESSION_TIMEOUT = timedelta(minutes=config.system["sessions"]["timeout_minutes"])
-ENABLE_MEMORY = config.system["sessions"].get("enable_memory", False)
 
 # Controlla quante interazioni recenti passiamo al contextualizer
 MAX_HISTORY_FOR_CONTEXTUALIZER = 4
 # Lunghezza massima (caratteri) per sintesi testo memorizzata nel prompt
 MAX_CONTEXT_SNIPPET_LENGTH = 220
-
-SCOPE_RESET_KEYWORDS = {
-    "in generale",
-    "nel complesso",
-    "complessivamente",
-    "overall",
-    "in general",
-    "globalmente",
-    "su tutti",
-    "per tutti",
-    "considerando tutti",
-    "senza filtri",
-    "tutti i clienti",
-    "tutte le ditte",
-    "tutti i fornitori",
-}
 
 
 def get_or_create_session(user_id: str) -> ConversationSession:
@@ -594,6 +1083,8 @@ def _collect_entities_from_context(context: List[Dict]) -> Dict[str, set]:
         "fornitori": set(),
         "ditte": set(),
         "prodotti": set(),
+        "famiglia": set(),
+        "documenti": set(),
     }
 
     for item in context or []:
@@ -613,7 +1104,342 @@ def _collect_entities_from_context(context: List[Dict]) -> Dict[str, set]:
                 buckets["prodotti"].add(val_str)
             elif "cliente" in lower_key:
                 buckets["clienti"].add(val_str)
+            elif "famiglia" in lower_key:
+                buckets["famiglia"].add(val_str)
+            elif "documento" in lower_key or "doc_" in lower_key:
+                buckets["documenti"].add(val_str)
     return buckets
+
+
+def _extract_recent_scope_anchor(
+    session: ConversationSession,
+) -> Optional[Tuple[str, str]]:
+    """Recupera l'ultima entità esplicita utile per chiarire lo scope."""
+
+    if not session or not session.messages:
+        return None
+
+    history = session.messages[-MAX_HISTORY_FOR_CONTEXTUALIZER:]
+    for message in reversed(history):
+        explicit = _extract_explicit_identifiers(message.question)
+        for label in ("cliente", "ditta", "fornitore", "famiglia", "documento"):
+            values = explicit.get(label) or set()
+            if values:
+                # Uso un ordinamento deterministico per evitare oscillazioni.
+                return label, sorted(values)[0]
+        entities = _collect_entities_from_context(message.context)
+        label_map = {
+            "clienti": "cliente",
+            "ditte": "ditta",
+            "fornitori": "fornitore",
+            "prodotti": "prodotto",
+            "famiglia": "famiglia",
+            "documenti": "documento",
+        }
+        for bucket in (
+            "clienti",
+            "ditte",
+            "fornitori",
+            "prodotti",
+            "famiglia",
+            "documenti",
+        ):
+            values = entities.get(bucket) or set()
+            if values:
+                label = label_map.get(bucket, bucket)
+                return label, sorted(values)[0]
+    return None
+
+
+def _build_scope_confirmation_prompt(
+    question: str, entity_label: str, entity_value: str
+) -> str:
+    """Genera il messaggio di chiarimento quando lo scope non è chiaro."""
+
+    friendly_subject = {
+        "cliente": "sul cliente",
+        "ditta": "sulla ditta",
+        "fornitore": "sul fornitore",
+        "prodotto": "sul prodotto",
+        "famiglia": "sulla famiglia di prodotti",
+        "documento": "sul documento",
+    }.get(entity_label, "su quello che stavamo analizzando")
+
+    friendly_label = {
+        "cliente": "quel cliente",
+        "ditta": "quella ditta",
+        "fornitore": "quel fornitore",
+        "prodotto": "quel prodotto",
+        "famiglia": "quella famiglia di prodotti",
+        "documento": "quel documento",
+    }.get(entity_label, "lo stesso ambito")
+
+    subject_fragment = (
+        f"{friendly_subject} «{entity_value}»" if entity_value else friendly_subject
+    )
+
+    return (
+        f"L'ultima risposta era concentrata {subject_fragment}. "
+        f"Per la nuova domanda «{question}» vuoi che continui a parlare di {friendly_label} "
+        "oppure preferisci che allarghi la ricerca? "
+        'Scrivimi semplicemente "sì" o "stesso" per confermare, '
+        "altrimenti dammi qualche dettaglio sul nuovo ambito."
+    )
+
+
+def _register_scope_confirmation(question: str, session: ConversationSession) -> bool:
+    """Memorizza la richiesta di conferma se troviamo un'ancora recente."""
+
+    anchor = _extract_recent_scope_anchor(session)
+    if not anchor:
+        return False
+
+    entity_label, entity_value = anchor
+    prompt = _build_scope_confirmation_prompt(question, entity_label, entity_value)
+
+    session.pending_confirmation = PendingMemoryConfirmation(
+        status="awaiting_user",
+        original_question=question,
+        prompt=prompt,
+        entity_label=entity_label,
+        entity_value=entity_value,
+        created_at=datetime.now(),
+    )
+    logger.info(
+        "Memory routing: domanda corta senza riferimenti espliciti, richiesta conferma all'utente."
+    )
+    return True
+
+
+def _interpret_scope_confirmation_reply(
+    reply: str, pending: PendingMemoryConfirmation
+) -> Literal["confirm", "reject", "unsure"]:
+    """Prova a capire se la risposta dell'utente conferma o cambia lo scope."""
+
+    if not reply:
+        return "unsure"
+
+    lowered = reply.strip().lower()
+    tokens = re.findall(r"\w+", lowered)
+
+    if _contains_keyword(lowered, tokens, CONFIRMATION_KEYWORDS):
+        return "confirm"
+
+    if _contains_keyword(lowered, tokens, REJECTION_KEYWORDS):
+        return "reject"
+
+    if pending.entity_value and pending.entity_value.lower() in lowered:
+        return "confirm"
+
+    if "confermo" in lowered or "va bene" in lowered or "ok" in lowered:
+        return "confirm"
+
+    return "unsure"
+
+
+def _question_mentions_known_entities(
+    question: str, session: ConversationSession
+) -> bool:
+    """Verifica se la domanda fa riferimento a entità note nelle interazioni precedenti."""
+    if not question or not session.messages:
+        return False
+
+    lowered_question = question.lower()
+    known_entities: set = set()
+    recent_messages = session.messages[-MAX_HISTORY_FOR_CONTEXTUALIZER:]
+    for message in recent_messages:
+        entities = _collect_entities_from_context(message.context)
+        for values in entities.values():
+            for val in values:
+                if not val:
+                    continue
+                known_entities.add(str(val).lower())
+        explicit = _extract_explicit_identifiers(message.question)
+        for values in explicit.values():
+            for val in values:
+                if not val:
+                    continue
+                known_entities.add(str(val).lower())
+    return any(entity and entity in lowered_question for entity in known_entities)
+
+
+def _should_use_memory(question: str, session: ConversationSession) -> bool:
+    """Stabilisce se includere la cronologia per la domanda corrente."""
+    if not question or not session.messages:
+        return False
+
+    pending = session.pending_confirmation
+    if (
+        pending
+        and pending.status == "resolved"
+        and pending.original_question == question
+    ):
+        logger.info("Memory routing: riutilizzo memoria confermato dall'utente.")
+        session.pending_confirmation = None
+        return True
+
+    lowered = question.strip().lower()
+    if not lowered:
+        return False
+
+    tokens = re.findall(r"\w+", lowered)
+
+    if any(keyword in lowered for keyword in EXPLICIT_RESET_KEYWORDS):
+        # Reset esplicito: svuota la sessione per evitare carry-over indesiderato.
+        session.messages = []
+        logger.info("Reset esplicito richiesto dall'utente: cronologia azzerata.")
+        return False
+
+    if _should_reset_scope(question):
+        return False
+
+    last_message = session.messages[-1]
+    if RECENCY_WINDOW and datetime.now() - last_message.timestamp > RECENCY_WINDOW:
+        logger.info("Memory routing: sessione inattiva oltre la finestra configurata.")
+        return False
+
+    first_token = tokens[0] if tokens else ""
+    if PRONOUN_STARTS and any(first_token == prefix for prefix in PRONOUN_STARTS):
+        return True
+
+    if _contains_keyword(lowered, tokens, CONFIRMATION_KEYWORDS):
+        logger.info(
+            "Memory routing: conferma implicita rilevata, riuso della cronologia."
+        )
+        return True
+
+    if _question_mentions_known_entities(lowered, session):
+        return True
+
+    if _contains_keyword(lowered, tokens, FOLLOW_UP_KEYWORDS):
+        return True
+
+    if SHORT_QUESTION_TOKEN_THRESHOLD and len(tokens) <= SHORT_QUESTION_TOKEN_THRESHOLD:
+        if _register_scope_confirmation(question, session):
+            return False
+        logger.info(
+            "Memory routing: domanda corta senza riferimenti espliciti, cronologia non riutilizzata."
+        )
+        return False
+
+    if RECENCY_WINDOW and len(tokens) <= max(SHORT_QUESTION_TOKEN_THRESHOLD * 2, 12):
+        if _register_scope_confirmation(question, session):
+            return False
+        logger.info(
+            "Memory routing: domanda recente ma senza riferimenti, trattata come nuovo argomento."
+        )
+        return False
+
+    similarity = _max_embedding_similarity(lowered, session)
+    if similarity is not None:
+        if similarity >= EMBEDDING_THRESHOLD:
+            logger.info(
+                f"Memory routing: similarità embedding {similarity:.2f} ≥ soglia {EMBEDDING_THRESHOLD:.2f}."
+            )
+            return True
+        logger.info(
+            f"Memory routing: similarità embedding {similarity:.2f} < soglia {EMBEDDING_THRESHOLD:.2f}."
+        )
+        return False
+
+    return False
+
+
+def _max_embedding_similarity(
+    question: str, session: ConversationSession
+) -> Optional[float]:
+    """Calcola la massima similarità coseno tra la domanda attuale e la cronologia recente."""
+    if not EMBEDDING_ACTIVE or MEMORY_EMBEDDER is None or EMBEDDING_HISTORY_SIZE <= 0:
+        return None
+    try:
+        history_questions = [
+            msg.question
+            for msg in session.messages[-EMBEDDING_HISTORY_SIZE:]
+            if msg.question
+        ]
+        if not history_questions:
+            return None
+
+        texts = [question] + history_questions
+        embeddings = MEMORY_EMBEDDER.encode(texts, show_progress_bar=False)
+        if embeddings is None or len(embeddings) <= 1:
+            return None
+
+        query_vec = np.array(embeddings[0], dtype=np.float32)
+        history_vecs = np.array(embeddings[1:], dtype=np.float32)
+        query_norm = np.linalg.norm(query_vec)
+        history_norms = np.linalg.norm(history_vecs, axis=1)
+
+        if query_norm == 0 or np.any(history_norms == 0):
+            return None
+
+        sims = (history_vecs @ query_vec) / (history_norms * query_norm)
+        if sims.size == 0:
+            return None
+        return float(np.max(sims))
+    except Exception as exc:
+        logger.warning(f"Similarity embedding fallita: {exc}")
+        return None
+
+
+def _format_semantic_examples_for_prompt(
+    examples: Optional[List[Dict[str, Any]]], top_k: int
+) -> str:
+    if not examples:
+        return ""
+    lines: List[str] = []
+    limit = top_k if top_k > 0 else len(examples)
+    for idx, ex in enumerate(examples[:limit], start=1):
+        question = ex.get("question", "").strip()
+        sim = ex.get("similarity")
+        header = f"{idx}. {question}" if question else f"{idx}."
+        if isinstance(sim, (int, float)):
+            header += f" (sim {float(sim):.2f})"
+        lines.append(header)
+        cypher = (ex.get("cypher") or "").strip()
+        if cypher:
+            first_line = cypher.splitlines()[0]
+            lines.append(f"   Cypher: {first_line}")
+    return "\n".join(lines)
+
+
+def _semantic_expansion_attempt(
+    *,
+    question_it: str,
+    contextualized_question: Optional[str],
+    english_task: str,
+    relevant_schema: str,
+    bad_query: str,
+    error_msg: str,
+    semantic_examples: Optional[List[Dict[str, Any]]],
+    base_hints: str,
+    recent_repairs: str,
+    top_k: int,
+) -> str:
+    if not SEMANTIC_EXPANSION_ENABLED or not QUERY_EXPANSION_PROMPT:
+        return ""
+
+    examples_block = _format_semantic_examples_for_prompt(semantic_examples, top_k)
+    variables = {
+        "question_it": contextualized_question or question_it,
+        "english_task": english_task,
+        "schema": relevant_schema,
+        "bad_query": bad_query,
+        "error": error_msg,
+        "examples": examples_block or "",
+        "recent_repairs": recent_repairs or "",
+        "hints": base_hints or "",
+    }
+    try:
+        expanded = _invoke_with_profile(
+            agent_name="coder",
+            prompt_text=QUERY_EXPANSION_PROMPT,
+            variables=variables,
+        )
+        return extract_cypher(expanded)
+    except Exception as exc:
+        logger.error(f"Errore durante la semantic expansion: {exc}")
+        return ""
 
 
 def _extract_explicit_identifiers(text: str) -> Dict[str, set]:
@@ -693,7 +1519,9 @@ def _scope_summary_for_synth(original: str, contextualized: str) -> str:
     return f'Interpretazione contestualizzata: "{contextualized}"'
 
 
-def get_conversation_context(user_id: str) -> str:
+def get_conversation_context(
+    user_id: str, incoming_question: Optional[str] = None
+) -> str:
     """Costruisce un contesto multi-turno compatto per il contextualizer."""
 
     if not ENABLE_MEMORY:
@@ -701,6 +1529,12 @@ def get_conversation_context(user_id: str) -> str:
 
     session = conversation_sessions.get(user_id)
     if not session or not session.messages:
+        return ""
+
+    if incoming_question and not _should_use_memory(incoming_question, session):
+        logger.info(
+            "Memory routing: domanda trattata come nuovo argomento, cronologia esclusa."
+        )
         return ""
 
     history_slice = session.messages[-MAX_HISTORY_FOR_CONTEXTUALIZER:]
@@ -711,6 +1545,8 @@ def get_conversation_context(user_id: str) -> str:
         "fornitori": set(),
         "ditte": set(),
         "prodotti": set(),
+        "famiglia": set(),
+        "documenti": set(),
     }
     explicit_refs = {"ditta": set(), "cliente": set(), "fornitore": set()}
 
@@ -732,6 +1568,8 @@ def get_conversation_context(user_id: str) -> str:
 
         entities = _collect_entities_from_context(message.context)
         for bucket, values in entities.items():
+            if bucket not in aggregated_entities:
+                aggregated_entities[bucket] = set()
             aggregated_entities[bucket].update(values)
 
     # Inserisco blocchi riassuntivi finali per aiutare il contextualizer a non perdere riferimenti
@@ -793,7 +1631,18 @@ def correggi_nomi_fuzzy_neo4j(question: str) -> tuple[str, list]:
     )
 
     # ESTRAI PAROLE CANDIDATE
-    parole = [p for p in question.split() if len(p) >= MIN_WORD_LENGTH]  # ← DA CONFIG
+    token_pattern = re.compile(
+        r"""(?:"[^"]+"|'[^']+'|“[^”]+”|‘[^’]+’|`[^`]+`|«[^»]+»|„[^“]+“|\S+)"""
+    )
+    raw_tokens = token_pattern.findall(question)
+    parole: List[str] = []
+    token_map: Dict[str, str] = {}
+    for token in raw_tokens:
+        cleaned = token.strip("'\"“”‘’`”„«»")
+        cleaned = re.sub(r"^[,.;:!?]+|[,.;:!?]+$", "", cleaned)
+        if cleaned and len(cleaned) >= MIN_WORD_LENGTH:
+            parole.append(cleaned)
+            token_map[cleaned] = token
 
     logger.debug(f"🔍 Fuzzy matching su {len(parole)} parole: {parole}")
 
@@ -846,7 +1695,26 @@ def correggi_nomi_fuzzy_neo4j(question: str) -> tuple[str, list]:
             if (
                 similarity > MIN_SIMILARITY and parola.lower() != best_match.lower()
             ):  # ← DA CONFIG
-                question = question.replace(parola, best_match)
+                original_token = token_map.get(parola, parola)
+                prefix = ""
+                suffix = ""
+                if original_token and original_token[0] in "'\"“”‘’`”„«»":
+                    prefix = original_token[0]
+                if original_token and original_token[-1] in "'\"“”‘’`”„«»":
+                    suffix = original_token[-1]
+                wrapped_best_match = f"{prefix}{best_match}{suffix}"
+                if original_token:
+                    question = question.replace(original_token, wrapped_best_match, 1)
+                # Sostituisci eventuali occorrenze nude della parola
+                if original_token != parola and re.search(
+                    rf"\b{re.escape(parola)}\b", question
+                ):
+                    question = re.sub(
+                        rf"\b{re.escape(parola)}\b",
+                        wrapped_best_match,
+                        question,
+                        count=1,
+                    )
                 correzioni.append(
                     f"'{parola}' → '{best_match}' ({best_tipo}, score={best_score:.2f}, sim={similarity:.2f})"
                 )
@@ -962,6 +1830,11 @@ GENERAL_CONVERSATION_PROMPT = load_prompt_from_yaml(
 QUERY_REPAIR_PROMPT = load_prompt_from_yaml(
     resolve_prompt_path("coder", "query_repair_prompt.yaml")
 )
+QUERY_EXPANSION_PROMPT = (
+    load_prompt_from_yaml(resolve_prompt_path("coder", SEMANTIC_EXPANSION_PROMPT_NAME))
+    if SEMANTIC_EXPANSION_ENABLED
+    else None
+)
 
 
 def _invoke_with_profile(agent_name: str, prompt_text: str, variables: dict) -> str:
@@ -990,25 +1863,52 @@ def _invoke_with_profile(agent_name: str, prompt_text: str, variables: dict) -> 
 
 
 # Verifica che tutti i prompt siano stati caricati correttamente
-if not all(
-    [
-        BASE_CYPHER_RULES,
-        SPECIALIST_ROUTER_PROMPT,
-        SPECIALIST_CODERS,
-        ADVANCED_CONTEXTUALIZER_PROMPT,
-        SYNTHESIZER_PROMPT,
-        TRANSLATOR_PROMPT,
-        GENERAL_CONVERSATION_PROMPT,
-    ]
-):
+required_prompts = [
+    BASE_CYPHER_RULES,
+    SPECIALIST_ROUTER_PROMPT,
+    SPECIALIST_CODERS,
+    ADVANCED_CONTEXTUALIZER_PROMPT,
+    SYNTHESIZER_PROMPT,
+    TRANSLATOR_PROMPT,
+    GENERAL_CONVERSATION_PROMPT,
+    QUERY_REPAIR_PROMPT,
+]
+if SEMANTIC_EXPANSION_ENABLED:
+    required_prompts.append(QUERY_EXPANSION_PROMPT)
+
+if not all(required_prompts):
     print("Uno o più file prompt non sono stati caricati. Il programma terminerà.")
     exit()
 
 logger.info("📚 Inizializzo Example Retriever...")
 from example_retriever import ExampleRetriever
 
-example_retriever = ExampleRetriever()
+example_retriever = ExampleRetriever(min_similarity=EXAMPLES_MIN_SIMILARITY)
 logger.info(f"✅ Esempi: {example_retriever.get_stats()}")
+
+if EMBEDDING_ACTIVE:
+    try:
+        if EMBEDDING_REUSE_EXAMPLES and hasattr(example_retriever, "model"):
+            MEMORY_EMBEDDER = example_retriever.model
+        if MEMORY_EMBEDDER is None:
+            from sentence_transformers import SentenceTransformer
+
+            MEMORY_EMBEDDER = SentenceTransformer(EMBEDDING_MODEL_NAME)
+        if MEMORY_EMBEDDER is not None:
+            logger.info(
+                f"Memoria sessione: embedding attivo (soglia {EMBEDDING_THRESHOLD:.2f}, history {EMBEDDING_HISTORY_SIZE})."
+            )
+        else:
+            EMBEDDING_ACTIVE = False
+            logger.warning(
+                "Memoria sessione: embedding disattivato (modello non disponibile)."
+            )
+    except Exception as exc:
+        EMBEDDING_ACTIVE = False
+        MEMORY_EMBEDDER = None
+        logger.warning(
+            f"Impossibile inizializzare il modello di embedding per la memoria: {exc}"
+        )
 
 
 # --- 3. FUNZIONI DEGLI AGENTI SPECIALISTI ---
@@ -1101,29 +2001,58 @@ def run_coder_agent(
     specialist_type: str,
     original_question_it: str,
     examples_top_k: Optional[int] = None,
-) -> str:
+) -> Tuple[str, List[Dict], List[Dict], Optional[float]]:
     """Coder con esempi dinamici RAG"""
     logger.info(f"🤖 Coder: {specialist_type}")
 
     # 1. RECUPERA ESEMPI
     # Usa la domanda originale in IT per il retrieval degli esempi
     top_k_examples = (
-        examples_top_k if examples_top_k is not None else example_retriever.get_default_top_k()
+        examples_top_k
+        if examples_top_k is not None
+        else example_retriever.get_default_top_k()
     )
-    relevant_examples = example_retriever.retrieve(
-        question=original_question_it, specialist=specialist_type, top_k=top_k_examples
+    raw_examples = example_retriever.retrieve(
+        question=original_question_it,
+        specialist=specialist_type,
+        top_k=top_k_examples,
+        allow_low_similarity=True,
     )
 
+    best_similarity = example_retriever.last_similarity
+    use_examples = raw_examples
+    min_sim = getattr(example_retriever, "min_similarity", None)
+    if (
+        min_sim is not None
+        and best_similarity is not None
+        and best_similarity < float(min_sim)
+    ):
+        logger.info(
+            "📏 Similarità esempi %.3f sotto soglia %.3f: lo specialista %s procederà senza esempi RAG.",
+            best_similarity,
+            float(min_sim),
+            specialist_type,
+        )
+        use_examples = []
+    elif best_similarity is not None:
+        logger.info(
+            "📏 Similarità esempi selezionati: %.3f (threshold=%s)",
+            best_similarity,
+            f"{float(min_sim):.2f}" if min_sim is not None else "n/a",
+        )
+    else:
+        logger.info("📏 Nessun esempio recuperato o similarità non disponibile.")
+
     # 2. FORMATTA ESEMPI (con escape delle graffe)
-    if relevant_examples:
+    if use_examples:
         examples_text = "\n\n**RELEVANT EXAMPLES:**\n" + "\n\n".join(
             [
                 f"Q: {ex['question']}\n```cypher\n{ex['cypher'].strip().replace('{', '{{').replace('}', '}}')}\n```"
-                for ex in relevant_examples
+                for ex in use_examples
             ]
         )
         logger.info(
-            f"📚 Recuperati (top_k={top_k_examples}): {[ex['id'] for ex in relevant_examples]}"
+            f"📚 Recuperati (top_k={top_k_examples}): {[ex['id'] for ex in use_examples]}"
         )
     else:
         examples_text = ""
@@ -1158,7 +2087,7 @@ def run_coder_agent(
         },
     )
 
-    return extract_cypher(query)
+    return extract_cypher(query), use_examples, raw_examples, best_similarity
 
 
 def run_contextualizer_agent(question: str, chat_history: str) -> str:
@@ -1210,6 +2139,156 @@ def run_synthesizer_agent(
 
 
 # FUNZIONI AUSILIARIE VARIE
+def _extract_node_identity(node: Any) -> Optional[str]:
+    """Estrae l'ID univoco del nodo/relazione (compatibile v4/v5)."""
+    if node is None:
+        return None
+
+    # Neo4j v5+ usa element_id (stringa)
+    if hasattr(node, "element_id"):
+        try:
+            return str(getattr(node, "element_id"))
+        except Exception:
+            pass  # Continua con i fallback
+
+    # Fallback per Neo4j v4 (int)
+    for attr in ("id", "identity"):
+        if hasattr(node, attr):
+            try:
+                # Converte sempre in stringa per coerenza
+                return str(int(getattr(node, attr)))
+            except Exception:
+                continue
+
+    logger.debug("Impossibile estrarre un ID per il nodo/relazione")
+    return None
+
+
+def _node_to_payload(node: Node) -> Dict[str, Any]:
+    node_id = _extract_node_identity(node)  # Ora ritorna una stringa (o None)
+    labels = list(node.labels) if hasattr(node, "labels") else []
+    properties = {k: make_context_json_serializable(v) for k, v in node.items()}
+    return {
+        "id": node_id,  # Già stringa (o None)
+        "labels": labels,
+        "properties": properties,
+    }
+
+
+def _relationship_to_payload(rel: Relationship) -> Dict[str, Any]:
+    rel_id = _extract_node_identity(rel)  # Stringa
+
+    start_id = None
+    # Neo4j v5+ ha gli ID direttamente
+    if hasattr(rel, "start_node_element_id"):
+        start_id = str(rel.start_node_element_id)
+    # Fallback per v4
+    elif hasattr(rel, "start_node"):
+        start_id = _extract_node_identity(rel.start_node)
+
+    end_id = None
+    # Neo4j v5+ ha gli ID direttamente
+    if hasattr(rel, "end_node_element_id"):
+        end_id = str(rel.end_node_element_id)
+    # Fallback per v4
+    elif hasattr(rel, "end_node"):
+        end_id = _extract_node_identity(rel.end_node)
+
+    properties = {k: make_context_json_serializable(v) for k, v in rel.items()}
+    return {
+        "id": rel_id,  # Già stringa
+        "type": getattr(rel, "type", None),
+        "source": start_id,  # Già stringa
+        "target": end_id,  # Già stringa
+        "properties": properties,
+    }
+
+
+def extract_graph_snapshot(
+    records: List[Dict[str, Any]],
+) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Estrae nodi e relazioni dai risultati Neo4j per visualizzazione front-end.
+    """
+    nodes: Dict[str, Dict[str, Any]] = {}
+    edges: Dict[str, Dict[str, Any]] = {}
+
+    def visit(value: Any):
+        """Visita ricorsivamente i valori per estrarre nodi e relazioni."""
+        if value is None:
+            return
+
+        # Gestione nodi
+        if isinstance(value, Node):
+            node_id = _extract_node_identity(value)
+            if node_id:
+                key = str(node_id)
+                if key not in nodes:
+                    nodes[key] = _node_to_payload(value)
+
+        # Gestione relazioni
+        elif isinstance(value, Relationship):
+            payload = _relationship_to_payload(value)
+            edge_id = payload.get("id")
+            if edge_id:
+                edges[str(edge_id)] = payload
+
+            # Visita anche i nodi di inizio e fine
+            if hasattr(value, "start_node") and value.start_node:
+                visit(value.start_node)
+            if hasattr(value, "end_node") and value.end_node:
+                visit(value.end_node)
+
+        # Gestione path
+        elif isinstance(value, Path):
+            for node in value.nodes:
+                visit(node)
+            for rel in value.relationships:
+                visit(rel)
+
+        # Gestione collezioni
+        elif isinstance(value, (list, tuple, set)):
+            for item in value:
+                visit(item)
+
+        # Gestione dizionari
+        elif isinstance(value, dict):
+            for item in value.values():
+                visit(item)
+
+    # Processa tutti i records
+    for record in records or []:
+        if isinstance(record, dict):
+            for value in record.values():
+                visit(value)
+        else:
+            # Records potrebbero essere oggetti Record di Neo4j
+            try:
+                for value in record.values():
+                    visit(value)
+            except Exception as e:
+                logger.debug(f"Errore processando record: {e}")
+
+    # Verifica se abbiamo trovato qualcosa
+    if not nodes and not edges:
+        logger.debug("Nessun nodo o relazione trovata nei records")
+        return {}
+
+    # Limiti di sicurezza
+    max_nodes = 200
+    max_edges = 400
+
+    if len(nodes) > max_nodes or len(edges) > max_edges:
+        logger.warning(
+            f"Grafo troppo grande (nodi={len(nodes)}, relazioni={len(edges)}). "
+            f"Limiti: max_nodes={max_nodes}, max_edges={max_edges}"
+        )
+        return {}
+
+    logger.info(f"Grafo estratto: {len(nodes)} nodi, {len(edges)} relazioni")
+    return {"nodes": list(nodes.values()), "edges": list(edges.values())}
+
+
 def make_context_json_serializable(context):
     """
     Scorre ricorsivamente i risultati e converte TUTTI i tipi non-JSON in stringhe.
@@ -1220,10 +2299,371 @@ def make_context_json_serializable(context):
         return {
             key: make_context_json_serializable(value) for key, value in context.items()
         }
+    if isinstance(context, Node):
+        payload = _node_to_payload(context)
+        payload["_type"] = "node"
+        return payload
+    if isinstance(context, Relationship):
+        payload = _relationship_to_payload(context)
+        payload["_type"] = "relationship"
+        return payload
+    if isinstance(context, Path):
+        return {
+            "_type": "path",
+            "nodes": [make_context_json_serializable(node) for node in context.nodes],
+            "relationships": [
+                make_context_json_serializable(rel) for rel in context.relationships
+            ],
+        }
     # Gestisce tutti i tipi di dato temporale di Neo4j e Python
     if isinstance(context, (date, Date, DateTime, Time, Duration)):
         return str(context)  # La conversione a stringa è universale e sicura
     return context
+
+
+def _extract_variables_from_query(query_prefix: str) -> Tuple[List[str], List[str]]:
+    """
+    Estrae tutti i nomi di variabili di nodi E RELAZIONI
+    da una stringa di query Cypher (prefisso MATCH/WHERE/WITH).
+    """
+    # Regex per nodi: (varName:Label) o (varName)
+    # \(([a-zA-Z0-9_]+) -> cattura il nome della variabile (es. 'c')
+    # \s*(?::[a-zA-Z0-9_`| ]+)? -> opzionalmente matcha :Label, :`Label con Spazi`, :Label1|Label2
+    node_pattern = re.compile(r"\(([a-zA-Z0-9_]+)\s*(?::[a-zA-Z0-9_`| ]+)?\s*\)")
+
+    # Regex per relazioni: -[varName:TYPE]- o -[varName]-
+    # -\[([a-zA-Z0-9_]+) -> cattura il nome della variabile (es. 'r')
+    # \s*(?::[a-zA-Z0-9_`|* ]+)? -> opzionalmente matcha :TYPE, :`TYPE`, :TYPE1|TYPE2, :*
+    rel_pattern = re.compile(r"-\[([a-zA-Z0-9_]+)\s*(?::[a-zA-Z0-9_`|* ]+)?\s*\]-")
+
+    node_vars: List[str] = []
+    rel_vars: List[str] = []
+    node_seen: Set[str] = set()
+    rel_seen: Set[str] = set()
+
+    # Trova tutti i nodi
+    for match in node_pattern.finditer(query_prefix):
+        var_name = match.group(1)
+        if var_name:  # Ignora variabili anonime come ()
+            if var_name not in node_seen:
+                node_seen.add(var_name)
+                node_vars.append(var_name)
+
+    # Trova tutte le relazioni
+    for match in rel_pattern.finditer(query_prefix):
+        var_name = match.group(1)
+        if var_name:  # Ignora variabili anonime come -[]-
+            if var_name not in rel_seen:
+                rel_seen.add(var_name)
+                rel_vars.append(var_name)
+
+    if not node_vars and not rel_vars:
+        logger.debug("Nessuna variabile trovata nel prefisso query.")
+
+    return node_vars, rel_vars
+
+
+def _extract_missing_variable_from_error(message: str) -> Optional[str]:
+    """Prova a estrarre il nome della variabile assente dal messaggio di errore Neo4j."""
+
+    if not message:
+        return None
+    match = re.search(r"Variable\s+`([^`]+)`\s+not defined", message)
+    if match:
+        return match.group(1)
+    match = re.search(r"Variable\s+'([^']+)'\s+not defined", message)
+    if match:
+        return match.group(1)
+    return None
+
+
+def _reconstruct_graph_from_query(query: str) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Ricostruisce un grafo da query che restituiscono aggregazioni (COUNT, SUM, etc.).
+    STRATEGIA: Assegna variabili a tutti i nodi anonimi, poi estrae tutto.
+    """
+    try:
+        if not query:
+            return {}
+
+        query_clean = query.strip()
+
+        # Trova l'ULTIMO RETURN
+        return_matches = list(re.finditer(r"\bRETURN\b", query_clean, re.IGNORECASE))
+        if not return_matches:
+            logger.debug("Ricostruzione: nessun RETURN trovato")
+            return {}
+
+        last_return_pos = return_matches[-1].start()
+        prefix = query_clean[:last_return_pos].strip()
+
+        # STEP 1: Assegna variabili ai nodi anonimi
+        prefix_with_vars, var_counter = _assign_variables_to_anonymous_nodes(prefix)
+
+        logger.debug(f"Query dopo assegnazione variabili:\n{prefix_with_vars}")
+
+        # STEP 2: Assegna variabili alle relazioni anonime
+        prefix_with_all_vars, _ = _assign_variables_to_anonymous_rels(prefix_with_vars)
+
+        logger.debug(f"Query dopo assegnazione variabili:\n{prefix_with_all_vars}")
+
+        # STEP 3: Estrai TUTTE le variabili (incluse quelle appena create)
+        node_vars, rel_vars = _extract_variables_from_query(prefix_with_all_vars)
+        all_vars = node_vars + rel_vars
+
+        if not all_vars:
+            logger.debug("Ricostruzione: nessuna variabile trovata")
+            return {}
+
+        logger.info(f"Variabili per grafo - Nodi: {node_vars}, Relazioni: {rel_vars}")
+
+        # STEP 4: Costruisci query che restituisce TUTTO (nodi + relazioni)
+        attempt_vars: List[str] = []
+        for var in all_vars:
+            if var not in attempt_vars:
+                attempt_vars.append(var)
+
+        graph_records: List[Dict[str, Any]] = []
+        removed_vars: List[str] = []
+
+        while attempt_vars:
+            graph_query = (
+                f"{prefix_with_all_vars}\nRETURN DISTINCT {', '.join(attempt_vars)} LIMIT 10"
+            )
+
+            logger.info(f"Query ricostruita:\n{graph_query}")
+            try:
+                _ensure_read_only_query(graph_query)
+                graph_records = execute_cypher_with_records(graph_query)
+                break
+            except Neo4jError as neo_exc:
+                missing_var = _extract_missing_variable_from_error(str(neo_exc))
+                if missing_var and missing_var in attempt_vars:
+                    logger.warning(
+                        "Ricostruzione grafo: variabile '%s' non definita, la rimuovo dal RETURN.",
+                        missing_var,
+                    )
+                    attempt_vars = [v for v in attempt_vars if v != missing_var]
+                    removed_vars.append(missing_var)
+                    continue
+                logger.error("Errore ricostruzione grafo: %s", neo_exc)
+                raise
+
+        if removed_vars:
+            logger.warning(
+                "Ricostruzione grafo completata senza le variabili %s (fuori scope).",
+                removed_vars,
+            )
+
+        if not attempt_vars:
+            logger.warning("Ricostruzione grafo: nessuna variabile valida disponibile.")
+            return {}
+
+        # subito dopo aver ottenuto graph_records
+        try:
+            if graph_records:
+                sample_vals = list(graph_records[0].values())
+                logger.warning(
+                    "Sample record types: %s", [type(v) for v in sample_vals]
+                )
+            else:
+                logger.warning("Nessun record restituito dalla query ricostruita")
+        except Exception as e:
+            logger.warning("Impossibile introspezionare i graph_records: %s", e)
+
+        # Estrai il grafo
+        snapshot = extract_graph_snapshot(graph_records)
+
+        if not snapshot.get("nodes"):
+            logger.warning(
+                "Query eseguita ma snapshot vuoto - probabilmente nessun dato"
+            )
+
+        return snapshot
+
+    except Exception as exc:
+        logger.error(f"Errore ricostruzione grafo: {exc}", exc_info=True)
+        return {}
+
+
+def _assign_variables_to_anonymous_nodes(query: str) -> Tuple[str, int]:
+    """
+    Assegna variabili uniche ai nodi anonimi tipo (:Label) o ().
+    Ritorna: (query_modificata, numero_variabili_aggiunte)
+
+    Esempio:
+    Input:  (c:Cliente)-[:REL]->(:Documento)
+    Output: (c:Cliente)-[:REL]->(n1:Documento)
+    """
+    var_counter = 0
+    result = query
+
+    # Pattern per nodi anonimi: () o (:Label) ma NON (var) o (var:Label)
+    # Cerchiamo ( seguito da : o ) ma NON da una variabile
+    anonymous_pattern = re.compile(
+        r"\("  # Aperta parentesi
+        r"(?!"  # Negative lookahead
+        r"[a-zA-Z_][a-zA-Z0-9_]*"  # NON una variabile
+        r"[\s:]"  # seguita da spazio o :
+        r")"
+        r"(:[a-zA-Z0-9_`|]+)?"  # Optional label(s)
+        r"(?:\s*\{[^}]*\})?"  # Optional properties
+        r"\)"  # Chiusa parentesi
+    )
+
+    def replace_anonymous(match):
+        nonlocal var_counter
+        var_counter += 1
+        var_name = f"n{var_counter}"
+
+        # Se c'è un label, lo manteniamo
+        labels = match.group(1) or ""  # Cattura :Label se presente
+        return f"({var_name}{labels})"
+
+    result = anonymous_pattern.sub(replace_anonymous, result)
+
+    if var_counter > 0:
+        logger.info(f"Assegnate {var_counter} variabili a nodi anonimi")
+
+    return result, var_counter
+
+
+def _assign_variables_to_anonymous_rels(
+    query: str, rel_var_counter: int = 0
+) -> Tuple[str, int]:
+    """
+    Assegna variabili uniche alle relazioni anonime tipo -[:TYPE]-> o -[]->.
+    """
+    result = query
+
+    # Pattern per relazioni anonime: -[]- o -[:TYPE]- o -[:TYPE*1..2]- ecc.
+    # NON matcha -[r]- o -[r:TYPE]-
+    anonymous_pattern = re.compile(
+        r"-\["  # Inizio relazione
+        r"(?![a-zA-Z_][a-zA-Z0-9_]*)"  # Negative lookahead: NON una variabile
+        r"([:[a-zA-Z0-9_`|*.. ]*)?"  # Gruppo 1: Optional type/spec (es. :REL, :REL*1..2)
+        r"(\s*\{[^}]*\})?"  # Gruppo 2: Optional properties
+        r"\s*\]-"  # Chiusa relazione
+    )
+
+    matches_to_replace = []
+    for match in anonymous_pattern.finditer(result):
+        matches_to_replace.append(match)
+
+    for match in reversed(matches_to_replace):
+        rel_var_counter += 1
+        var_name = f"r{rel_var_counter}"
+
+        rel_type = match.group(1) or ""  # Es. ":HA_RICEVUTO"
+        props = match.group(2) or ""
+
+        replacement = f"-[{var_name}{rel_type}{props}]-"
+
+        result = result[: match.start()] + replacement + result[match.end() :]
+
+    if (rel_var_counter - (rel_var_counter - len(matches_to_replace))) > 0:
+        logger.info(
+            f"Assegnate {len(matches_to_replace)} variabili a relazioni anonime"
+        )
+
+    return result, rel_var_counter
+
+
+def build_graph_payload_from_results(
+    query: str, records: List[Dict[str, Any]]
+) -> Tuple[Dict[str, List[Dict[str, Any]]], str]:
+    """
+    Costruisce il payload del grafo dai risultati Neo4j.
+    Ritorna: (graph_payload, source_type)
+    """
+    # PRIMA: prova a estrarre direttamente dai records
+    graph_payload = extract_graph_snapshot(records)
+    if graph_payload and graph_payload.get("nodes"):
+        logger.info(f"Grafo estratto dai records: {len(graph_payload['nodes'])} nodi")
+        return graph_payload, "context_results"
+
+    # SECONDA: prova a ricostruire dalla query
+    logger.info("Nessun grafo nei records, tento ricostruzione dalla query")
+    rebuilt_graph = _reconstruct_graph_from_query(query)
+    if rebuilt_graph and rebuilt_graph.get("nodes"):
+        logger.info(f"Grafo ricostruito: {len(rebuilt_graph['nodes'])} nodi")
+        return rebuilt_graph, "reconstructed_from_query"
+
+    logger.warning("Nessun grafo trovato né nei records né nella ricostruzione")
+    return {}, "no_nodes_detected"
+
+
+def _extract_variables_from_query(query_prefix: str) -> Tuple[List[str], List[str]]:
+    """
+    Estrae variabili di nodi e relazioni da una query Cypher.
+    Returns: (node_variables, relationship_variables)
+    """
+    # Pattern per nodi: (varName), (varName:Label), (varName:`Label`), etc.
+    node_pattern = re.compile(
+        r"\(([a-zA-Z_][a-zA-Z0-9_]*)"  # Nome variabile
+        r"(?:\s*:[^)]+)?"  # Optional label(s)
+        r"(?:\s*\{[^}]*\})?"  # Optional properties
+        r"\)"
+    )
+
+    # Pattern per relazioni: -[varName]-, -[varName:TYPE]-, etc.
+    rel_pattern = re.compile(
+        r"-\[([a-zA-Z_][a-zA-Z0-9_]*)"  # Nome variabile
+        r"(?:\s*:[^\]]+)?"  # Optional type(s)
+        r"(?:\s*\{[^}]*\})?"  # Optional properties
+        r"\]-"
+    )
+
+    node_vars: Set[str] = set()
+    rel_vars: Set[str] = set()
+
+    # Parole chiave Cypher da escludere
+    cypher_keywords = {
+        "match",
+        "where",
+        "with",
+        "return",
+        "optional",
+        "union",
+        "order",
+        "limit",
+        "skip",
+        "and",
+        "or",
+        "not",
+        "in",
+        "as",
+        "distinct",
+        "by",
+        "asc",
+        "desc",
+        "case",
+        "when",
+        "then",
+        "else",
+        "end",
+        "create",
+        "merge",
+        "delete",
+        "set",
+        "remove",
+    }
+
+    # Trova tutti i nodi
+    for match in node_pattern.finditer(query_prefix):
+        var_name = match.group(1)
+        if var_name and var_name.lower() not in cypher_keywords:
+            node_vars.add(var_name)
+
+    # Trova tutte le relazioni
+    for match in rel_pattern.finditer(query_prefix):
+        var_name = match.group(1)
+        if var_name and var_name.lower() not in cypher_keywords:
+            rel_vars.add(var_name)
+
+    logger.debug(f"Estratte {len(node_vars)} var nodo, {len(rel_vars)} var relazione")
+
+    return sorted(list(node_vars)), sorted(list(rel_vars))
 
 
 def extract_final_line(text: str) -> str:
@@ -1298,24 +2738,154 @@ async def health_check():
 async def ask_question(user_question: UserQuestionWithSession):
     start_total_time = time.perf_counter()
     timing_details = {}
+    generated_query: Optional[str] = None
+    context_completo: List[Dict[str, Any]] = []
+    prompt_examples: List[Dict[str, Any]] = []
+    semantic_candidates: List[Dict[str, Any]] = []
+    examples_similarity: Optional[float] = None
+    specialist_route: Optional[str] = None
 
     user_id = user_question.user_id or "default_user"
-    original_question_text = user_question.question.strip()
+    user_input_text = user_question.question.strip()
+    effective_question_text = user_input_text
     requested_examples_top_k = (
-        user_question.examples_top_k if user_question.examples_top_k and user_question.examples_top_k > 0 else None
+        user_question.examples_top_k
+        if user_question.examples_top_k and user_question.examples_top_k > 0
+        else None
     )
     session = get_or_create_session(user_id)
 
-    logger.info(f"📥 [{user_id}] Domanda: '{original_question_text}'")
+    logger.info(f"📥 [{user_id}] Domanda: '{user_input_text}'")
 
     try:
         ## == FASE 1: PRE-PROCESSING E GESTIONE MEMORIA
+        pending_confirmation = session.pending_confirmation
+        if (
+            pending_confirmation
+            and pending_confirmation.status == "awaiting_user"
+            and pending_confirmation.original_question != effective_question_text
+        ):
+            interpretation = _interpret_scope_confirmation_reply(
+                effective_question_text, pending_confirmation
+            )
+            if interpretation == "confirm":
+                effective_question_text = (
+                    f"{pending_confirmation.original_question} "
+                    f"(conferma utente: {user_input_text})"
+                )
+                pending_confirmation.status = "resolved"
+                pending_confirmation.original_question = effective_question_text
+                logger.info(
+                    "Memory routing: conferma esplicita ricevuta, riuso dello scope precedente autorizzato."
+                )
+            elif interpretation == "reject":
+                session.pending_confirmation = None
+            else:
+                clarification_prompt = (
+                    pending_confirmation.prompt
+                    + ' Non ho capito la tua risposta: scrivi "stesso perimetro" '
+                    "oppure descrivi il nuovo perimetro con qualche dettaglio."
+                )
+                add_message_to_session(
+                    user_id,
+                    effective_question_text,
+                    clarification_prompt,
+                    [],
+                    "",
+                )
+                total_time = time.perf_counter() - start_total_time
+                timing_details["memory_used"] = False
+                timing_details["preprocessing"] = 0.0
+                timing_details["totale"] = total_time
+                return {
+                    "domanda": effective_question_text,
+                    "query_generata": None,
+                    "risposta": clarification_prompt,
+                    "context": [],
+                    "graph_data": {},
+                    "timing_details": timing_details,
+                    "specialist": None,
+                    "examples_top_k": None,
+                    "examples_used": [],
+                    "repair_audit": [],
+                    "success": False,
+                    "requires_user_confirmation": True,
+                }
+
+        is_small_talk = _is_small_talk(effective_question_text)
+
+        if _contains_dangerous_intent(effective_question_text):
+            session.pending_confirmation = None
+            warning_message = (
+                "Posso solo consultare i dati in lettura. "
+                "Per sicurezza non posso creare, modificare o cancellare informazioni nel database."
+            )
+            add_message_to_session(
+                user_id,
+                effective_question_text,
+                warning_message,
+                [],
+                "",
+            )
+            timing_details["dangerous_intent"] = True
+            timing_details["generazione_query"] = 0.0
+            timing_details["esecuzione_db"] = 0.0
+            timing_details["sintesi_risposta"] = 0.0
+            timing_details["totale"] = time.perf_counter() - start_total_time
+            return {
+                "domanda": effective_question_text,
+                "query_generata": None,
+                "risposta": warning_message,
+                "context": [],
+                "graph_data": {},
+                "timing_details": timing_details,
+                "specialist": "SAFETY_GUARD",
+                "examples_top_k": requested_examples_top_k,
+                "examples_used": [],
+                "repair_audit": [],
+                "success": False,
+                "dangerous_intent": True,
+            }
+
         start_preprocessing_time = time.perf_counter()
 
         # 1a. Gestione Memoria: Il nuovo Contextualizer riscrive la domanda
-        chat_history = get_conversation_context(user_id)
-        question_text = run_contextualizer_agent(original_question_text, chat_history)
-        if question_text != original_question_text:
+        chat_history = get_conversation_context(user_id, effective_question_text)
+        timing_details["memory_used"] = bool(chat_history)
+        pending_confirmation = session.pending_confirmation
+        if (
+            pending_confirmation
+            and pending_confirmation.status == "awaiting_user"
+            and pending_confirmation.original_question == effective_question_text
+        ):
+            clarification_prompt = pending_confirmation.prompt
+            add_message_to_session(
+                user_id,
+                effective_question_text,
+                clarification_prompt,
+                [],
+                "",
+            )
+            preprocessing_time = time.perf_counter() - start_preprocessing_time
+            timing_details["preprocessing"] = preprocessing_time
+            timing_details["totale"] = time.perf_counter() - start_total_time
+            return {
+                "domanda": effective_question_text,
+                "query_generata": None,
+                "risposta": clarification_prompt,
+                "context": [],
+                "graph_data": {},
+                "timing_details": timing_details,
+                "specialist": None,
+                "examples_top_k": requested_examples_top_k,
+                "examples_used": [],
+                "repair_audit": [],
+                "success": False,
+                "requires_user_confirmation": True,
+            }
+
+        question_text = run_contextualizer_agent(effective_question_text, chat_history)
+        if question_text != effective_question_text:
             logger.info(f"Domanda riscritta dal Contestualizzatore: '{question_text}'")
 
         # 1b. Correzione Fuzzy
@@ -1326,6 +2896,39 @@ async def ask_question(user_question: UserQuestionWithSession):
         # 1c. Traduzione (fondamentale per la coerenza dei prompt)
         english_task = run_translator_agent(question_text)
         logger.info(f"Task tradotto in Inglese: '{english_task}'")
+
+        if _contains_dangerous_intent(english_task):
+            session.pending_confirmation = None
+            warning_message = (
+                "Posso aiutarti solo con analisi e ricerche. "
+                "Non ho il permesso di creare, modificare o cancellare dati."
+            )
+            add_message_to_session(
+                user_id,
+                effective_question_text,
+                warning_message,
+                [],
+                "",
+            )
+            timing_details["dangerous_intent"] = True
+            timing_details["generazione_query"] = 0.0
+            timing_details["esecuzione_db"] = 0.0
+            timing_details["sintesi_risposta"] = 0.0
+            timing_details["totale"] = time.perf_counter() - start_total_time
+            return {
+                "domanda": effective_question_text,
+                "query_generata": None,
+                "risposta": warning_message,
+                "context": [],
+                "graph_data": {},
+                "timing_details": timing_details,
+                "specialist": "SAFETY_GUARD",
+                "examples_top_k": requested_examples_top_k,
+                "examples_used": [],
+                "repair_audit": [],
+                "success": False,
+                "dangerous_intent": True,
+            }
 
         effective_examples_top_k = (
             requested_examples_top_k
@@ -1354,22 +2957,34 @@ async def ask_question(user_question: UserQuestionWithSession):
                 timings_copy = dict(cached_timings)
                 timings_copy["cache_hit"] = True
                 cached_response["timing_details"] = timings_copy
+                cached_context = cached_response.get("context")
+                if cached_context is None:
+                    cached_context = cached_entry.get("context", [])
+                cached_graph = cached_response.get("graph_data")
+                if cached_graph is None:
+                    cached_graph = cached_entry.get("graph_data", {})
+                cached_examples = cached_response.get("examples_used")
+                if cached_examples is None:
+                    cached_examples = cached_entry.get("examples_used", [])
 
                 add_message_to_session(
                     user_id,
-                    original_question_text,
+                    effective_question_text,
                     cached_response.get("risposta", ""),
-                    cached_entry.get("context", []),
+                    cached_context,
                     cached_entry.get("query_generata", ""),
                 )
 
                 return {
-                    "domanda": original_question_text,
+                    "domanda": effective_question_text,
                     "query_generata": cached_entry.get("query_generata"),
                     "risposta": cached_response.get("risposta"),
+                    "context": cached_context,
+                    "graph_data": cached_graph,
                     "timing_details": timings_copy,
                     "specialist": cached_entry.get("specialist"),
                     "examples_top_k": cached_entry.get("examples_top_k"),
+                    "examples_used": cached_examples,
                     "cached": True,
                 }
 
@@ -1383,9 +2998,17 @@ async def ask_question(user_question: UserQuestionWithSession):
         timing_details["routing"] = time.perf_counter() - start_route_time
         logger.info(f" Rotta decisa dallo Specialist Router: {specialist_route}")
 
+        if is_small_talk and specialist_route != "GENERAL_CONVERSATION":
+            logger.info(
+                "Small talk rilevato: forzo la rotta su GENERAL_CONVERSATION per evitare accessi al database."
+            )
+            specialist_route = "GENERAL_CONVERSATION"
+
         if specialist_route == "GENERAL_CONVERSATION":
             start_conv_time = time.perf_counter()
-            conversation_reply = run_general_conversation_agent(original_question_text)
+            conversation_reply = run_general_conversation_agent(effective_question_text)
+            if is_small_talk:
+                timing_details["small_talk"] = True
             timing_details["conversazione"] = time.perf_counter() - start_conv_time
             timing_details["generazione_query"] = 0.0
             timing_details["esecuzione_db"] = 0.0
@@ -1394,23 +3017,29 @@ async def ask_question(user_question: UserQuestionWithSession):
 
             add_message_to_session(
                 user_id,
-                original_question_text,
+                effective_question_text,
                 conversation_reply,
                 [],
                 "",
             )
             response_payload = {
-                "domanda": original_question_text,
+                "domanda": effective_question_text,
                 "query_generata": None,
                 "risposta": conversation_reply,
+                "context": [],
+                "graph_data": {},
                 "timing_details": timing_details,
                 "specialist": specialist_route,
                 "examples_top_k": effective_examples_top_k,
+                "examples_used": [],
+                "repair_audit": [],
+                "success": True,
             }
             if ENABLE_CACHE and cache_key:
                 query_cache[cache_key] = {
                     "response": copy.deepcopy(response_payload),
                     "context": [],
+                    "graph_data": {},
                     "query_generata": None,
                     "specialist": specialist_route,
                     "examples_top_k": response_payload["examples_top_k"],
@@ -1435,153 +3064,156 @@ async def ask_question(user_question: UserQuestionWithSession):
             prompt_template=coder_prompt_template,
         )
         """
-        generated_query = run_coder_agent(
+        (
+            generated_query,
+            prompt_examples,
+            semantic_candidates,
+            examples_similarity,
+        ) = run_coder_agent(
             question=english_task,
             relevant_schema=relevant_schema,
             prompt_template=coder_prompt_template,
             specialist_type=specialist_route,
-            original_question_it=original_question_text,
+            original_question_it=effective_question_text,
             examples_top_k=effective_examples_top_k,
         )
 
         timing_details["generazione_query"] = time.perf_counter() - start_gen_time
+        if examples_similarity is not None:
+            timing_details["examples_similarity"] = examples_similarity
         logger.info(
             f"Query generata dallo specialista '{specialist_route}':\n{generated_query}"
         )
 
+        blocked_keyword = _detect_write_operation(generated_query)
+        if blocked_keyword:
+            logger.warning(
+                "Query bloccata per operazione proibita '%s'.", blocked_keyword
+            )
+            warning_message = (
+                "Non posso eseguire questa richiesta perché contiene operazioni "
+                "che modificherebbero il database (es. "
+                f"{blocked_keyword.upper()}). Posso solo consultare i dati in lettura."
+            )
+            timing_details["esecuzione_db"] = 0.0
+            timing_details["sintesi_risposta"] = 0.0
+            timing_details["totale"] = time.perf_counter() - start_total_time
+
+            add_message_to_session(
+                user_id,
+                effective_question_text,
+                warning_message,
+                [],
+                generated_query,
+            )
+
+            return {
+                "domanda": effective_question_text,
+                "query_generata": generated_query,
+                "risposta": warning_message,
+                "context": [],
+                "graph_data": {},
+                "timing_details": timing_details,
+                "specialist": specialist_route,
+                "examples_top_k": effective_examples_top_k,
+                "examples_used": [
+                    {
+                        "id": ex.get("id"),
+                        "question": ex.get("question"),
+                        "similarity": ex.get("similarity"),
+                    }
+                    for ex in (prompt_examples or [])
+                ],
+                "repair_audit": [],
+                "success": False,
+                "dangerous_intent": True,
+            }
+
         ## == FASE 3: ESECUZIONE E SINTESI DELLA RISPOSTA
         # 3a. Esecuzione query con ciclo di repair (configurabile)
         start_db_time = time.perf_counter()
-        attempts = max(1, int(config.system.get("retry", {}).get("max_attempts", 1)))
-        patterns = config.system.get("retry", {}).get("repairable_error_patterns", [])
-        max_recent = int(config.system.get("retry", {}).get("max_recent_repairs", 0))
+        retry_cfg = config.system.get("retry", {}) or {}
+        semantic_cfg = retry_cfg.get("semantic_expansion", {}) or {}
+        max_recent = int(retry_cfg.get("max_recent_repairs", 0))
         hints_texts = []
-        for hint_file in config.system.get("retry", {}).get("hints_files", []) or []:
+        for hint_file in retry_cfg.get("hints_files", []) or []:
             try:
                 with open(hint_file, "r", encoding="utf-8") as hf:
                     hints_texts.append(hf.read())
             except Exception:
                 continue
         recent_repairs = _load_recent_repairs(max_recent) if max_recent > 0 else ""
+        base_hints_text = "\n\n".join(hints_texts).strip()
 
-        last_error_msg = None
-        current_query = generated_query
-
-        # Preflight: intercetta sintassi SQL non valida per Cypher (es. GROUP BY, HAVING, OVER)
         try:
-            sql_like = re.compile(
-                r"\b(GROUP\s+BY|HAVING|OVER\b|PARTITION\s+BY|ROW_NUMBER\s*\(|RANK\s*\(|WINDOW\b)",
-                re.IGNORECASE,
+            generated_query, context_completo, repair_audit = (
+                execute_query_with_iterative_improvement(
+                    initial_query=generated_query,
+                    english_task=english_task,
+                    original_question_it=effective_question_text,
+                    relevant_schema=relevant_schema,
+                    retry_cfg=retry_cfg,
+                    base_hints_text=base_hints_text,
+                    recent_repairs=recent_repairs,
+                    semantic_cfg=semantic_cfg,
+                    semantic_examples=semantic_candidates,
+                    contextualized_question=question_text,
+                )
             )
-            if current_query and sql_like.search(current_query) and QUERY_REPAIR_PROMPT:
-                logger.info(
-                    "Preflight Repair: rilevata sintassi SQL-like (GROUP BY/HAVING/OVER). Provo a correggere prima dell'esecuzione."
-                )
-                preflight_hints = (
-                    "SQL-like keywords are invalid in Cypher (GROUP BY, HAVING, OVER).\n"
-                    "Use Cypher aggregation instead: RETURN key, sum(val) AS total; or WITH key, sum(val) AS total RETURN key, total.\n"
-                    "For best-year or ranking, use WITH + collect(...) and pick the first element after ORDER BY, not GROUP BY.\n"
-                )
-                auto_hints_pf = _suggest_unnecessary_with_hints(current_query)
-                combined_hints_pf = "\n\n".join(
-                    [
-                        h
-                        for h in [
-                            hints_blob if "hints_blob" in locals() else "",
-                            preflight_hints,
-                            auto_hints_pf,
-                        ]
-                        if h
-                    ]
-                ).strip()
-                fixed_pf = _invoke_with_profile(
-                    agent_name="coder",
-                    prompt_text=QUERY_REPAIR_PROMPT,
-                    variables={
-                        "question": english_task,
-                        "schema": relevant_schema,
-                        "bad_query": current_query,
-                        "error": "Detected SQL-like syntax (GROUP BY/HAVING/OVER) not valid in Cypher.",
-                        "hints": combined_hints_pf,
-                        "recent_repairs": recent_repairs,
-                    },
-                )
-                fixed_pf_query = extract_cypher(fixed_pf)
-                logger.info(f"Query corretta (preflight) proposta:\n{fixed_pf_query}")
-                _append_repair_event(
-                    english_task,
-                    current_query,
-                    "Preflight SQL-like syntax",
-                    fixed_pf_query,
-                )
-                current_query = fixed_pf_query
-        except Exception:
-            pass
-        for attempt_idx in range(1, attempts + 1):
-            try:
-                context_completo = execute_cypher_with_timeout(current_query)
-                generated_query = current_query
-                last_error_msg = None
-                break
-            except QueryTimeoutError as timeout_exc:
-                last_error_msg = str(timeout_exc)
-                logger.error(
-                    f"Tentativo {attempt_idx}/{attempts} fallito per timeout della query Neo4j: {last_error_msg}"
-                )
-                raise
-            except Exception as e:
-                last_error_msg = str(e)
-                logger.warning(
-                    f"Tentativo {attempt_idx}/{attempts} fallito: {last_error_msg[:180]}"
-                )
-                if not QUERY_REPAIR_PROMPT:
-                    continue
-                # Check se l'errore è riparabile
-                if not any(
-                    (
-                        re.search(pat, last_error_msg)
-                        if any(ch in pat for ch in ".*?[]()^$")
-                        else (pat in last_error_msg)
-                    )
-                    for pat in patterns
-                ):
-                    continue
-                # Prepara prompt di repair
-                hints_blob = "\n\n".join(hints_texts).strip()
-                # Auto-detected hints (e.g., unnecessary WITH)
-                auto_hints = _suggest_unnecessary_with_hints(current_query)
-                combined_hints = "\n\n".join(hints_texts).strip() or ""
-                if auto_hints:
-                    combined_hints = (
-                        (combined_hints + "\n\n" + auto_hints).strip()
-                        if combined_hints
-                        else auto_hints
-                    )
+        except UnsafeCypherError as unsafe_exc:
+            logger.warning("Blocco esecuzione query: %s", unsafe_exc)
+            timing_details["esecuzione_db"] = 0.0
+            timing_details["sintesi_risposta"] = 0.0
+            timing_details["totale"] = time.perf_counter() - start_total_time
+            warning_message = (
+                "Per motivi di sicurezza non posso eseguire query che modificano "
+                "il database. Ho rilevato l'operazione vietata "
+                f"«{unsafe_exc.keyword.upper()}»."
+            )
+            add_message_to_session(
+                user_id,
+                effective_question_text,
+                warning_message,
+                [],
+                generated_query,
+            )
+            return {
+                "domanda": effective_question_text,
+                "query_generata": generated_query,
+                "risposta": warning_message,
+                "context": [],
+                "graph_data": {},
+                "timing_details": timing_details,
+                "specialist": specialist_route,
+                "examples_top_k": effective_examples_top_k,
+                "examples_used": [
+                    {
+                        "id": ex.get("id"),
+                        "question": ex.get("question"),
+                        "similarity": ex.get("similarity"),
+                    }
+                    for ex in (prompt_examples or [])
+                ],
+                "repair_audit": [],
+                "success": False,
+                "dangerous_intent": True,
+            }
+        except Exception as e:
+            raise e
 
-                fixed = _invoke_with_profile(
-                    agent_name="coder",
-                    prompt_text=QUERY_REPAIR_PROMPT,
-                    variables={
-                        "question": english_task,
-                        "schema": relevant_schema,
-                        "bad_query": current_query,
-                        "error": last_error_msg,
-                        "hints": combined_hints,
-                        "recent_repairs": recent_repairs,
-                    },
-                )
-                fixed_query = extract_cypher(fixed)
-                logger.info(f"Query corretta proposta:\n{fixed_query}")
-                _append_repair_event(
-                    english_task, current_query, last_error_msg, fixed_query
-                )
-                current_query = fixed_query
-                continue
-        if last_error_msg:
-            # re-raise ultimo errore se tutti i tentativi falliscono
-            raise Exception(last_error_msg)
         total_results = len(context_completo)
         timing_details["esecuzione_db"] = time.perf_counter() - start_db_time
+        timing_details["repair_iterations"] = len(repair_audit)
+        semantic_iterations = sum(
+            1 for entry in repair_audit if entry.get("semantic_expansion")
+        )
+        if semantic_iterations:
+            timing_details["semantic_expansion"] = True
+            timing_details["semantic_expansion_iterations"] = semantic_iterations
+        if retry_cfg.get("enabled", False) and repair_audit:
+            logger.info(
+                f"Iterative repair completato con {len(repair_audit)} tentativi intermedi."
+            )
         logger.info(f"Query eseguita. Trovati {total_results} risultati.")
 
         # 3b. Prepara il contesto e chiama il Synthesizer per la risposta finale
@@ -1595,6 +3227,10 @@ async def ask_question(user_question: UserQuestionWithSession):
         )
         context_da_inviare = context_completo[:max_results_final]
 
+        graph_payload, graph_origin = build_graph_payload_from_results(
+            generated_query, context_da_inviare
+        )
+        timing_details["graph_origin"] = graph_origin
         sanitized_context = make_context_json_serializable(context_da_inviare)
         context_str_for_llm = json.dumps(
             {"risultato": sanitized_context}, indent=2, ensure_ascii=False
@@ -1602,11 +3238,11 @@ async def ask_question(user_question: UserQuestionWithSession):
 
         start_synth_time = time.perf_counter()
         filters_summary = _scope_summary_for_synth(
-            original_question_text, question_text
+            effective_question_text, question_text
         )
 
         final_answer = run_synthesizer_agent(
-            question=original_question_text,
+            question=effective_question_text,
             context_str=context_str_for_llm,
             total_results=total_results,
             contextualized_question=question_text,
@@ -1622,28 +3258,44 @@ async def ask_question(user_question: UserQuestionWithSession):
 
         add_message_to_session(
             user_id,
-            original_question_text,
+            effective_question_text,
             final_answer,
             context_completo,
             generated_query,
         )
 
+        examples_used_summary = [
+            {
+                "id": ex.get("id"),
+                "question": ex.get("question"),
+                "similarity": ex.get("similarity"),
+            }
+            for ex in (prompt_examples or [])
+        ]
+
         response_payload = {
-            "domanda": original_question_text,
+            "domanda": effective_question_text,
             "query_generata": generated_query,
             "risposta": final_answer,
+            "context": sanitized_context,
+            "graph_data": graph_payload,
             "timing_details": timing_details,
             "specialist": specialist_route,
             "examples_top_k": effective_examples_top_k,
+            "examples_used": examples_used_summary,
+            "repair_audit": repair_audit,
+            "success": True,
         }
 
         if ENABLE_CACHE and cache_key:
             query_cache[cache_key] = {
                 "response": copy.deepcopy(response_payload),
-                "context": context_completo,
+                "context": sanitized_context,
+                "graph_data": graph_payload,
                 "query_generata": generated_query,
                 "specialist": specialist_route,
                 "examples_top_k": response_payload["examples_top_k"],
+                "examples_used": examples_used_summary,
             }
             logger.info("♻️ Cache STORE per query specialist")
 
@@ -1653,14 +3305,56 @@ async def ask_question(user_question: UserQuestionWithSession):
         logger.error(
             f"Timeout durante l'esecuzione della query Neo4j: {e}", exc_info=False
         )
-        raise HTTPException(status_code=504, detail=str(e))
+        timing_details.setdefault("errore", str(e))
+        timing_details.setdefault("totale", time.perf_counter() - start_total_time)
+        polite_msg = "Sto impiegando troppo tempo per recuperare i dati. Prova a restringere i filtri o a porre la domanda in modo più specifico."
+        return {
+            "domanda": effective_question_text,
+            "query_generata": generated_query,
+            "risposta": polite_msg,
+            "context": [],
+            "graph_data": {},
+            "timing_details": timing_details,
+            "specialist": specialist_route,
+            "examples_top_k": requested_examples_top_k,
+            "examples_used": [
+                {
+                    "id": ex.get("id"),
+                    "question": ex.get("question"),
+                    "similarity": ex.get("similarity"),
+                }
+                for ex in (prompt_examples or [])
+            ],
+            "repair_audit": [],
+            "success": False,
+        }
     except Exception as e:
         logger.error(
             f"ERRORE GRAVE nel flusso ad agenti specializzati: {e}", exc_info=True
         )
-        raise HTTPException(
-            status_code=500, detail=f"Errore durante l'elaborazione: {e}"
-        )
+        timing_details.setdefault("errore", str(e))
+        timing_details.setdefault("totale", time.perf_counter() - start_total_time)
+        polite_msg = "Al momento non riesco a rispondere a questa domanda. Riprova più tardi o riformula la richiesta."
+        return {
+            "domanda": effective_question_text,
+            "query_generata": generated_query,
+            "risposta": polite_msg,
+            "context": [],
+            "graph_data": {},
+            "timing_details": timing_details,
+            "specialist": specialist_route,
+            "examples_top_k": requested_examples_top_k,
+            "examples_used": [
+                {
+                    "id": ex.get("id"),
+                    "question": ex.get("question"),
+                    "similarity": ex.get("similarity"),
+                }
+                for ex in (prompt_examples or [])
+            ],
+            "repair_audit": [],
+            "success": False,
+        }
 
 
 # Endpoint per ottenere la cronologia della conversazione
@@ -1759,18 +3453,27 @@ async def debug_rag(request: dict):
         specialist = run_specialist_router_agent(english_task)
 
     # Recupera esempi
-    examples = example_retriever.retrieve(question, specialist, top_k=top_k)
+    examples = example_retriever.retrieve(
+        question,
+        specialist,
+        top_k=top_k,
+        allow_low_similarity=True,
+    )
+    best_similarity = example_retriever.last_similarity
 
     return {
         "question": question,
         "specialist_used": specialist,
         "top_k": top_k,
+        "best_similarity": best_similarity,
+        "min_similarity": getattr(example_retriever, "min_similarity", None),
         "retrieved_examples": [
             {
                 "rank": i + 1,
                 "id": ex["id"],
                 "question": ex["question"],
                 "cypher": ex["cypher"],
+                "similarity": ex.get("similarity"),
             }
             for i, ex in enumerate(examples)
         ],

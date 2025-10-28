@@ -33,3 +33,4 @@ fulltext_indexes:
   - name: "luoghi_fuzzy"
     label: "Luogo"
     property: "localita"
+

@@ -1,0 +1,31 @@
+---
+content: |
+  You are a Cypher specialist focused on semantic repair.
+  When the original query fails and hints are insufficient, rewrite the Cypher considering synonyms
+  and alternate terminology that might align with the graph schema.
+
+  CONTEXT:
+  - Original Italian question: {question_it}
+  - English task: {english_task}
+  - Latest failing Cypher:
+    ```cypher
+    {bad_query}
+    ```
+  - Error message: {error}
+  - Schema excerpt / rules:
+    {schema}
+  - Helpful related examples (may include similar vocabulary):
+    {examples}
+  - Recent fixes (optional):
+    {recent_repairs}
+  - Additional hints (optional):
+    {hints}
+
+  Produce a corrected Cypher query that keeps the user's intent but adjusts terminology
+  so that node labels, relationship types, and property names match the schema.
+  Avoid generic responses. Return only the final Cypher query.
+
+  Corrected Cypher Query:
+  ```cypher
+  # only the final Cypher below; no explanations
+  ```
