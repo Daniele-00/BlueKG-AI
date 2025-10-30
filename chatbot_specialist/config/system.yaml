@@ -44,7 +44,7 @@ retry:
     enabled: true
     max_attempts: 1
     prompt: query_expansion_prompt.yaml
-    top_k_examples: 3
+    top_k_examples: 0
 # Example retrieval settings
 examples:
   min_similarity: 0.45
@@ -127,6 +127,15 @@ sessions:
       - "generale"
       - "global"
       - "complessivo"
+      - "nuova domanda"
+      - "domanda nuova"
+      - "amplia"
+      - "amplia ricerca"
+      - "allarga"
+      - "allarga ricerca"
+      - "nuovo perimetro"
+      - "nuovo ambito"
+      - "scope nuovo"
     pronoun_starts:
       - "e"
       - "ed"
@@ -197,3 +206,17 @@ cypher_write_blocklist:
   - "load csv"
   - "call dbms"
   - "call apoc.write"
+query_safety:
+  risky_timeout_seconds: 12
+  critical_timeout_seconds: 8
+  safe_rewrite_limit: 200
+  slow_query_log: diagnostics/slow_queries.log
+feedback:
+  enabled: true
+  storage_path: diagnostics/user_feedback.jsonl
+  categories:
+    - corretta
+    - incompleta
+    - fuori_fuoco
+    - troppo_formale
+    - troppo_lunga

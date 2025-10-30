@@ -82,8 +82,8 @@ SPECIALIST_DIR = SCRIPT_DIR.parent / "chatbot_specialist"
 HYBRID_DIR = SCRIPT_DIR.parent / "chatbot_hybrid"
 
 # Output directories (dentro validation/)
-# VALIDATION_SET = SCRIPT_DIR / "validation_set_2.json"
-VALIDATION_SET = SCRIPT_DIR / "test_set.json"
+VALIDATION_SET = SCRIPT_DIR / "validation_set_2.json"
+# VALIDATION_SET = SCRIPT_DIR / "test_set.json"
 RESULTS_DIR = SCRIPT_DIR / "validation_results"
 RESULTS_DIR.mkdir(exist_ok=True)
 

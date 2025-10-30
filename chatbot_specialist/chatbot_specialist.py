@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from langchain_neo4j import Neo4jGraph
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import PromptTemplate
@@ -331,6 +331,34 @@ CYPHER_WRITE_BLOCKLIST = [
     for item in config.system.get("cypher_write_blocklist", []) or []
     if str(item).strip()
 ]
+QUERY_SAFETY_CFG = config.system.get("query_safety", {}) or {}
+QUERY_RISKY_TIMEOUT = float(QUERY_SAFETY_CFG.get("risky_timeout_seconds", 12) or 12)
+QUERY_CRITICAL_TIMEOUT = float(
+    QUERY_SAFETY_CFG.get("critical_timeout_seconds", 8) or 8
+)
+SAFE_REWRITE_LIMIT = int(QUERY_SAFETY_CFG.get("safe_rewrite_limit", 200) or 200)
+SLOW_QUERY_LOG_PATH = QUERY_SAFETY_CFG.get("slow_query_log", "diagnostics/slow_queries.log")
+
+FEEDBACK_CFG = config.system.get("feedback", {}) or {}
+FEEDBACK_ENABLED = bool(FEEDBACK_CFG.get("enabled", True))
+FEEDBACK_STORAGE_PATH = FEEDBACK_CFG.get(
+    "storage_path", "diagnostics/user_feedback.jsonl"
+)
+FEEDBACK_ALLOWED_CATEGORIES = set(
+    _normalize_keyword_list(FEEDBACK_CFG.get("categories"))
+) or {"corretta", "incompleta", "fuori_fuoco", "troppo_formale", "troppo_lunga"}
+ENTITY_STOPWORDS = {
+    "con",
+    "piu",
+    "più",
+    "piu'",
+    "cliente",
+    "qual",
+    "quale",
+    "chi",
+    "cosa",
+    "quanto",
+}
 
 _CYPHER_WRITE_PATTERNS: List[Tuple[str, Pattern[str]]] = []
 for kw in CYPHER_WRITE_BLOCKLIST:
@@ -378,6 +406,22 @@ def _contains_dangerous_intent(question: str) -> bool:
     return False
 
 
+def _sanitize_entity_value(value: Optional[str]) -> Optional[str]:
+    """Normalizza e filtra valori poco significativi usati come anchor."""
+
+    if value is None:
+        return None
+    raw = str(value).strip().strip("'\"")
+    if not raw:
+        return None
+    val = raw.lower()
+    if val in ENTITY_STOPWORDS:
+        return None
+    if len(val) < 3:
+        return None
+    return raw
+
+
 def _detect_write_operation(query: Optional[str]) -> Optional[str]:
     """Ritorna la keyword vietata trovata nella query, se presente."""
 
@@ -396,6 +440,175 @@ def _ensure_read_only_query(query: str) -> None:
     keyword = _detect_write_operation(query)
     if keyword:
         raise UnsafeCypherError(keyword)
+
+
+def _classify_query_complexity(query: Optional[str]) -> Tuple[str, List[str]]:
+    """Analizza la query e ritorna (livello, motivi)."""
+
+    if not query:
+        return "ok", []
+
+    lowered = query.lower()
+    reasons: List[str] = []
+
+    # Pattern negati
+    if re.search(r"where\s+not\s*\(\s*[a-z][a-z0-9_]*\s*-\s*\[", lowered, re.IGNORECASE):
+        reasons.append("negated_path")
+
+    # MATCH senza label
+    for match in re.finditer(r"match\s*\(\s*([a-z][a-z0-9_]*)\s*([^)]+)?\)", lowered):
+        inner = match.group(0)
+        if ":" not in inner:
+            reasons.append("match_without_label")
+            break
+
+    # Assenza totale di WHERE e LIMIT
+    if "return" in lowered and "where" not in lowered and "limit" not in lowered:
+        reasons.append("missing_filters")
+    elif "return" in lowered and "limit" not in lowered:
+        reasons.append("no_limit")
+
+    # Catene lunghe di relazioni
+    chain_count = len(re.findall(r"-\[[^\]]*\]-", lowered))
+    if chain_count >= 5:
+        reasons.append("long_chain")
+
+    if not reasons:
+        return "ok", []
+
+    severity_map = {
+        "negated_path": "critical",
+        "missing_filters": "critical",
+        "long_chain": "risky",
+        "match_without_label": "risky",
+        "no_limit": "risky",
+    }
+    level = "risky"
+    if any(severity_map.get(reason) == "critical" for reason in reasons):
+        level = "critical"
+
+    return level, sorted(set(reasons))
+
+
+def _rewrite_query_safe(query: str, reasons: List[str]) -> Tuple[Optional[str], List[str]]:
+    """Prova a riscrivere la query in modo più sicuro. Restituisce (nuova_query, note)."""
+
+    rewritten = query
+    notes: List[str] = []
+    changed = False
+
+    if "negated_path" in reasons:
+        new_query = _rewrite_negated_path_to_not_exists(rewritten)
+        if new_query and new_query != rewritten:
+            rewritten = new_query
+            notes.append(
+                "convertito WHERE NOT in NOT EXISTS con LIMIT {limit}".format(
+                    limit=SAFE_REWRITE_LIMIT
+                )
+            )
+            changed = True
+
+    if not changed:
+        return None, []
+    return rewritten, notes
+
+
+def _rewrite_negated_path_to_not_exists(query: str) -> Optional[str]:
+    """Trasforma WHERE NOT (pattern) in WHERE NOT EXISTS { MATCH pattern LIMIT N }."""
+
+    pattern = re.compile(r"where\s+not\s*\(", re.IGNORECASE)
+    idx = 0
+    result = query
+    changed = False
+
+    while True:
+        match = pattern.search(result, idx)
+        if not match:
+            break
+
+        segment = result[match.start() : match.start() + len("where not exists")]
+        if segment.lower().startswith("where not exists"):
+            idx = match.end()
+            continue
+
+        open_paren_idx = result.find("(", match.start())
+        if open_paren_idx == -1:
+            idx = match.end()
+            continue
+
+        depth = 1
+        pos = open_paren_idx + 1
+        while pos < len(result) and depth > 0:
+            char = result[pos]
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+            pos += 1
+
+        if depth != 0:
+            idx = match.end()
+            continue
+
+        inner = result[open_paren_idx + 1 : pos - 1].strip()
+        indent = _infer_indentation(result, match.start())
+        replacement = (
+            f"WHERE NOT EXISTS {{\n"
+            f"{indent}    MATCH {inner}\n"
+            f"{indent}    LIMIT {SAFE_REWRITE_LIMIT}\n"
+            f"{indent}}}"
+        )
+        result = result[: match.start()] + replacement + result[pos:]
+        idx = match.start() + len(replacement)
+        changed = True
+
+    return result if changed else None
+
+
+def _infer_indentation(text: str, position: int) -> str:
+    """Calcola l'indentazione (spazi) della linea corrente."""
+
+    line_start = text.rfind("\n", 0, position)
+    if line_start == -1:
+        line_start = 0
+    else:
+        line_start += 1
+    line = text[line_start:position]
+    indent = ""
+    for ch in line:
+        if ch in (" ", "\t"):
+            indent += ch
+        else:
+            break
+    return indent
+
+
+def _log_slow_query(payload: Dict[str, Any]) -> None:
+    """Append slow query diagnostics su file dedicato."""
+
+    if not SLOW_QUERY_LOG_PATH:
+        return
+    try:
+        path = Path(SLOW_QUERY_LOG_PATH)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception as exc:
+        logger.warning("Impossibile scrivere slow query log: %s", exc)
+
+
+def _store_feedback_entry(entry: Dict[str, Any]) -> None:
+    """Salva il feedback dell'utente in formato JSONL."""
+
+    if not FEEDBACK_ENABLED:
+        return
+    try:
+        path = Path(FEEDBACK_STORAGE_PATH)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception as exc:
+        logger.warning("Impossibile salvare il feedback utente: %s", exc)
 
 
 SCOPE_RESET_KEYWORDS = set(
@@ -698,6 +911,7 @@ def execute_query_with_iterative_improvement(
     semantic_cfg: Optional[Dict[str, Any]] = None,
     semantic_examples: Optional[List[Dict[str, Any]]] = None,
     contextualized_question: Optional[str] = None,
+    execution_timeout: Optional[float] = None,
 ) -> Tuple[str, List[Dict[str, Any]], List[Dict[str, str]]]:
     """
     Esegue la query su Neo4j provando a correggerla iterativamente.
@@ -737,7 +951,9 @@ def execute_query_with_iterative_improvement(
         try:
             logger.info(f"Esecuzione attempt {attempt_idx}/{attempts} su Neo4j.")
             _ensure_read_only_query(current_query)
-            context = execute_cypher_with_timeout(current_query)
+            context = execute_cypher_with_timeout(
+                current_query, timeout_seconds=execution_timeout
+            )
             return current_query, context, audit_trail
         except QueryTimeoutError as timeout_exc:
             last_error_msg = str(timeout_exc)
@@ -837,7 +1053,9 @@ def execute_query_with_iterative_improvement(
             try:
                 logger.info("Esecuzione query dopo espansione semantica.")
                 _ensure_read_only_query(semantic_query)
-                context = execute_cypher_with_timeout(semantic_query)
+                context = execute_cypher_with_timeout(
+                    semantic_query, timeout_seconds=execution_timeout
+                )
                 audit_trail.append(audit_entry)
                 return semantic_query, context, audit_trail
             except Exception as semantic_exc:
@@ -979,6 +1197,7 @@ class ConversationMessage(BaseModel):
     answer: str
     context: List[Dict] = []
     query_generated: str = ""
+    meta: Dict[str, Any] = Field(default_factory=dict)
 
 
 class PendingMemoryConfirmation(BaseModel):
@@ -997,6 +1216,16 @@ class ConversationSession(BaseModel):
     created_at: datetime
     last_activity: datetime
     pending_confirmation: Optional[PendingMemoryConfirmation] = None
+
+
+class FeedbackPayload(BaseModel):
+    user_id: str
+    question: str
+    category: str
+    notes: Optional[str] = None
+    answer: Optional[str] = None
+    query_generated: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 # Cache globale per le sessioni di conversazione (scade dopo timeout configurato)
@@ -1035,7 +1264,12 @@ def get_or_create_session(user_id: str) -> ConversationSession:
 
 
 def add_message_to_session(
-    user_id: str, question: str, answer: str, context: List[Dict], query: str
+    user_id: str,
+    question: str,
+    answer: str,
+    context: List[Dict],
+    query: str,
+    meta: Optional[Dict[str, Any]] = None,
 ):
     """Aggiungi un messaggio alla sessione di conversazione"""
     if not ENABLE_MEMORY:
@@ -1049,6 +1283,7 @@ def add_message_to_session(
         answer=answer,
         context=context,
         query_generated=query,
+        meta=meta or {},
     )
 
     session.messages.append(message)
@@ -1125,8 +1360,11 @@ def _extract_recent_scope_anchor(
         for label in ("cliente", "ditta", "fornitore", "famiglia", "documento"):
             values = explicit.get(label) or set()
             if values:
-                # Uso un ordinamento deterministico per evitare oscillazioni.
-                return label, sorted(values)[0]
+                ordered = sorted(values)
+                for candidate in ordered:
+                    clean = _sanitize_entity_value(candidate)
+                    if clean:
+                        return label, clean
         entities = _collect_entities_from_context(message.context)
         label_map = {
             "clienti": "cliente",
@@ -1147,7 +1385,11 @@ def _extract_recent_scope_anchor(
             values = entities.get(bucket) or set()
             if values:
                 label = label_map.get(bucket, bucket)
-                return label, sorted(values)[0]
+                ordered = sorted(values)
+                for candidate in ordered:
+                    clean = _sanitize_entity_value(candidate)
+                    if clean:
+                        return label, clean
     return None
 
 
@@ -1310,6 +1552,12 @@ def _should_use_memory(question: str, session: ConversationSession) -> bool:
 
     if _question_mentions_known_entities(lowered, session):
         return True
+
+    if _contains_keyword(lowered, tokens, REJECTION_KEYWORDS):
+        logger.info(
+            "Memory routing: risposta esplicita di cambio ambito, cronologia ignorata."
+        )
+        return False
 
     if _contains_keyword(lowered, tokens, FOLLOW_UP_KEYWORDS):
         return True
@@ -2792,6 +3040,10 @@ async def ask_question(user_question: UserQuestionWithSession):
                     clarification_prompt,
                     [],
                     "",
+                    meta={
+                        "event": "confirmation_prompt_retry",
+                        "pending_reason": pending_confirmation.reason,
+                    },
                 )
                 total_time = time.perf_counter() - start_total_time
                 timing_details["memory_used"] = False
@@ -2826,6 +3078,7 @@ async def ask_question(user_question: UserQuestionWithSession):
                 warning_message,
                 [],
                 "",
+                meta={"event": "dangerous_intent", "stage": "pre_translation"},
             )
             timing_details["dangerous_intent"] = True
             timing_details["generazione_query"] = 0.0
@@ -2865,6 +3118,12 @@ async def ask_question(user_question: UserQuestionWithSession):
                 clarification_prompt,
                 [],
                 "",
+                meta={
+                    "event": "confirmation_prompt",
+                    "pending_reason": pending_confirmation.reason
+                    if pending_confirmation
+                    else None,
+                },
             )
             preprocessing_time = time.perf_counter() - start_preprocessing_time
             timing_details["preprocessing"] = preprocessing_time
@@ -2909,6 +3168,7 @@ async def ask_question(user_question: UserQuestionWithSession):
                 warning_message,
                 [],
                 "",
+                meta={"event": "dangerous_intent", "stage": "post_translation"},
             )
             timing_details["dangerous_intent"] = True
             timing_details["generazione_query"] = 0.0
@@ -2973,6 +3233,7 @@ async def ask_question(user_question: UserQuestionWithSession):
                     cached_response.get("risposta", ""),
                     cached_context,
                     cached_entry.get("query_generata", ""),
+                    meta={"event": "cache_hit", "cache_key": cache_key},
                 )
 
                 return {
@@ -3021,6 +3282,10 @@ async def ask_question(user_question: UserQuestionWithSession):
                 conversation_reply,
                 [],
                 "",
+                meta={
+                    "event": "general_conversation",
+                    "small_talk": bool(is_small_talk),
+                },
             )
             response_payload = {
                 "domanda": effective_question_text,
@@ -3085,6 +3350,31 @@ async def ask_question(user_question: UserQuestionWithSession):
             f"Query generata dallo specialista '{specialist_route}':\n{generated_query}"
         )
 
+        complexity_level, complexity_reasons = _classify_query_complexity(
+            generated_query
+        )
+        timing_details["query_complexity"] = {
+            "level": complexity_level,
+            "reasons": complexity_reasons,
+        }
+        default_timeout = get_query_timeout_seconds()
+        if not default_timeout or default_timeout <= 0:
+            default_timeout = 30.0
+        timeout_budget = float(default_timeout)
+        if complexity_level == "critical":
+            timeout_budget = min(timeout_budget, QUERY_CRITICAL_TIMEOUT)
+        elif complexity_level == "risky":
+            timeout_budget = min(timeout_budget, QUERY_RISKY_TIMEOUT)
+        timing_details["query_timeout_seconds"] = timeout_budget
+
+        query_meta: Dict[str, Any] = {
+            "complexity": {
+                "level": complexity_level,
+                "reasons": complexity_reasons,
+                "timeout_seconds": timeout_budget,
+            }
+        }
+
         blocked_keyword = _detect_write_operation(generated_query)
         if blocked_keyword:
             logger.warning(
@@ -3105,6 +3395,7 @@ async def ask_question(user_question: UserQuestionWithSession):
                 warning_message,
                 [],
                 generated_query,
+                meta={**query_meta, "blocked_keyword": blocked_keyword},
             )
 
             return {
@@ -3145,24 +3436,85 @@ async def ask_question(user_question: UserQuestionWithSession):
         recent_repairs = _load_recent_repairs(max_recent) if max_recent > 0 else ""
         base_hints_text = "\n\n".join(hints_texts).strip()
 
+        execution_attempts: List[Dict[str, Any]] = []
+        context_completo: List[Dict[str, Any]] = []
+        repair_audit: List[Dict[str, str]] = []
+        safe_rewrite_applied = False
+        safe_rewrite_notes: List[str] = []
+        slow_query_message: Optional[str] = None
+
         try:
-            generated_query, context_completo, repair_audit = (
-                execute_query_with_iterative_improvement(
-                    initial_query=generated_query,
-                    english_task=english_task,
-                    original_question_it=effective_question_text,
-                    relevant_schema=relevant_schema,
-                    retry_cfg=retry_cfg,
-                    base_hints_text=base_hints_text,
-                    recent_repairs=recent_repairs,
-                    semantic_cfg=semantic_cfg,
-                    semantic_examples=semantic_candidates,
-                    contextualized_question=question_text,
-                )
+            final_query, context_completo, repair_audit = execute_query_with_iterative_improvement(
+                initial_query=generated_query,
+                english_task=english_task,
+                original_question_it=effective_question_text,
+                relevant_schema=relevant_schema,
+                retry_cfg=retry_cfg,
+                base_hints_text=base_hints_text,
+                recent_repairs=recent_repairs,
+                semantic_cfg=semantic_cfg,
+                semantic_examples=semantic_candidates,
+                contextualized_question=question_text,
+                execution_timeout=timeout_budget,
             )
+            execution_attempts.append({"query": generated_query, "status": "success"})
+            generated_query = final_query
+        except QueryTimeoutError as timeout_exc:
+            timing_details["initial_timeout"] = str(timeout_exc)
+            execution_attempts.append(
+                {"query": generated_query, "status": "timeout", "message": str(timeout_exc)}
+            )
+            rewritten_query, rewrite_notes = _rewrite_query_safe(
+                generated_query, complexity_reasons
+            )
+            if rewritten_query:
+                safe_rewrite_applied = True
+                safe_rewrite_notes = rewrite_notes
+                timing_details["safe_rewrite"] = {
+                    "applied": True,
+                    "notes": rewrite_notes,
+                }
+                try:
+                    final_query, context_completo, repair_audit = execute_query_with_iterative_improvement(
+                        initial_query=rewritten_query,
+                        english_task=english_task,
+                        original_question_it=effective_question_text,
+                        relevant_schema=relevant_schema,
+                        retry_cfg=retry_cfg,
+                        base_hints_text=base_hints_text,
+                        recent_repairs=recent_repairs,
+                        semantic_cfg=semantic_cfg,
+                        semantic_examples=semantic_candidates,
+                        contextualized_question=question_text,
+                        execution_timeout=timeout_budget,
+                    )
+                    execution_attempts.append(
+                        {"query": rewritten_query, "status": "success"}
+                    )
+                    generated_query = final_query
+                except QueryTimeoutError as timeout_exc_2:
+                    execution_attempts.append(
+                        {
+                            "query": rewritten_query,
+                            "status": "timeout",
+                            "message": str(timeout_exc_2),
+                        }
+                    )
+                    slow_query_message = (
+                        "La query è stata interrotta perché troppo pesante. "
+                        "Aggiungi filtri come periodo, fornitore o restringi la famiglia di prodotti prima di riprovare."
+                    )
+            else:
+                slow_query_message = (
+                    "La query è stata interrotta perché troppo pesante. "
+                    "Aggiungi filtri come periodo, fornitore o restringi il perimetro prima di riprovare."
+                )
         except UnsafeCypherError as unsafe_exc:
+            execution_attempts.append(
+                {"query": generated_query, "status": "unsafe", "keyword": unsafe_exc.keyword}
+            )
             logger.warning("Blocco esecuzione query: %s", unsafe_exc)
-            timing_details["esecuzione_db"] = 0.0
+            timing_details["esecuzione_db"] = time.perf_counter() - start_db_time
             timing_details["sintesi_risposta"] = 0.0
             timing_details["totale"] = time.perf_counter() - start_total_time
             warning_message = (
@@ -3176,6 +3528,7 @@ async def ask_question(user_question: UserQuestionWithSession):
                 warning_message,
                 [],
                 generated_query,
+                meta={**query_meta, "blocked_keyword": unsafe_exc.keyword},
             )
             return {
                 "domanda": effective_question_text,
@@ -3198,8 +3551,73 @@ async def ask_question(user_question: UserQuestionWithSession):
                 "success": False,
                 "dangerous_intent": True,
             }
-        except Exception as e:
-            raise e
+
+        if "safe_rewrite" not in timing_details:
+            timing_details["safe_rewrite"] = {"applied": False}
+        timing_details["execution_attempts"] = execution_attempts
+
+        if safe_rewrite_applied:
+            query_meta["safe_rewrite"] = {
+                "applied": True,
+                "notes": safe_rewrite_notes,
+            }
+        else:
+            query_meta.setdefault("safe_rewrite", {"applied": False})
+
+        if slow_query_message:
+            elapsed_db = time.perf_counter() - start_db_time
+            timing_details["esecuzione_db"] = elapsed_db
+            timing_details["sintesi_risposta"] = 0.0
+            timing_details["totale"] = time.perf_counter() - start_total_time
+            timing_details["slow_query"] = {
+                "message": slow_query_message,
+                "attempts": execution_attempts,
+                "complexity_level": complexity_level,
+                "reasons": complexity_reasons,
+            }
+            _log_slow_query(
+                {
+                    "timestamp": datetime.now().isoformat(),
+                    "user_id": user_id,
+                    "question": effective_question_text,
+                    "english_task": english_task,
+                    "query_originale": generated_query,
+                    "attempts": execution_attempts,
+                    "complexity": {
+                        "level": complexity_level,
+                        "reasons": complexity_reasons,
+                    },
+                }
+            )
+            add_message_to_session(
+                user_id,
+                effective_question_text,
+                slow_query_message,
+                [],
+                generated_query,
+                meta={**query_meta, "slow_query": True, "attempts": execution_attempts},
+            )
+            return {
+                "domanda": effective_question_text,
+                "query_generata": generated_query,
+                "risposta": slow_query_message,
+                "context": [],
+                "graph_data": {},
+                "timing_details": timing_details,
+                "specialist": specialist_route,
+                "examples_top_k": effective_examples_top_k,
+                "examples_used": [
+                    {
+                        "id": ex.get("id"),
+                        "question": ex.get("question"),
+                        "similarity": ex.get("similarity"),
+                    }
+                    for ex in (prompt_examples or [])
+                ],
+                "repair_audit": [],
+                "success": False,
+                "slow_query": True,
+            }
 
         total_results = len(context_completo)
         timing_details["esecuzione_db"] = time.perf_counter() - start_db_time
@@ -3256,12 +3674,19 @@ async def ask_question(user_question: UserQuestionWithSession):
             f"Risposta Finale generata in {timing_details['totale']:.2f}s: {final_answer}"
         )
 
+        session_meta = {
+            **query_meta,
+            "execution_attempts": execution_attempts,
+            "graph_origin": graph_origin,
+        }
+
         add_message_to_session(
             user_id,
             effective_question_text,
             final_answer,
             context_completo,
             generated_query,
+            meta=session_meta,
         )
 
         examples_used_summary = [
@@ -3355,6 +3780,38 @@ async def ask_question(user_question: UserQuestionWithSession):
             "repair_audit": [],
             "success": False,
         }
+
+
+@app.post("/feedback")
+async def submit_feedback(payload: FeedbackPayload):
+    """Raccoglie il feedback esplicito degli utenti."""
+
+    if not FEEDBACK_ENABLED:
+        raise HTTPException(
+            status_code=503,
+            detail="La raccolta feedback è temporaneamente disabilitata.",
+        )
+
+    category = (payload.category or "").strip().lower()
+    if category not in FEEDBACK_ALLOWED_CATEGORIES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Categoria feedback non supportata: {payload.category}",
+        )
+
+    entry = {
+        "timestamp": datetime.now().isoformat(),
+        "user_id": payload.user_id,
+        "question": payload.question,
+        "category": category,
+        "notes": payload.notes,
+        "answer": payload.answer,
+        "query_generated": payload.query_generated,
+        "metadata": payload.metadata,
+    }
+    _store_feedback_entry(entry)
+    logger.info("Feedback registrato per utente %s (categoria=%s)", payload.user_id, category)
+    return {"status": "ok", "stored": True}
 
 
 # Endpoint per ottenere la cronologia della conversazione

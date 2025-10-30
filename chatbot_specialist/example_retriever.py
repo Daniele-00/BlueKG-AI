@@ -99,7 +99,9 @@ class ExampleRetriever:
         q_embedding = self.model.encode([question])[0]
         q_norm = np.linalg.norm(q_embedding)
         if q_norm == 0:
-            logger.warning("Embedding domanda con norma nulla; nessun esempio restituito.")
+            logger.warning(
+                "Embedding domanda con norma nulla; nessun esempio restituito."
+            )
             self.last_similarity = None
             return []
 

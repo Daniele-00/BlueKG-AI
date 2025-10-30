@@ -8,7 +8,7 @@ from pathlib import Path
 from datetime import datetime
 import pandas as pd
 import uuid
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 
 # --- FUNZIONE PER CODIFICARE L'IMMAGINE IN BASE64 ---
@@ -750,6 +750,8 @@ API_URL = "http://localhost:8000/ask"
 HEALTH_URL = "http://localhost:8000/health"
 CACHE_URL = "http://localhost:8000/cache"
 CONVERSATION_URL = "http://localhost:8000/conversation"
+FEEDBACK_URL = "http://localhost:8000/feedback"
+SLOW_QUERY_LOG_PATH = Path("diagnostics/slow_queries.log")
 
 # --- INIZIALIZZAZIONE STATO SESSIONE ---
 if "messages" not in st.session_state:
@@ -770,6 +772,9 @@ if "conversation_stats" not in st.session_state:
 
 if "user_id" not in st.session_state:
     st.session_state.user_id = f"user-{datetime.now().strftime('%H%M%S')}"
+
+if "submitted_feedback" not in st.session_state:
+    st.session_state.submitted_feedback = []
 
 # Flag di visualizzazione (valori di default, sovrascritti dalla sidebar)
 debug_mode = False
@@ -839,6 +844,7 @@ def clear_conversation():
         "successful_queries": 0,
         "start_time": datetime.now().isoformat(),
     }
+    st.session_state.submitted_feedback = []
     try:
         requests.delete(f"{CONVERSATION_URL}/{st.session_state.user_id}", timeout=5)
     except Exception as exc:
@@ -1167,6 +1173,152 @@ def render_table(context) -> bool:
     return True
 
 
+def render_execution_details_ui(
+    timing_details: Optional[Dict[str, Any]],
+    label: str = "Dettagli esecuzione",
+) -> None:
+    """Mostra un riepilogo compatto dei metadati di esecuzione."""
+
+    if not timing_details:
+        return
+
+    complexity = timing_details.get("query_complexity") or {}
+    slow = timing_details.get("slow_query")
+    timeout_val = timing_details.get("query_timeout_seconds")
+
+    with st.expander(f"📊 {label}", expanded=False):
+        col1, col2 = st.columns(2)
+        level = complexity.get("level")
+        col1.metric("Complessità", level.upper() if level else "-")
+        if timeout_val:
+            col2.metric("Timeout applicato", f"{timeout_val:.1f}s")
+        else:
+            col2.metric("Timeout applicato", "default")
+
+        reasons = complexity.get("reasons") or []
+        if reasons:
+            st.markdown(
+                "**Motivi rilevati:** "
+                + ", ".join(sorted(set(str(reason) for reason in reasons)))
+            )
+
+        safe_info = timing_details.get("safe_rewrite") or {}
+        if safe_info.get("applied"):
+            notes = safe_info.get("notes") or []
+            text = "; ".join(notes) if notes else "riscrittura di sicurezza applicata"
+            st.info(f"Rewrite di sicurezza attivo: {text}")
+
+        attempts = timing_details.get("execution_attempts") or []
+        if attempts:
+            df_attempts = pd.DataFrame(attempts)
+            if "query" in df_attempts.columns:
+                df_attempts["query"] = df_attempts["query"].apply(
+                    lambda q: (q[:180] + "…")
+                    if isinstance(q, str) and len(q) > 200
+                    else q
+                )
+            st.markdown("**Tentativi di esecuzione**")
+            st.dataframe(df_attempts, use_container_width=True)
+
+        semantic_iters = timing_details.get("semantic_expansion_iterations")
+        if semantic_iters:
+            st.caption(f"Tentativi di espansione semantica: {semantic_iters}")
+
+        examples_similarity = timing_details.get("examples_similarity")
+        if isinstance(examples_similarity, (int, float)):
+            st.caption(f"Similarità esempio selezionato: {examples_similarity:.3f}")
+
+        if slow:
+            st.warning(slow.get("message", "Query interrotta per eccessiva durata."))
+
+
+def show_feedback_form(
+    user_question: Optional[str],
+    answer: Optional[str],
+    query: Optional[str],
+    timing_details: Optional[Dict[str, Any]],
+    key: str,
+) -> None:
+    """Mostra il form di feedback collegato al nuovo endpoint backend."""
+
+    if not FEEDBACK_URL:
+        return
+
+    user_question = user_question or ""
+    submitted_keys = set(st.session_state.submitted_feedback)
+    already_sent = key in submitted_keys
+
+    labels = {
+        "corretta": "✅ Corretta",
+        "incompleta": "⚠️ Incompleta",
+        "fuori_fuoco": "🎯 Fuori fuoco",
+        "troppo_formale": "🗣️ Tonalità da rivedere",
+        "troppo_lunga": "📏 Troppo lunga",
+    }
+
+    with st.expander("🗳️ Feedback", expanded=False):
+        with st.form(key=f"feedback_form_{key}"):
+            category = st.selectbox(
+                "Valutazione",
+                options=list(labels.keys()),
+                format_func=lambda c: labels.get(c, c),
+                disabled=already_sent,
+            )
+            notes = st.text_area(
+                "Note (opzionali)",
+                disabled=already_sent,
+                placeholder="Spiega cosa dovremmo migliorare oppure conferma che va bene.",
+            )
+            submitted = st.form_submit_button(
+                "Invia feedback",
+                disabled=already_sent,
+                use_container_width=True,
+            )
+
+            if submitted:
+                payload = {
+                    "user_id": st.session_state.user_id,
+                    "question": user_question,
+                    "category": category,
+                    "notes": notes or None,
+                    "answer": answer,
+                    "query_generated": query,
+                    "metadata": {"timing_details": timing_details},
+                }
+                try:
+                    resp = requests.post(FEEDBACK_URL, json=payload, timeout=10)
+                    if resp.status_code == 200:
+                        st.success("Feedback registrato, grazie!")
+                        st.session_state.submitted_feedback.append(key)
+                    else:
+                        st.error(
+                            f"Errore durante l'invio del feedback ({resp.status_code})."
+                        )
+                except Exception as exc:
+                    st.error(f"Impossibile inviare il feedback: {exc}")
+
+        if already_sent:
+            st.caption("Feedback già inviato per questa risposta.")
+
+
+def load_slow_query_log(limit: int = 25) -> List[Dict[str, Any]]:
+    """Carica gli ultimi slow query log dal file JSONL."""
+
+    if not SLOW_QUERY_LOG_PATH.exists():
+        return []
+    entries: List[Dict[str, Any]] = []
+    try:
+        lines = SLOW_QUERY_LOG_PATH.read_text(encoding="utf-8").splitlines()
+        for line in lines[-limit:]:
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    except Exception as exc:
+        logger.warning(f"Impossibile leggere slow query log: {exc}")
+    return entries
+
+
 # --- FUNZIONE PRINCIPALE PER PROCESSARE QUERY ---
 def process_query(prompt):
     """Processa una query e gestisce la risposta dall'API."""
@@ -1218,6 +1370,7 @@ def process_query(prompt):
                 success = data.get("success", False)
                 timing_details = data.get("timing_details", {})
                 graph_origin = timing_details.get("graph_origin")
+                message_id = str(uuid.uuid4())
 
                 # Aggiorna statistiche
                 if success:
@@ -1225,6 +1378,9 @@ def process_query(prompt):
 
                 # Mostra la risposta
                 message_placeholder.markdown(risposta_ai)
+                slow_meta = timing_details.get("slow_query")
+                if slow_meta and isinstance(slow_meta, dict):
+                    st.warning(slow_meta.get("message", "Query interrotta per eccessiva durata."))
 
                 # Crea il messaggio da salvare
                 assistant_message = {
@@ -1240,6 +1396,12 @@ def process_query(prompt):
                     "success": success,
                     "timestamp": datetime.now().isoformat(),
                     "timing_details": timing_details,
+                    "message_id": message_id,
+                    "metadata": {
+                        "slow_query": slow_meta,
+                        "query_complexity": timing_details.get("query_complexity"),
+                        "safe_rewrite": timing_details.get("safe_rewrite"),
+                    },
                 }
 
                 # Mostra query Cypher se presente e richiesto
@@ -1262,6 +1424,9 @@ def process_query(prompt):
                         "timestamp": assistant_message["timestamp"],
                         "graph_origin": timing_details.get("graph_origin"),
                         "examples_used": data.get("examples_used"),
+                        "complexity": timing_details.get("query_complexity"),
+                        "safe_rewrite": timing_details.get("safe_rewrite"),
+                        "execution_attempts": timing_details.get("execution_attempts"),
                     }
                     with st.expander(" Debug Info"):
                         st.json(debug_info)
@@ -1309,6 +1474,18 @@ def process_query(prompt):
                 # Warning se nessun dato
                 if not success or "Non ho trovato" in risposta_ai:
                     st.warning(" Nessun dato trovato. Prova a riformulare la domanda.")
+
+                render_execution_details_ui(
+                    timing_details, label="Dettagli esecuzione (risposta corrente)"
+                )
+
+                show_feedback_form(
+                    user_question=prompt,
+                    answer=risposta_ai,
+                    query=query_generata,
+                    timing_details=timing_details,
+                    key=message_id,
+                )
 
                 # Salva il messaggio
                 st.session_state.messages.append(assistant_message)
@@ -1535,14 +1712,28 @@ if is_debug_mode:
             with col2:
                 st.metric("Successo", f"{success_rate:.0f}%")
 
-            st.metric("Messaggi", len(st.session_state.messages))
+        st.metric("Messaggi", len(st.session_state.messages))
 
-            start_time = datetime.fromisoformat(
-                st.session_state.conversation_stats["start_time"]
-            )
-            duration = datetime.now() - start_time
-            minutes = int(duration.total_seconds() / 60)
-            st.caption(f"⏱️ Sessione: {minutes} minuti")
+        start_time = datetime.fromisoformat(
+            st.session_state.conversation_stats["start_time"]
+        )
+        duration = datetime.now() - start_time
+        minutes = int(duration.total_seconds() / 60)
+        st.caption(f"⏱️ Sessione: {minutes} minuti")
+
+        with st.expander("📈 Slow query log"):
+            entries = load_slow_query_log()
+            if entries:
+                df_log = pd.DataFrame(entries)
+                if "query_originale" in df_log.columns:
+                    df_log["query_originale"] = df_log["query_originale"].apply(
+                        lambda q: (q[:200] + "…")
+                        if isinstance(q, str) and len(q) > 220
+                        else q
+                    )
+                st.dataframe(df_log, use_container_width=True)
+            else:
+                st.caption("Nessuna query lenta registrata al momento.")
 
         st.markdown("---")
 
@@ -1644,6 +1835,12 @@ for i, message in enumerate(st.session_state.messages):
                 "has_query": bool(message.get("query")),
                 "has_context": bool(message.get("context")),
                 "timestamp": message.get("timestamp", "N/A"),
+                "complexity": (message.get("timing_details") or {}).get(
+                    "query_complexity"
+                ),
+                "safe_rewrite": (message.get("timing_details") or {}).get(
+                    "safe_rewrite"
+                ),
             }
             with st.expander("🔍 Debug Info"):
                 st.json(debug_data)
@@ -1676,6 +1873,25 @@ for i, message in enumerate(st.session_state.messages):
                     st.info("La query non ha restituito nodi Neo4j da visualizzare.")
                 else:
                     st.info("Nessun grafo disponibile per questa risposta.")
+
+        if message["role"] == "assistant":
+            render_execution_details_ui(
+                message.get("timing_details"),
+                label=f"Dettagli esecuzione • risposta #{i + 1}",
+            )
+            prev_question = None
+            if i > 0:
+                previous = st.session_state.messages[i - 1]
+                if previous.get("role") == "user":
+                    prev_question = previous.get("content")
+            feedback_key = message.get("message_id") or f"history_{i}"
+            show_feedback_form(
+                user_question=prev_question,
+                answer=message.get("content"),
+                query=message.get("query"),
+                timing_details=message.get("timing_details"),
+                key=feedback_key,
+            )
 
 # Gestione query pendenti (da bottoni)
 if "pending_query" in st.session_state:
