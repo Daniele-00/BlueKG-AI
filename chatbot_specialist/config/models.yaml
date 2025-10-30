@@ -1,10 +1,10 @@
 agent_models:
-  coder: gpt-4o-mini
-  contextualizer: gpt-4o-mini
-  general_conversation: gpt-4o-mini
-  router: gpt-4o-mini
-  synthesizer: gpt-4o-mini
-  translator: gpt-4o-mini
+  coder: llama3
+  contextualizer: llama3
+  general_conversation: llama3
+  router: llama3
+  synthesizer: llama3
+  translator: llama3
 available_models:
   gemini-2.5-flash:
     description: Google Gemini 2.5 Flash - 1M token context

@@ -1213,12 +1213,12 @@ def render_execution_details_ui(
             df_attempts = pd.DataFrame(attempts)
             if "query" in df_attempts.columns:
                 df_attempts["query"] = df_attempts["query"].apply(
-                    lambda q: (q[:180] + "…")
-                    if isinstance(q, str) and len(q) > 200
-                    else q
+                    lambda q: (
+                        (q[:180] + "…") if isinstance(q, str) and len(q) > 200 else q
+                    )
                 )
             st.markdown("**Tentativi di esecuzione**")
-            st.dataframe(df_attempts, use_container_width=True)
+            st.dataframe(df_attempts, width="stretch")
 
         semantic_iters = timing_details.get("semantic_expansion_iterations")
         if semantic_iters:
@@ -1272,7 +1272,7 @@ def show_feedback_form(
             submitted = st.form_submit_button(
                 "Invia feedback",
                 disabled=already_sent,
-                use_container_width=True,
+                width="stretch",
             )
 
             if submitted:
@@ -1380,7 +1380,11 @@ def process_query(prompt):
                 message_placeholder.markdown(risposta_ai)
                 slow_meta = timing_details.get("slow_query")
                 if slow_meta and isinstance(slow_meta, dict):
-                    st.warning(slow_meta.get("message", "Query interrotta per eccessiva durata."))
+                    st.warning(
+                        slow_meta.get(
+                            "message", "Query interrotta per eccessiva durata."
+                        )
+                    )
 
                 # Crea il messaggio da salvare
                 assistant_message = {
@@ -1727,9 +1731,11 @@ if is_debug_mode:
                 df_log = pd.DataFrame(entries)
                 if "query_originale" in df_log.columns:
                     df_log["query_originale"] = df_log["query_originale"].apply(
-                        lambda q: (q[:200] + "…")
-                        if isinstance(q, str) and len(q) > 220
-                        else q
+                        lambda q: (
+                            (q[:200] + "…")
+                            if isinstance(q, str) and len(q) > 220
+                            else q
+                        )
                     )
                 st.dataframe(df_log, use_container_width=True)
             else:

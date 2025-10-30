@@ -333,11 +333,11 @@ CYPHER_WRITE_BLOCKLIST = [
 ]
 QUERY_SAFETY_CFG = config.system.get("query_safety", {}) or {}
 QUERY_RISKY_TIMEOUT = float(QUERY_SAFETY_CFG.get("risky_timeout_seconds", 12) or 12)
-QUERY_CRITICAL_TIMEOUT = float(
-    QUERY_SAFETY_CFG.get("critical_timeout_seconds", 8) or 8
-)
+QUERY_CRITICAL_TIMEOUT = float(QUERY_SAFETY_CFG.get("critical_timeout_seconds", 8) or 8)
 SAFE_REWRITE_LIMIT = int(QUERY_SAFETY_CFG.get("safe_rewrite_limit", 200) or 200)
-SLOW_QUERY_LOG_PATH = QUERY_SAFETY_CFG.get("slow_query_log", "diagnostics/slow_queries.log")
+SLOW_QUERY_LOG_PATH = QUERY_SAFETY_CFG.get(
+    "slow_query_log", "diagnostics/slow_queries.log"
+)
 
 FEEDBACK_CFG = config.system.get("feedback", {}) or {}
 FEEDBACK_ENABLED = bool(FEEDBACK_CFG.get("enabled", True))
@@ -358,6 +358,30 @@ ENTITY_STOPWORDS = {
     "chi",
     "cosa",
     "quanto",
+}
+CONTROL_FALLBACK_TOKENS = {
+    "ricerca",
+    "ricerche",
+    "ambito",
+    "ambiti",
+    "perimetro",
+    "perimetri",
+    "scope",
+    "analisi",
+    "questa",
+    "questo",
+    "questa",
+    "nuovo",
+    "nuova",
+    "tutti",
+    "tutte",
+    "la",
+    "il",
+    "lo",
+    "un",
+    "una",
+    "gli",
+    "le",
 }
 
 _CYPHER_WRITE_PATTERNS: List[Tuple[str, Pattern[str]]] = []
@@ -406,6 +430,36 @@ def _contains_dangerous_intent(question: str) -> bool:
     return False
 
 
+def _is_pure_rejection_reply(text: str) -> bool:
+    """Riconosce risposte di controllo che indicano solo di cambiare ambito."""
+
+    if not text:
+        return True
+
+    lowered = text.strip().lower()
+    if not lowered:
+        return True
+
+    if len(lowered) > 80:
+        return False
+
+    tokens = re.findall(r"\w+", lowered)
+    if not tokens:
+        return True
+
+    meaningful = []
+    for token in tokens:
+        if token in REJECTION_KEYWORDS:
+            continue
+        if token in CONTROL_FALLBACK_TOKENS:
+            continue
+        if len(token) <= 2:
+            continue
+        meaningful.append(token)
+
+    return len(meaningful) == 0
+
+
 def _sanitize_entity_value(value: Optional[str]) -> Optional[str]:
     """Normalizza e filtra valori poco significativi usati come anchor."""
 
@@ -452,7 +506,9 @@ def _classify_query_complexity(query: Optional[str]) -> Tuple[str, List[str]]:
     reasons: List[str] = []
 
     # Pattern negati
-    if re.search(r"where\s+not\s*\(\s*[a-z][a-z0-9_]*\s*-\s*\[", lowered, re.IGNORECASE):
+    if re.search(
+        r"where\s+not\s*\(\s*[a-z][a-z0-9_]*\s*-\s*\[", lowered, re.IGNORECASE
+    ):
         reasons.append("negated_path")
 
     # MATCH senza label
@@ -490,7 +546,9 @@ def _classify_query_complexity(query: Optional[str]) -> Tuple[str, List[str]]:
     return level, sorted(set(reasons))
 
 
-def _rewrite_query_safe(query: str, reasons: List[str]) -> Tuple[Optional[str], List[str]]:
+def _rewrite_query_safe(
+    query: str, reasons: List[str]
+) -> Tuple[Optional[str], List[str]]:
     """Prova a riscrivere la query in modo più sicuro. Restituisce (nuova_query, note)."""
 
     rewritten = query
@@ -1200,22 +1258,11 @@ class ConversationMessage(BaseModel):
     meta: Dict[str, Any] = Field(default_factory=dict)
 
 
-class PendingMemoryConfirmation(BaseModel):
-    status: Literal["awaiting_user", "resolved"]
-    original_question: str
-    prompt: str
-    reason: str = "ambiguous_followup"
-    entity_label: Optional[str] = None
-    entity_value: Optional[str] = None
-    created_at: datetime
-
-
 class ConversationSession(BaseModel):
     user_id: str
     messages: List[ConversationMessage] = []
     created_at: datetime
     last_activity: datetime
-    pending_confirmation: Optional[PendingMemoryConfirmation] = None
 
 
 class FeedbackPayload(BaseModel):
@@ -1346,139 +1393,6 @@ def _collect_entities_from_context(context: List[Dict]) -> Dict[str, set]:
     return buckets
 
 
-def _extract_recent_scope_anchor(
-    session: ConversationSession,
-) -> Optional[Tuple[str, str]]:
-    """Recupera l'ultima entità esplicita utile per chiarire lo scope."""
-
-    if not session or not session.messages:
-        return None
-
-    history = session.messages[-MAX_HISTORY_FOR_CONTEXTUALIZER:]
-    for message in reversed(history):
-        explicit = _extract_explicit_identifiers(message.question)
-        for label in ("cliente", "ditta", "fornitore", "famiglia", "documento"):
-            values = explicit.get(label) or set()
-            if values:
-                ordered = sorted(values)
-                for candidate in ordered:
-                    clean = _sanitize_entity_value(candidate)
-                    if clean:
-                        return label, clean
-        entities = _collect_entities_from_context(message.context)
-        label_map = {
-            "clienti": "cliente",
-            "ditte": "ditta",
-            "fornitori": "fornitore",
-            "prodotti": "prodotto",
-            "famiglia": "famiglia",
-            "documenti": "documento",
-        }
-        for bucket in (
-            "clienti",
-            "ditte",
-            "fornitori",
-            "prodotti",
-            "famiglia",
-            "documenti",
-        ):
-            values = entities.get(bucket) or set()
-            if values:
-                label = label_map.get(bucket, bucket)
-                ordered = sorted(values)
-                for candidate in ordered:
-                    clean = _sanitize_entity_value(candidate)
-                    if clean:
-                        return label, clean
-    return None
-
-
-def _build_scope_confirmation_prompt(
-    question: str, entity_label: str, entity_value: str
-) -> str:
-    """Genera il messaggio di chiarimento quando lo scope non è chiaro."""
-
-    friendly_subject = {
-        "cliente": "sul cliente",
-        "ditta": "sulla ditta",
-        "fornitore": "sul fornitore",
-        "prodotto": "sul prodotto",
-        "famiglia": "sulla famiglia di prodotti",
-        "documento": "sul documento",
-    }.get(entity_label, "su quello che stavamo analizzando")
-
-    friendly_label = {
-        "cliente": "quel cliente",
-        "ditta": "quella ditta",
-        "fornitore": "quel fornitore",
-        "prodotto": "quel prodotto",
-        "famiglia": "quella famiglia di prodotti",
-        "documento": "quel documento",
-    }.get(entity_label, "lo stesso ambito")
-
-    subject_fragment = (
-        f"{friendly_subject} «{entity_value}»" if entity_value else friendly_subject
-    )
-
-    return (
-        f"L'ultima risposta era concentrata {subject_fragment}. "
-        f"Per la nuova domanda «{question}» vuoi che continui a parlare di {friendly_label} "
-        "oppure preferisci che allarghi la ricerca? "
-        'Scrivimi semplicemente "sì" o "stesso" per confermare, '
-        "altrimenti dammi qualche dettaglio sul nuovo ambito."
-    )
-
-
-def _register_scope_confirmation(question: str, session: ConversationSession) -> bool:
-    """Memorizza la richiesta di conferma se troviamo un'ancora recente."""
-
-    anchor = _extract_recent_scope_anchor(session)
-    if not anchor:
-        return False
-
-    entity_label, entity_value = anchor
-    prompt = _build_scope_confirmation_prompt(question, entity_label, entity_value)
-
-    session.pending_confirmation = PendingMemoryConfirmation(
-        status="awaiting_user",
-        original_question=question,
-        prompt=prompt,
-        entity_label=entity_label,
-        entity_value=entity_value,
-        created_at=datetime.now(),
-    )
-    logger.info(
-        "Memory routing: domanda corta senza riferimenti espliciti, richiesta conferma all'utente."
-    )
-    return True
-
-
-def _interpret_scope_confirmation_reply(
-    reply: str, pending: PendingMemoryConfirmation
-) -> Literal["confirm", "reject", "unsure"]:
-    """Prova a capire se la risposta dell'utente conferma o cambia lo scope."""
-
-    if not reply:
-        return "unsure"
-
-    lowered = reply.strip().lower()
-    tokens = re.findall(r"\w+", lowered)
-
-    if _contains_keyword(lowered, tokens, CONFIRMATION_KEYWORDS):
-        return "confirm"
-
-    if _contains_keyword(lowered, tokens, REJECTION_KEYWORDS):
-        return "reject"
-
-    if pending.entity_value and pending.entity_value.lower() in lowered:
-        return "confirm"
-
-    if "confermo" in lowered or "va bene" in lowered or "ok" in lowered:
-        return "confirm"
-
-    return "unsure"
-
-
 def _question_mentions_known_entities(
     question: str, session: ConversationSession
 ) -> bool:
@@ -1506,91 +1420,42 @@ def _question_mentions_known_entities(
 
 
 def _should_use_memory(question: str, session: ConversationSession) -> bool:
-    """Stabilisce se includere la cronologia per la domanda corrente."""
-    if not question or not session.messages:
+    """
+    Stabilisce se includere la cronologia. Versione "intelligente" (pulita).
+    Si fida del Contextualizer per capire i follow-up.
+    """
+    if not question:
         return False
 
-    pending = session.pending_confirmation
-    if (
-        pending
-        and pending.status == "resolved"
-        and pending.original_question == question
-    ):
-        logger.info("Memory routing: riutilizzo memoria confermato dall'utente.")
-        session.pending_confirmation = None
-        return True
+    # 1. CONTROLLO "SMALL TALK" (Fix per "Grazie mille")
+    if _is_small_talk(question):
+        logger.info("Memory routing: Rilevato small talk. Nessuna memoria usata.")
+        return False
 
+    # 2. CONTROLLO "PRIMA DOMANDA"
+    if not session.messages:
+        logger.info("Memory routing: Prima domanda, nessuna memoria usata.")
+        return False
+
+    # 3. CONTROLLO "RESET ESPLICITO" (l'utente lo chiede)
     lowered = question.strip().lower()
-    if not lowered:
-        return False
-
     tokens = re.findall(r"\w+", lowered)
-
-    if any(keyword in lowered for keyword in EXPLICIT_RESET_KEYWORDS):
-        # Reset esplicito: svuota la sessione per evitare carry-over indesiderato.
-        session.messages = []
-        logger.info("Reset esplicito richiesto dall'utente: cronologia azzerata.")
+    if _contains_keyword(lowered, tokens, EXPLICIT_RESET_KEYWORDS):
+        logger.info("Memory reset: Rilevato reset esplicito.")
+        session.messages = []  # Svuota la memoria
         return False
 
-    if _should_reset_scope(question):
+    # 4. CONTROLLO "RESET STRUTTURALE" (Fix per "Lombardia")
+    if _should_reset_scope(question):  # Chiama la funzione "intelligente"
+        logger.info("Memory reset: Rilevata domanda autosufficiente.")
         return False
 
-    last_message = session.messages[-1]
-    if RECENCY_WINDOW and datetime.now() - last_message.timestamp > RECENCY_WINDOW:
-        logger.info("Memory routing: sessione inattiva oltre la finestra configurata.")
-        return False
-
-    first_token = tokens[0] if tokens else ""
-    if PRONOUN_STARTS and any(first_token == prefix for prefix in PRONOUN_STARTS):
-        return True
-
-    if _contains_keyword(lowered, tokens, CONFIRMATION_KEYWORDS):
-        logger.info(
-            "Memory routing: conferma implicita rilevata, riuso della cronologia."
-        )
-        return True
-
-    if _question_mentions_known_entities(lowered, session):
-        return True
-
-    if _contains_keyword(lowered, tokens, REJECTION_KEYWORDS):
-        logger.info(
-            "Memory routing: risposta esplicita di cambio ambito, cronologia ignorata."
-        )
-        return False
-
-    if _contains_keyword(lowered, tokens, FOLLOW_UP_KEYWORDS):
-        return True
-
-    if SHORT_QUESTION_TOKEN_THRESHOLD and len(tokens) <= SHORT_QUESTION_TOKEN_THRESHOLD:
-        if _register_scope_confirmation(question, session):
-            return False
-        logger.info(
-            "Memory routing: domanda corta senza riferimenti espliciti, cronologia non riutilizzata."
-        )
-        return False
-
-    if RECENCY_WINDOW and len(tokens) <= max(SHORT_QUESTION_TOKEN_THRESHOLD * 2, 12):
-        if _register_scope_confirmation(question, session):
-            return False
-        logger.info(
-            "Memory routing: domanda recente ma senza riferimenti, trattata come nuovo argomento."
-        )
-        return False
-
-    similarity = _max_embedding_similarity(lowered, session)
-    if similarity is not None:
-        if similarity >= EMBEDDING_THRESHOLD:
-            logger.info(
-                f"Memory routing: similarità embedding {similarity:.2f} ≥ soglia {EMBEDDING_THRESHOLD:.2f}."
-            )
-            return True
-        logger.info(
-            f"Memory routing: similarità embedding {similarity:.2f} < soglia {EMBEDDING_THRESHOLD:.2f}."
-        )
-        return False
-
-    return False
+    # Se non è niente di tutto ciò, È UN FOLLOW-UP.
+    # Passiamo la palla al Contextualizer per decidere COME usarla.
+    logger.info(
+        "Memory routing: Domanda non-reset, passo al Contextualizer con cronologia."
+    )
+    return True
 
 
 def _max_embedding_similarity(
@@ -1715,13 +1580,48 @@ def _extract_explicit_identifiers(text: str) -> Dict[str, set]:
 
 
 def _should_reset_scope(question: str) -> bool:
-    """Determina se la nuova domanda richiede di ignorare lo scope precedente."""
+    """
+    Determina se la nuova domanda richiede di ignorare lo scope precedente.
+    """
 
     if not question:
         return False
 
-    lowered = question.lower()
-    return any(keyword in lowered for keyword in SCOPE_RESET_KEYWORDS)
+    lowered = question.lower().strip()
+    tokens = set(re.findall(r"\w+", lowered))
+
+    # 1. Controllo keyword esplicite da config (es. "nuova ricerca")
+    if _contains_keyword(lowered, list(tokens), EXPLICIT_RESET_KEYWORDS):
+        logger.info("Memory reset: Rilevata keyword di reset esplicito.")
+        return True
+
+    # 2. Controllo keyword generiche da config (es. "statistiche")
+    if _contains_keyword(lowered, list(tokens), SCOPE_RESET_KEYWORDS):
+        logger.info("Memory reset: Rilevata keyword di reset generico.")
+        return True
+
+    # 3. Controllo STRUTTURALE (La vera soluzione)
+    #    Se la domanda è una NUOVA interrogativa autosufficiente, resetta.
+    interrogative_list = MEMORY_CFG.get("INTERROGATIVE_START")
+    dominio_list = MEMORY_CFG.get("DOMINIO_KEYWORDS")
+    dominio_set = set(dominio_list) if dominio_list else set()
+    # Controlla se esiste e convertila in TUPLA
+    if interrogative_list and lowered.startswith(tuple(interrogative_list)):
+        # a) Contiene parole chiave del DOMINIO (es. "Qual è il fatturato...")
+        if dominio_set.intersection(tokens):
+            logger.info("Memory reset: Rilevata domanda 'Wh-' con keyword di dominio.")
+            return True
+
+        # b) Contiene un NOME PROPRIO (euristica generale per nomi di persone/aziende)
+        original_tokens = re.findall(r"\w+", question)
+        if len(original_tokens) > 1:
+            if any(t[0].isupper() for t in original_tokens[1:]):
+                logger.info(
+                    "Memory reset: Rilevata domanda 'Wh-' con probabile Nome Proprio."
+                )
+                return True
+
+    return False
 
 
 def _scope_summary_for_synth(original: str, contextualized: str) -> str:
@@ -1781,9 +1681,10 @@ def get_conversation_context(
 
     if incoming_question and not _should_use_memory(incoming_question, session):
         logger.info(
-            "Memory routing: domanda trattata come nuovo argomento, cronologia esclusa."
+            "Memory routing: _should_use_memory ha dato False. Cronologia esclusa."
         )
         return ""
+    # --- FINE MODIFICA ---
 
     history_slice = session.messages[-MAX_HISTORY_FOR_CONTEXTUALIZER:]
     context_lines: List[str] = ["CONVERSAZIONE PRECEDENTE (più recente per primo):"]
@@ -2675,9 +2576,7 @@ def _reconstruct_graph_from_query(query: str) -> Dict[str, List[Dict[str, Any]]]
         removed_vars: List[str] = []
 
         while attempt_vars:
-            graph_query = (
-                f"{prefix_with_all_vars}\nRETURN DISTINCT {', '.join(attempt_vars)} LIMIT 10"
-            )
+            graph_query = f"{prefix_with_all_vars}\nRETURN DISTINCT {', '.join(attempt_vars)} LIMIT 10"
 
             logger.info(f"Query ricostruita:\n{graph_query}")
             try:
@@ -2996,6 +2895,7 @@ async def ask_question(user_question: UserQuestionWithSession):
     user_id = user_question.user_id or "default_user"
     user_input_text = user_question.question.strip()
     effective_question_text = user_input_text
+    scope_reset_flag = False
     requested_examples_top_k = (
         user_question.examples_top_k
         if user_question.examples_top_k and user_question.examples_top_k > 0
@@ -3006,65 +2906,60 @@ async def ask_question(user_question: UserQuestionWithSession):
     logger.info(f"📥 [{user_id}] Domanda: '{user_input_text}'")
 
     try:
-        ## == FASE 1: PRE-PROCESSING E GESTIONE MEMORIA
-        pending_confirmation = session.pending_confirmation
-        if (
-            pending_confirmation
-            and pending_confirmation.status == "awaiting_user"
-            and pending_confirmation.original_question != effective_question_text
-        ):
-            interpretation = _interpret_scope_confirmation_reply(
-                effective_question_text, pending_confirmation
+        ## == FASE 1: GESTIONE PRELIMINARE (SMALL TALK & PERICOLO)
+
+        # --- MODIFICA CHIAVE 1: GESTIONE SMALL TALK ANTICIPATA ---
+        # Intercettiamo "Grazie mille" ecc. SUBITO, prima di qualsiasi logica di memoria.
+        if _is_small_talk(effective_question_text):
+            logger.info("Small talk rilevato: rotta diretta a GENERAL_CONVERSATION.")
+            start_conv_time = time.perf_counter()
+
+            # Chiamiamo l'agente con la domanda ORIGINALE (es. "Grazie mille")
+            # e il prompt YAML che hai caricato (general_conversation_prompt.yaml)
+            conversation_reply = run_general_conversation_agent(effective_question_text)
+
+            timing_details["small_talk"] = True
+            timing_details["conversazione"] = time.perf_counter() - start_conv_time
+            timing_details["totale"] = time.perf_counter() - start_total_time
+
+            add_message_to_session(
+                user_id,
+                effective_question_text,
+                conversation_reply,
+                [],
+                "",
+                meta={"event": "general_conversation", "small_talk": True},
             )
-            if interpretation == "confirm":
-                effective_question_text = (
-                    f"{pending_confirmation.original_question} "
-                    f"(conferma utente: {user_input_text})"
+
+            response_payload = {
+                "domanda": effective_question_text,
+                "risposta": conversation_reply,
+                "specialist": "GENERAL_CONVERSATION",
+                "query_generata": None,
+                "context": [],
+                "graph_data": {},
+                "timing_details": timing_details,
+                "examples_top_k": None,
+                "examples_used": [],
+                "repair_audit": [],
+                "success": True,
+            }
+
+            # Salva in cache anche questa risposta di cortesia
+            if ENABLE_CACHE:
+                cache_key = _make_cache_key(
+                    user_id, effective_question_text, effective_question_text
                 )
-                pending_confirmation.status = "resolved"
-                pending_confirmation.original_question = effective_question_text
-                logger.info(
-                    "Memory routing: conferma esplicita ricevuta, riuso dello scope precedente autorizzato."
-                )
-            elif interpretation == "reject":
-                session.pending_confirmation = None
-            else:
-                clarification_prompt = (
-                    pending_confirmation.prompt
-                    + ' Non ho capito la tua risposta: scrivi "stesso perimetro" '
-                    "oppure descrivi il nuovo perimetro con qualche dettaglio."
-                )
-                add_message_to_session(
-                    user_id,
-                    effective_question_text,
-                    clarification_prompt,
-                    [],
-                    "",
-                    meta={
-                        "event": "confirmation_prompt_retry",
-                        "pending_reason": pending_confirmation.reason,
-                    },
-                )
-                total_time = time.perf_counter() - start_total_time
-                timing_details["memory_used"] = False
-                timing_details["preprocessing"] = 0.0
-                timing_details["totale"] = total_time
-                return {
-                    "domanda": effective_question_text,
-                    "query_generata": None,
-                    "risposta": clarification_prompt,
+                query_cache[cache_key] = {
+                    "response": copy.deepcopy(response_payload),
                     "context": [],
                     "graph_data": {},
-                    "timing_details": timing_details,
-                    "specialist": None,
+                    "query_generata": None,
+                    "specialist": "GENERAL_CONVERSATION",
                     "examples_top_k": None,
-                    "examples_used": [],
-                    "repair_audit": [],
-                    "success": False,
-                    "requires_user_confirmation": True,
                 }
-
-        is_small_talk = _is_small_talk(effective_question_text)
+            return response_payload
+        # --- FINE BLOCCO SMALL TALK ---
 
         if _contains_dangerous_intent(effective_question_text):
             session.pending_confirmation = None
@@ -3078,13 +2973,18 @@ async def ask_question(user_question: UserQuestionWithSession):
                 warning_message,
                 [],
                 "",
-                meta={"event": "dangerous_intent", "stage": "pre_translation"},
+                meta={
+                    "event": "dangerous_intent",
+                    "stage": "pre_translation",
+                    "scope_reset": scope_reset_flag,
+                },
             )
             timing_details["dangerous_intent"] = True
             timing_details["generazione_query"] = 0.0
             timing_details["esecuzione_db"] = 0.0
             timing_details["sintesi_risposta"] = 0.0
             timing_details["totale"] = time.perf_counter() - start_total_time
+            timing_details["scope_reset"] = scope_reset_flag
             return {
                 "domanda": effective_question_text,
                 "query_generata": None,
@@ -3105,44 +3005,6 @@ async def ask_question(user_question: UserQuestionWithSession):
         # 1a. Gestione Memoria: Il nuovo Contextualizer riscrive la domanda
         chat_history = get_conversation_context(user_id, effective_question_text)
         timing_details["memory_used"] = bool(chat_history)
-        pending_confirmation = session.pending_confirmation
-        if (
-            pending_confirmation
-            and pending_confirmation.status == "awaiting_user"
-            and pending_confirmation.original_question == effective_question_text
-        ):
-            clarification_prompt = pending_confirmation.prompt
-            add_message_to_session(
-                user_id,
-                effective_question_text,
-                clarification_prompt,
-                [],
-                "",
-                meta={
-                    "event": "confirmation_prompt",
-                    "pending_reason": pending_confirmation.reason
-                    if pending_confirmation
-                    else None,
-                },
-            )
-            preprocessing_time = time.perf_counter() - start_preprocessing_time
-            timing_details["preprocessing"] = preprocessing_time
-            timing_details["totale"] = time.perf_counter() - start_total_time
-            return {
-                "domanda": effective_question_text,
-                "query_generata": None,
-                "risposta": clarification_prompt,
-                "context": [],
-                "graph_data": {},
-                "timing_details": timing_details,
-                "specialist": None,
-                "examples_top_k": requested_examples_top_k,
-                "examples_used": [],
-                "repair_audit": [],
-                "success": False,
-                "requires_user_confirmation": True,
-            }
-
         question_text = run_contextualizer_agent(effective_question_text, chat_history)
         if question_text != effective_question_text:
             logger.info(f"Domanda riscritta dal Contestualizzatore: '{question_text}'")
@@ -3168,13 +3030,18 @@ async def ask_question(user_question: UserQuestionWithSession):
                 warning_message,
                 [],
                 "",
-                meta={"event": "dangerous_intent", "stage": "post_translation"},
+                meta={
+                    "event": "dangerous_intent",
+                    "stage": "post_translation",
+                    "scope_reset": scope_reset_flag,
+                },
             )
             timing_details["dangerous_intent"] = True
             timing_details["generazione_query"] = 0.0
             timing_details["esecuzione_db"] = 0.0
             timing_details["sintesi_risposta"] = 0.0
             timing_details["totale"] = time.perf_counter() - start_total_time
+            timing_details["scope_reset"] = scope_reset_flag
             return {
                 "domanda": effective_question_text,
                 "query_generata": None,
@@ -3233,7 +3100,11 @@ async def ask_question(user_question: UserQuestionWithSession):
                     cached_response.get("risposta", ""),
                     cached_context,
                     cached_entry.get("query_generata", ""),
-                    meta={"event": "cache_hit", "cache_key": cache_key},
+                    meta={
+                        "event": "cache_hit",
+                        "cache_key": cache_key,
+                        "scope_reset": scope_reset_flag,
+                    },
                 )
 
                 return {
@@ -3258,60 +3129,6 @@ async def ask_question(user_question: UserQuestionWithSession):
         specialist_route = run_specialist_router_agent(english_task)
         timing_details["routing"] = time.perf_counter() - start_route_time
         logger.info(f" Rotta decisa dallo Specialist Router: {specialist_route}")
-
-        if is_small_talk and specialist_route != "GENERAL_CONVERSATION":
-            logger.info(
-                "Small talk rilevato: forzo la rotta su GENERAL_CONVERSATION per evitare accessi al database."
-            )
-            specialist_route = "GENERAL_CONVERSATION"
-
-        if specialist_route == "GENERAL_CONVERSATION":
-            start_conv_time = time.perf_counter()
-            conversation_reply = run_general_conversation_agent(effective_question_text)
-            if is_small_talk:
-                timing_details["small_talk"] = True
-            timing_details["conversazione"] = time.perf_counter() - start_conv_time
-            timing_details["generazione_query"] = 0.0
-            timing_details["esecuzione_db"] = 0.0
-            timing_details["sintesi_risposta"] = 0.0
-            timing_details["totale"] = time.perf_counter() - start_total_time
-
-            add_message_to_session(
-                user_id,
-                effective_question_text,
-                conversation_reply,
-                [],
-                "",
-                meta={
-                    "event": "general_conversation",
-                    "small_talk": bool(is_small_talk),
-                },
-            )
-            response_payload = {
-                "domanda": effective_question_text,
-                "query_generata": None,
-                "risposta": conversation_reply,
-                "context": [],
-                "graph_data": {},
-                "timing_details": timing_details,
-                "specialist": specialist_route,
-                "examples_top_k": effective_examples_top_k,
-                "examples_used": [],
-                "repair_audit": [],
-                "success": True,
-            }
-            if ENABLE_CACHE and cache_key:
-                query_cache[cache_key] = {
-                    "response": copy.deepcopy(response_payload),
-                    "context": [],
-                    "graph_data": {},
-                    "query_generata": None,
-                    "specialist": specialist_route,
-                    "examples_top_k": response_payload["examples_top_k"],
-                }
-                logger.info("♻️ Cache STORE per conversazione generale")
-
-            return response_payload
 
         # 2b. Seleziona il prompt corretto dal dizionario degli specialisti
         coder_prompt_template = SPECIALIST_CODERS.get(
@@ -3366,13 +3183,15 @@ async def ask_question(user_question: UserQuestionWithSession):
         elif complexity_level == "risky":
             timeout_budget = min(timeout_budget, QUERY_RISKY_TIMEOUT)
         timing_details["query_timeout_seconds"] = timeout_budget
+        timing_details["scope_reset"] = scope_reset_flag
 
         query_meta: Dict[str, Any] = {
             "complexity": {
                 "level": complexity_level,
                 "reasons": complexity_reasons,
                 "timeout_seconds": timeout_budget,
-            }
+            },
+            "scope_reset": scope_reset_flag,
         }
 
         blocked_keyword = _detect_write_operation(generated_query)
@@ -3444,25 +3263,31 @@ async def ask_question(user_question: UserQuestionWithSession):
         slow_query_message: Optional[str] = None
 
         try:
-            final_query, context_completo, repair_audit = execute_query_with_iterative_improvement(
-                initial_query=generated_query,
-                english_task=english_task,
-                original_question_it=effective_question_text,
-                relevant_schema=relevant_schema,
-                retry_cfg=retry_cfg,
-                base_hints_text=base_hints_text,
-                recent_repairs=recent_repairs,
-                semantic_cfg=semantic_cfg,
-                semantic_examples=semantic_candidates,
-                contextualized_question=question_text,
-                execution_timeout=timeout_budget,
+            final_query, context_completo, repair_audit = (
+                execute_query_with_iterative_improvement(
+                    initial_query=generated_query,
+                    english_task=english_task,
+                    original_question_it=effective_question_text,
+                    relevant_schema=relevant_schema,
+                    retry_cfg=retry_cfg,
+                    base_hints_text=base_hints_text,
+                    recent_repairs=recent_repairs,
+                    semantic_cfg=semantic_cfg,
+                    semantic_examples=semantic_candidates,
+                    contextualized_question=question_text,
+                    execution_timeout=timeout_budget,
+                )
             )
             execution_attempts.append({"query": generated_query, "status": "success"})
             generated_query = final_query
         except QueryTimeoutError as timeout_exc:
             timing_details["initial_timeout"] = str(timeout_exc)
             execution_attempts.append(
-                {"query": generated_query, "status": "timeout", "message": str(timeout_exc)}
+                {
+                    "query": generated_query,
+                    "status": "timeout",
+                    "message": str(timeout_exc),
+                }
             )
             rewritten_query, rewrite_notes = _rewrite_query_safe(
                 generated_query, complexity_reasons
@@ -3475,18 +3300,20 @@ async def ask_question(user_question: UserQuestionWithSession):
                     "notes": rewrite_notes,
                 }
                 try:
-                    final_query, context_completo, repair_audit = execute_query_with_iterative_improvement(
-                        initial_query=rewritten_query,
-                        english_task=english_task,
-                        original_question_it=effective_question_text,
-                        relevant_schema=relevant_schema,
-                        retry_cfg=retry_cfg,
-                        base_hints_text=base_hints_text,
-                        recent_repairs=recent_repairs,
-                        semantic_cfg=semantic_cfg,
-                        semantic_examples=semantic_candidates,
-                        contextualized_question=question_text,
-                        execution_timeout=timeout_budget,
+                    final_query, context_completo, repair_audit = (
+                        execute_query_with_iterative_improvement(
+                            initial_query=rewritten_query,
+                            english_task=english_task,
+                            original_question_it=effective_question_text,
+                            relevant_schema=relevant_schema,
+                            retry_cfg=retry_cfg,
+                            base_hints_text=base_hints_text,
+                            recent_repairs=recent_repairs,
+                            semantic_cfg=semantic_cfg,
+                            semantic_examples=semantic_candidates,
+                            contextualized_question=question_text,
+                            execution_timeout=timeout_budget,
+                        )
                     )
                     execution_attempts.append(
                         {"query": rewritten_query, "status": "success"}
@@ -3511,7 +3338,11 @@ async def ask_question(user_question: UserQuestionWithSession):
                 )
         except UnsafeCypherError as unsafe_exc:
             execution_attempts.append(
-                {"query": generated_query, "status": "unsafe", "keyword": unsafe_exc.keyword}
+                {
+                    "query": generated_query,
+                    "status": "unsafe",
+                    "keyword": unsafe_exc.keyword,
+                }
             )
             logger.warning("Blocco esecuzione query: %s", unsafe_exc)
             timing_details["esecuzione_db"] = time.perf_counter() - start_db_time
@@ -3587,6 +3418,7 @@ async def ask_question(user_question: UserQuestionWithSession):
                         "level": complexity_level,
                         "reasons": complexity_reasons,
                     },
+                    "scope_reset": scope_reset_flag,
                 }
             )
             add_message_to_session(
@@ -3678,6 +3510,7 @@ async def ask_question(user_question: UserQuestionWithSession):
             **query_meta,
             "execution_attempts": execution_attempts,
             "graph_origin": graph_origin,
+            "specialist": specialist_route,
         }
 
         add_message_to_session(
@@ -3810,7 +3643,9 @@ async def submit_feedback(payload: FeedbackPayload):
         "metadata": payload.metadata,
     }
     _store_feedback_entry(entry)
-    logger.info("Feedback registrato per utente %s (categoria=%s)", payload.user_id, category)
+    logger.info(
+        "Feedback registrato per utente %s (categoria=%s)", payload.user_id, category
+    )
     return {"status": "ok", "stored": True}
 
 

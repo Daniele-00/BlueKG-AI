@@ -1,20 +1,68 @@
-# Contextualizer (Llama3 variant)
----
 content: |
-  Rewrite the follow-up question as a complete standalone question using the last chat message.
-  - If the last answer lists entities (e.g., LISTA_CLIENTI), explicitly include them if referenced.
-  - Preserve explicit identifiers quoted in the new question (es. "ditta '2'", "cliente 45").
-  - If the new question asks for a "general" view or contradicts previous filters, drop those filters even without explicit hints.
-  - If the scope hint equals RESET_SCOPE, treat it as a request to ignore previous scope unless the question reintroduces constraints.
-  - Return ONLY the final standalone question.
+  Sei un assistente che riscrive le domande per renderle complete.
+  - Il tuo compito è creare una 'Domanda Autonoma' partendo da una 'Nuova Domanda'.
+  - Usa la 'Cronologia Chat' per capire il contesto (il "significato") se la 'Nuova Domanda' è un frammento (es. "e per ditta?", "quanti ne ha?").
+  - Se la 'Nuova Domanda' è già una domanda completa e autosufficiente (es. "Quale fatturato ha la Ditta '1'?"), ignorala e restituiscila così com'è.
+  - Restituisci SOLO la domanda, nient'altro.
 
-  Chat History (last message):
+  ---
+  ESEMPIO 1
+  Cronologia Chat:
+  Domanda: Mostrami 5 clienti a Roma
+  Risposta: Ecco i 5 clienti...
+  Nuova Domanda:
+  e per ditta?
+  Domanda Autonoma:
+  Mostrami 5 ditte a Roma
+
+  ---
+  ESEMPIO 2
+  Cronologia Chat:
+  Domanda: Qual è il fatturato totale della ditta '1'?
+  Risposta: Il fatturato è 3.8M...
+  Nuova Domanda:
+  Quanti clienti ha?
+  Domanda Autonoma:
+  Quanti clienti ha la ditta '1'?
+
+  ---
+  ESEMPIO 3
+  Cronologia Chat:
+  Domanda: Mostrami 5 clienti a Roma
+  Risposta: Ecco i 5 clienti...
+  Nuova Domanda:
+  Qual è il fatturato totale in Lombardia?
+  Domanda Autonoma:
+  Qual è il fatturato totale in Lombardia?
+  
+  ---
+  ESEMPIO 4
+  Cronologia Chat:
+  Domanda: ...parlando di L'Abbondanza...
+  Risposta: ...
+  Nuova Domanda:
+  Quanti documenti ha emesso Ferrini?
+  Domanda Autonoma:
+  Quanti documenti ha emesso Ferrini?
+
+  ---
+  ESEMPIO 5
+  Cronologia Chat:
+  Domanda: Quanti clienti ha la ditta '1'?
+  Risposta: Ha 1911 clienti...
+  Nuova Domanda:
+  Perfetto grazie mille
+  Domanda Autonoma:
+  Perfetto grazie mille
+  ---
+
+  Cronologia Chat (last message):
   {chat_history}
 
-  New Question:
+  Nuova Domanda:
   {question}
 
   Scope Hint (may be empty):
   {scope_hint}
 
-  Standalone Question:
+  Domanda Autonoma:
