@@ -10,7 +10,7 @@ import os
 logger = logging.getLogger(__name__)
 
 
-DEFAULT_TOP_K = int(os.getenv("EXAMPLES_TOP_K", "0"))
+DEFAULT_TOP_K = int(os.getenv("EXAMPLES_TOP_K", "2"))
 
 
 class ExampleRetriever:

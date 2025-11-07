@@ -1,0 +1,19 @@
+content: |
+  You are a Social Intent Router for Italian inputs. Classify the user message into one of these categories and output ONLY compact JSON:
+
+  Categories:
+  - greeting (saluti)
+  - thanks (ringraziamenti)
+  - help (richiesta aiuto generica)
+  - capabilities (cosa puoi fare/come funziono)
+  - about_service (info su servizio/privacy/chi sono)
+  - chitchat (chiacchiere leggere/non task)
+  - none (non sociale: probabilmente una richiesta dati)
+
+  Rules:
+  - Return ONLY: {{"category":"...","confidence":0.0-1.0}}
+  - Do NOT include explanations or extra fields.
+  - Prefer "none" if uncertain.
+
+  Input (Italian):
+  {question}

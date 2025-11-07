@@ -66,7 +66,7 @@ def build_config_label(result):
     """Ritorna etichetta con config e top-k."""
     top_k = result.get("examples_top_k") or result["summary"].get("examples_top_k")
     if top_k is None:
-        top_k = "default"
+        top_k = "0"
     return f"{result['config']}\n(k={top_k})"
 
 

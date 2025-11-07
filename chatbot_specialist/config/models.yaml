@@ -1,10 +1,13 @@
 agent_models:
-  coder: llama3
-  contextualizer: llama3
-  general_conversation: llama3
-  router: llama3
-  synthesizer: llama3
-  translator: llama3
+  coder: gemini-2.5-flash
+  contextualizer: gemini-2.5-flash
+  general_conversation: gemini-2.5-flash
+  router: gemini-2.5-flash
+  entity_extractor: gemini-2.5-flash
+  synthesizer: gemini-2.5-flash
+  translator: gemini-2.5-flash
+  social_router: gemini-2.5-flash
+  social_conversation: gemini-2.5-flash
 available_models:
   gemini-2.5-flash:
     description: Google Gemini 2.5 Flash - 1M token context

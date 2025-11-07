@@ -198,3 +198,7 @@ feedback:
     - fuori_fuoco
     - troppo_formale
     - troppo_lunga
+
+social_router:
+  enabled: true
+  confidence_threshold: 0.7

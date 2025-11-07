@@ -904,6 +904,8 @@ CREATE FULLTEXT INDEX fornitori_fuzzy FOR (gf:GruppoFornitore) ON EACH [gf.ragio
 CREATE FULLTEXT INDEX articoli_fuzzy FOR (a:Articolo) ON EACH [a.descrizione];
 CREATE FULLTEXT INDEX doctype_fuzzy FOR (dt:DocType) ON EACH [dt.name];
 CREATE FULLTEXT INDEX luoghi_fuzzy FOR (l:Luogo) ON EACH [l.localita];
+CREATE FULLTEXT INDEX famiglie_fuzzy FOR (f:Famiglia) ON EACH [f.nome]
+CREATE FULLTEXT INDEX sottofamiglie_fuzzy FOR (sf:Sottofamiglia) ON EACH [sf.nome]
 """
 
 

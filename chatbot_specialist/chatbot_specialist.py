@@ -243,10 +243,13 @@ MODELLI_STRATIFICATI = {
     for agent in [
         "contextualizer",
         "router",
+        "social_router",
+        "entity_extractor",
         "coder",
         "synthesizer",
         "translator",
         "general_conversation",
+        "social_conversation",
     ]
 }
 
@@ -347,42 +350,55 @@ FEEDBACK_STORAGE_PATH = FEEDBACK_CFG.get(
 FEEDBACK_ALLOWED_CATEGORIES = set(
     _normalize_keyword_list(FEEDBACK_CFG.get("categories"))
 ) or {"corretta", "incompleta", "fuori_fuoco", "troppo_formale", "troppo_lunga"}
-ENTITY_STOPWORDS = {
-    "con",
-    "piu",
-    "più",
-    "piu'",
-    "cliente",
-    "qual",
-    "quale",
-    "chi",
-    "cosa",
-    "quanto",
-}
-CONTROL_FALLBACK_TOKENS = {
-    "ricerca",
-    "ricerche",
-    "ambito",
-    "ambiti",
-    "perimetro",
-    "perimetri",
-    "scope",
-    "analisi",
-    "questa",
-    "questo",
-    "questa",
-    "nuovo",
-    "nuova",
-    "tutti",
-    "tutte",
-    "la",
-    "il",
-    "lo",
-    "un",
-    "una",
-    "gli",
-    "le",
-}
+
+
+class AmbiguousEntityError(Exception):
+    """Eccezione per quando un nome è ambiguo (es. 'Rossi' è Cliente E Fornitore)."""
+
+    def __init__(self, text: str, options: List[Dict[str, Any]]):  # <<< MODIFICA QUI
+        self.text = text
+        self.options = options  # Ora è List[Dict], es: [{"name": "Ferrini", "label": "Cliente"}, ...]
+        options_str = [
+            f"{opt['name']} ({opt['label']})" for opt in options
+        ]  # <<< MODIFICA QUI
+        super().__init__(f"Ambiguità per '{text}': {options_str}")
+
+
+class NoEntityFoundError(Exception):
+    """Eccezione per quando un nome non si trova nel DB (nemmeno con fuzzy)."""
+
+    def __init__(self, text):
+        self.text = text
+        super().__init__(f"Entità non trovata: '{text}'")
+
+
+def _escape_lucene_query(text: str) -> str:
+    """
+    Prepara la query Lucene per l'indice fulltext:
+    - pulisce il testo
+    - fa escaping dei caratteri speciali
+    - aggiunge fuzzy (~2) per gestire piccoli errori di battitura
+    """
+    special_chars = r'[\+\-\&\|!\(\)\{\}\[\]\^"~\*\?:\\]'
+
+    # Normalizza un minimo il testo
+    cleaned = (text or "").strip().lower()
+    if not cleaned:
+        return ""
+
+    # Escaping Lucene
+    escaped_text = re.sub(special_chars, r"\\\g<0>", cleaned)
+
+    if not escaped_text:
+        return ""
+
+    # Se finisce già con wildcard *, non aggiungo fuzzy
+    if escaped_text.endswith("*"):
+        return escaped_text
+
+    # Fuzzy edit distance 2 (più permissivo di ~ solo)
+    return escaped_text + "~2"
+
 
 _CYPHER_WRITE_PATTERNS: List[Tuple[str, Pattern[str]]] = []
 for kw in CYPHER_WRITE_BLOCKLIST:
@@ -430,52 +446,6 @@ def _contains_dangerous_intent(question: str) -> bool:
     return False
 
 
-def _is_pure_rejection_reply(text: str) -> bool:
-    """Riconosce risposte di controllo che indicano solo di cambiare ambito."""
-
-    if not text:
-        return True
-
-    lowered = text.strip().lower()
-    if not lowered:
-        return True
-
-    if len(lowered) > 80:
-        return False
-
-    tokens = re.findall(r"\w+", lowered)
-    if not tokens:
-        return True
-
-    meaningful = []
-    for token in tokens:
-        if token in REJECTION_KEYWORDS:
-            continue
-        if token in CONTROL_FALLBACK_TOKENS:
-            continue
-        if len(token) <= 2:
-            continue
-        meaningful.append(token)
-
-    return len(meaningful) == 0
-
-
-def _sanitize_entity_value(value: Optional[str]) -> Optional[str]:
-    """Normalizza e filtra valori poco significativi usati come anchor."""
-
-    if value is None:
-        return None
-    raw = str(value).strip().strip("'\"")
-    if not raw:
-        return None
-    val = raw.lower()
-    if val in ENTITY_STOPWORDS:
-        return None
-    if len(val) < 3:
-        return None
-    return raw
-
-
 def _detect_write_operation(query: Optional[str]) -> Optional[str]:
     """Ritorna la keyword vietata trovata nella query, se presente."""
 
@@ -488,6 +458,7 @@ def _detect_write_operation(query: Optional[str]) -> Optional[str]:
     return None
 
 
+# Controllo pre-esecuzione di sicurezza
 def _ensure_read_only_query(query: str) -> None:
     """Solleva un'eccezione se la query contiene operazioni di scrittura."""
 
@@ -831,6 +802,7 @@ def _suggest_unnecessary_with_hints(cypher: str) -> str:
     return ""
 
 
+# Query Repair core logic
 def _compose_repair_task(original_question_it: str, english_task: str) -> str:
     """
     Prepara un blocco di testo che combina domanda originale e task inglese
@@ -870,6 +842,7 @@ def _error_matches_patterns(error_msg: str, patterns: List[str]) -> bool:
     return False
 
 
+# Query improvement / repair
 def _invoke_query_repair(
     *,
     english_task: str,
@@ -905,6 +878,7 @@ def _invoke_query_repair(
         return bad_query
 
 
+# Preflight guard
 def _apply_preflight_sql_guard(
     *,
     current_query: str,
@@ -1263,6 +1237,7 @@ class ConversationSession(BaseModel):
     messages: List[ConversationMessage] = []
     created_at: datetime
     last_activity: datetime
+    pending_confirmation: Optional[Dict[str, Any]] = None
 
 
 class FeedbackPayload(BaseModel):
@@ -1393,32 +1368,6 @@ def _collect_entities_from_context(context: List[Dict]) -> Dict[str, set]:
     return buckets
 
 
-def _question_mentions_known_entities(
-    question: str, session: ConversationSession
-) -> bool:
-    """Verifica se la domanda fa riferimento a entità note nelle interazioni precedenti."""
-    if not question or not session.messages:
-        return False
-
-    lowered_question = question.lower()
-    known_entities: set = set()
-    recent_messages = session.messages[-MAX_HISTORY_FOR_CONTEXTUALIZER:]
-    for message in recent_messages:
-        entities = _collect_entities_from_context(message.context)
-        for values in entities.values():
-            for val in values:
-                if not val:
-                    continue
-                known_entities.add(str(val).lower())
-        explicit = _extract_explicit_identifiers(message.question)
-        for values in explicit.values():
-            for val in values:
-                if not val:
-                    continue
-                known_entities.add(str(val).lower())
-    return any(entity and entity in lowered_question for entity in known_entities)
-
-
 def _should_use_memory(question: str, session: ConversationSession) -> bool:
     """
     Stabilisce se includere la cronologia. Versione "intelligente" (pulita).
@@ -1516,6 +1465,7 @@ def _format_semantic_examples_for_prompt(
     return "\n".join(lines)
 
 
+# Query expansion
 def _semantic_expansion_attempt(
     *,
     question_it: str,
@@ -1622,6 +1572,177 @@ def _should_reset_scope(question: str) -> bool:
                 return True
 
     return False
+
+
+RESOLVER_CFG = config.fuzzy.get("entity_resolver", {})
+ENTITY_DEFINITIONS = RESOLVER_CFG.get("entity_definitions", {})
+MIN_SCORE = RESOLVER_CFG.get("fuzzy_min_score", 0.65)
+MAX_RESULTS = RESOLVER_CFG.get("fuzzy_max_results", 3)
+DELTA_MIN = RESOLVER_CFG.get("ambiguity_delta", 0.08)
+
+
+def _resolve_entities_in_question(question: str) -> Tuple[str, dict]:
+    """
+    Funzione "Entity Resolver". Estrae entità dalla domanda e le verifica sul DB.
+    Restituisce: (domanda_pulita, mappa_hint)
+    Solleva AmbiguousEntityError o NoEntityFoundError se fallisce.
+    """
+
+    # 1. Estrai i nomi con l'LLM
+    nomi_da_cercare = run_entity_extractor_agent(question)
+
+    if not nomi_da_cercare:
+        # Nessuna entità riconosciuta: la domanda è generica, passo così com'è
+        return question, {}
+
+    logger.info(f"Entity Resolver: LLM ha estratto candidati {nomi_da_cercare}")
+    logger.warning(f"ENTITY_DEFINITIONS from config: {ENTITY_DEFINITIONS}")
+    logger.warning(
+        f"MIN_SCORE={MIN_SCORE}, MAX_RESULTS={MAX_RESULTS}, DELTA_MIN={DELTA_MIN}"
+    )
+
+    mappa_hint: dict = {}
+    domanda_pulita = question
+
+    for nome in nomi_da_cercare:
+        risultati: List[Dict[str, Any]] = []
+        logger.debug(f"[Resolver] Inizio risoluzione per nome: {nome!r}")
+
+        # 2. MATCH ESATTO (su tutte le entity_definitions)
+        union_parts: List[str] = []
+        for label, definition in ENTITY_DEFINITIONS.items():
+            prop = definition.get("property")
+            if not prop:
+                continue
+
+            union_parts.append(
+                f"""
+                MATCH (n:{label}) 
+                WHERE toLower(n.{prop}) = '{nome.lower()}'
+                RETURN n.{prop} AS name, '{label}' AS label, 10.0 AS score
+                """
+            )
+
+        if union_parts:
+            query_esatta = "\nUNION\n".join(union_parts)
+            logger.debug(f"[Resolver] Query esatta per {nome!r}:\n{query_esatta}")
+            try:
+                res_esatto = execute_cypher_with_timeout(query_esatta)
+                logger.debug(
+                    f"[Resolver] Risultati match esatto per {nome!r}: {res_esatto}"
+                )
+                risultati.extend(res_esatto)
+            except Exception as e:
+                logger.debug(f"[Resolver] Probe esatto fallito per '{nome}': {e}")
+
+        # 3. FUZZY FULLTEXT, se il match esatto non ha trovato nulla
+        if not risultati:
+            for label, definition in ENTITY_DEFINITIONS.items():
+                index_name = definition.get("index")
+                prop_name = definition.get("property")
+
+                # Se per quel label non c'è indice o proprietà, salto
+                if not index_name or not prop_name:
+                    continue
+
+                query_fuzzy = f"""
+                    CALL db.index.fulltext.queryNodes('{index_name}', '{_escape_lucene_query(nome)}') 
+                    YIELD node, score
+                    WHERE node:{label} AND score > {MIN_SCORE} 
+                    RETURN node.{prop_name} AS name, '{label}' AS label, score 
+                    ORDER BY score DESC LIMIT {MAX_RESULTS}
+                """
+
+                logger.debug(
+                    f"[Resolver] Query fuzzy per {nome!r} su label {label}, "
+                    f"index {index_name}:\n{query_fuzzy}"
+                )
+
+                try:
+                    res_fuzzy = execute_cypher_with_timeout(query_fuzzy)
+                    logger.debug(
+                        f"[Resolver] Risultati fuzzy per {nome!r} (label {label}): {res_fuzzy}"
+                    )
+                    risultati.extend(res_fuzzy)
+                except Exception as e:
+                    logger.warning(
+                        f"Errore su indice fuzzy {index_name} per '{nome}': {e}"
+                    )
+
+        # 3.bis FALLBACK LEVENSHTEIN su Cliente se ancora nulla
+        if not risultati:
+            try:
+                lev_min = RESOLVER_CFG.get("levenshtein_min_similarity", 0.4)
+
+                query_lev = f"""
+                    MATCH (n:Cliente)
+                    WITH n,
+                         apoc.text.levenshteinSimilarity(
+                             toLower(n.name),
+                             '{nome.lower()}'
+                         ) AS sim
+                    WHERE sim >= {lev_min}
+                    RETURN n.name AS name, 'Cliente' AS label, sim AS score
+                    ORDER BY sim DESC LIMIT {MAX_RESULTS}
+                """
+
+                logger.debug(
+                    f"[Resolver] Query Levenshtein fallback per {nome!r}:\n{query_lev}"
+                )
+
+                res_lev = execute_cypher_with_timeout(query_lev)
+                logger.debug(
+                    f"[Resolver] Risultati Levenshtein per {nome!r}: {res_lev}"
+                )
+                risultati.extend(res_lev)
+
+            except Exception as e:
+                logger.warning(
+                    f"[Resolver] Errore nel fallback Levenshtein per '{nome}': {e}"
+                )
+
+        # 4. DECISIONE
+        if not risultati:
+            logger.warning(
+                f"[Resolver] Nessun risultato per {nome!r} dopo esatto + fuzzy + fallback."
+            )
+            raise NoEntityFoundError(nome)  # nessuna entità trovata
+
+        risultati.sort(key=lambda x: x["score"], reverse=True)
+        best_match = risultati[0]
+        top_score = best_match["score"]
+
+        # Controllo ambiguità (delta tra primo e secondo)
+        if len(risultati) > 1:
+            second_score = risultati[1]["score"]
+            delta = top_score - second_score
+            if delta < DELTA_MIN:
+                # opzioni = list({f"{r['name']} ({r['label']})" for r in risultati})
+                ambiguous_options = [
+                    {"name": r["name"], "label": r["label"], "score": r["score"]}
+                    for r in risultati
+                    if r["score"] >= second_score  # Passa tutti i contendenti
+                ]
+        logger.warning(
+            f"[Resolver] Ambiguità per {nome!r}: "
+            f"top_score={top_score}, second_score={second_score}, delta={delta}"
+        )
+        raise AmbiguousEntityError(nome, ambiguous_options)
+
+        nome_corretto = best_match["name"]
+        label_corretta = best_match["label"]
+        logger.info(
+            f"Entity Resolver: '{nome}' -> '{nome_corretto}' ({label_corretta})"
+        )
+
+        # Hint per il Coder (passiamo nome pulito + label)
+        mappa_hint[nome] = {"name": nome_corretto, "label": label_corretta}
+
+        # Sostituisco nella domanda il nome sporco con quello pulito
+        # (attenzione: qui è una sostituzione semplice, va bene per i tuoi casi)
+        domanda_pulita = domanda_pulita.replace(nome, nome_corretto)
+
+    return domanda_pulita, mappa_hint
 
 
 def _scope_summary_for_synth(original: str, contextualized: str) -> str:
@@ -1746,132 +1867,6 @@ def get_conversation_context(
     return "\n".join(context_lines)
 
 
-def correggi_nomi_fuzzy_neo4j(question: str) -> tuple[str, list]:
-    """Usa full-text search Neo4j per correggere typo nei nomi di entità."""
-
-    # CHECK: Fuzzy abilitato?
-    if not config.fuzzy["fuzzy_matching"]["enabled"]:
-        logger.debug("🔇 Fuzzy matching disabilitato da config")
-        return question, []
-
-    correzioni = []
-
-    # PARAMETRI DA CONFIG
-    BLACKLIST = set(config.fuzzy["fuzzy_matching"]["blacklist"])
-    MIN_WORD_LENGTH = config.fuzzy["fuzzy_matching"]["min_word_length"]
-    EDIT_DISTANCE = config.fuzzy["fuzzy_matching"]["edit_distance"]
-    MIN_SCORE = config.fuzzy["fuzzy_matching"]["min_score"]
-    MIN_SIMILARITY = config.fuzzy["fuzzy_matching"]["min_similarity"]
-
-    # INDICI NEO4J (potrebbero anche venire da config/database.yaml)
-    indici = config.database.get(
-        "fulltext_indexes",
-        [
-            {"name": "clienti_fuzzy", "label": "Cliente", "property": "name"},
-            {
-                "name": "fornitori_fuzzy",
-                "label": "GruppoFornitore",
-                "property": "ragioneSociale",
-            },
-            {"name": "articoli_fuzzy", "label": "Articolo", "property": "descrizione"},
-            {"name": "doctype_fuzzy", "label": "DocType", "property": "name"},
-            {"name": "luoghi_fuzzy", "label": "Luogo", "property": "localita"},
-        ],
-    )
-
-    # ESTRAI PAROLE CANDIDATE
-    token_pattern = re.compile(
-        r"""(?:"[^"]+"|'[^']+'|“[^”]+”|‘[^’]+’|`[^`]+`|«[^»]+»|„[^“]+“|\S+)"""
-    )
-    raw_tokens = token_pattern.findall(question)
-    parole: List[str] = []
-    token_map: Dict[str, str] = {}
-    for token in raw_tokens:
-        cleaned = token.strip("'\"“”‘’`”„«»")
-        cleaned = re.sub(r"^[,.;:!?]+|[,.;:!?]+$", "", cleaned)
-        if cleaned and len(cleaned) >= MIN_WORD_LENGTH:
-            parole.append(cleaned)
-            token_map[cleaned] = token
-
-    logger.debug(f"🔍 Fuzzy matching su {len(parole)} parole: {parole}")
-
-    # CERCA MATCH PER OGNI PAROLA
-    for parola in parole:
-        # SKIP parole comuni
-        if parola.lower() in BLACKLIST:
-            continue
-
-        best_match = None
-        best_score = 0
-        best_tipo = None
-
-        # Cerca in tutti gli indici
-        for idx in indici:
-            # Supporta sia formato dict che tuple per retrocompatibilità
-            if isinstance(idx, dict):
-                idx_name = idx["name"]
-                label = idx["label"]
-                prop = idx["property"]
-            else:
-                idx_name, label, prop = idx
-
-            try:
-                # Query con edit distance DA CONFIG
-                query = f"""
-                CALL db.index.fulltext.queryNodes('{idx_name}', '{parola}~{EDIT_DISTANCE}')
-                YIELD node, score
-                RETURN node.{prop} as nome, score
-                ORDER BY score DESC
-                LIMIT 1
-                """
-                result = execute_cypher_with_timeout(query)
-
-                if result and result[0]["score"] > best_score:
-                    best_match = result[0]["nome"]
-                    best_score = result[0]["score"]
-                    best_tipo = label
-            except Exception as e:
-                logger.debug(f"Errore ricerca fuzzy su {idx_name}: {e}")
-                continue
-
-        # APPLICA CORREZIONE SE SUPERA SOGLIE
-        if best_match and best_score > MIN_SCORE:  # ← DA CONFIG
-            # Check similarità caratteri
-            similarity = len(set(parola.lower()) & set(best_match.lower())) / max(
-                len(parola), len(best_match)
-            )
-
-            if (
-                similarity > MIN_SIMILARITY and parola.lower() != best_match.lower()
-            ):  # ← DA CONFIG
-                original_token = token_map.get(parola, parola)
-                prefix = ""
-                suffix = ""
-                if original_token and original_token[0] in "'\"“”‘’`”„«»":
-                    prefix = original_token[0]
-                if original_token and original_token[-1] in "'\"“”‘’`”„«»":
-                    suffix = original_token[-1]
-                wrapped_best_match = f"{prefix}{best_match}{suffix}"
-                if original_token:
-                    question = question.replace(original_token, wrapped_best_match, 1)
-                # Sostituisci eventuali occorrenze nude della parola
-                if original_token != parola and re.search(
-                    rf"\b{re.escape(parola)}\b", question
-                ):
-                    question = re.sub(
-                        rf"\b{re.escape(parola)}\b",
-                        wrapped_best_match,
-                        question,
-                        count=1,
-                    )
-                correzioni.append(
-                    f"'{parola}' → '{best_match}' ({best_tipo}, score={best_score:.2f}, sim={similarity:.2f})"
-                )
-                logger.info(f"✏️ Fuzzy: {parola} → {best_match}")
-
-    return question, correzioni
-
-
 # OTTIMIZZAZIONE 1: Caricamento schema grafo in memoria all'avvio
 print("Caricamento dello schema del grafo in memoria...")
 try:
@@ -1964,6 +1959,21 @@ SPECIALIST_ROUTER_PROMPT = load_prompt_from_yaml(
 SPECIALIST_CODERS = load_prompt_from_yaml(
     resolve_prompt_path("coder", "specialist_coders.yaml")
 )
+
+ENTITY_EXTRACTOR_PROMPT = load_prompt_from_yaml(
+    resolve_prompt_path("entity_extractor", "entity_extractor_prompt.yaml")
+)
+SOCIAL_ROUTER_PROMPT = load_prompt_from_yaml(
+    resolve_prompt_path("social_router", "social_router.yaml")
+)
+SOCIAL_CONVERSATION_PROMPT = load_prompt_from_yaml(
+    resolve_prompt_path("social_conversation", "social_conversation_prompt.yaml")
+)
+
+AMBIGUITY_RESOLVER_PROMPT = load_prompt_from_yaml(
+    resolve_prompt_path("contextualizer", "ambiguity_resolver_prompt.yaml")
+)
+
 ADVANCED_CONTEXTUALIZER_PROMPT = load_prompt_from_yaml(
     resolve_prompt_path("contextualizer", "contextualizer_prompt.yaml")
 )
@@ -2015,12 +2025,16 @@ def _invoke_with_profile(agent_name: str, prompt_text: str, variables: dict) -> 
 required_prompts = [
     BASE_CYPHER_RULES,
     SPECIALIST_ROUTER_PROMPT,
+    ENTITY_EXTRACTOR_PROMPT,
     SPECIALIST_CODERS,
     ADVANCED_CONTEXTUALIZER_PROMPT,
     SYNTHESIZER_PROMPT,
     TRANSLATOR_PROMPT,
+    AMBIGUITY_RESOLVER_PROMPT,
     GENERAL_CONVERSATION_PROMPT,
     QUERY_REPAIR_PROMPT,
+    SOCIAL_ROUTER_PROMPT,
+    SOCIAL_CONVERSATION_PROMPT,
 ]
 if SEMANTIC_EXPANSION_ENABLED:
     required_prompts.append(QUERY_EXPANSION_PROMPT)
@@ -2073,6 +2087,98 @@ def run_translator_agent(question: str) -> str:
     return task.strip()
 
 
+def run_entity_extractor_agent(question: str) -> List[str]:
+    """
+    Usa un LLM per estrarre i nomi candidati (aziende, persone, luoghi)
+    dalla domanda. Gestisce anche risposte in blocchi ```json ... ``` dell'LLM.
+    """
+    logger.info("🤖 Chiamata all'Agente Estrattore Entità...")
+
+    try:
+        response = _invoke_with_profile(
+            agent_name="entity_extractor",
+            prompt_text=ENTITY_EXTRACTOR_PROMPT,
+            variables={"question": question},
+        )
+
+        raw = (response or "").strip()
+        logger.warning(f"🧠 [EntityExtractor RAW output] {raw!r}")
+
+        if not raw:
+            logger.warning(
+                "⚠️ LLM ha restituito una risposta vuota per l'estrattore entità."
+            )
+            return []
+
+        # 1) Se la risposta è in un blocco ``` ``` (es. ```json\n...\n```), estrai solo il contenuto interno
+        code_block_match = re.search(
+            r"```(?:json)?\s*\n(.*?)```", raw, re.DOTALL | re.IGNORECASE
+        )
+        if code_block_match:
+            content = code_block_match.group(1).strip()
+            logger.debug(f"🧩 [EntityExtractor code block content] {content!r}")
+        else:
+            content = raw
+
+        # 2) Prendi l’ultima riga non vuota del contenuto
+        lines = [line.strip() for line in content.splitlines() if line.strip()]
+        if not lines:
+            logger.warning("⚠️ Nessuna riga utile trovata nella risposta dell'LLM.")
+            return []
+
+        line = lines[-1]
+
+        # 3) Se c'è il prefisso 'Nomi:' rimuovilo
+        if line.lower().startswith("nomi"):
+            # Provo prima a tagliare direttamente dalla prima '['
+            idx = line.find("[")
+            if idx != -1:
+                line = line[idx:]
+            else:
+                parts = line.split(":", 1)
+                if len(parts) == 2:
+                    line = parts[1].strip()
+
+        # 4) Cerca una lista tra parentesi quadre nella riga
+        m = re.search(r"\[.*\]", line)
+        if not m:
+            # Se non la trova nella sola riga, prova su tutto il contenuto (magari la lista è su più righe)
+            m = re.search(r"\[.*\]", content, re.DOTALL)
+
+        if m:
+            json_str = m.group(0)
+            # Normalizza apici singoli in doppi per sicurezza
+            json_str = json_str.replace("'", '"')
+            logger.debug(f"🧩 [EntityExtractor JSON candidate] {json_str!r}")
+
+            try:
+                nomi = json.loads(json_str)
+            except Exception as e:
+                logger.error(f"❌ Errore nel json.loads della risposta LLM: {e}")
+                return []
+
+            if isinstance(nomi, list):
+                cleaned = [str(x).strip() for x in nomi if str(x).strip()]
+                logger.info(f"✅ [EntityExtractor parsed entities] {cleaned}")
+                return cleaned
+
+            logger.warning(f"⚠️ Risposta LLM parsata ma non è una lista: {nomi!r}")
+            return []
+
+        # 5) Fallback: nessuna '[' trovata → prova a interpretare la riga come nomi separati da virgola
+        parts = [p.strip(" '\"") for p in line.split(",") if p.strip()]
+        if parts:
+            logger.info(f"✅ [EntityExtractor fallback entities] {parts}")
+            return parts
+
+        logger.warning("⚠️ Nessuna entità estratta dopo tutti i tentativi.")
+        return []
+
+    except Exception as e:
+        logger.error(f"❌ Entity Extractor fallito: {e}", exc_info=True)
+        return []
+
+
 def run_general_conversation_agent(question: str) -> str:
     """Generates a conversational answer without querying the graph."""
     logger.info("🤖 Chiamata all'Agente Conversazionale...")
@@ -2082,6 +2188,45 @@ def run_general_conversation_agent(question: str) -> str:
         variables={"question": question},
     )
     return response.strip()
+
+
+def run_social_router_agent(question: str) -> Tuple[str, float]:
+    """Classifica l'input sociale in (category, confidence)."""
+    try:
+        raw = _invoke_with_profile(
+            agent_name="social_router",
+            prompt_text=SOCIAL_ROUTER_PROMPT,
+            variables={"question": question},
+        )
+        data = raw.strip()
+        try:
+            parsed = json.loads(data)
+        except Exception:
+            # tenta estrazione tra backticks o testo libero
+            m = re.search(r"\{.*\}", data, flags=re.DOTALL)
+            parsed = (
+                json.loads(m.group(0)) if m else {"category": "none", "confidence": 0.0}
+            )
+        cat = str(parsed.get("category", "none")).strip().lower()
+        conf = float(parsed.get("confidence", 0.0) or 0.0)
+        return cat, conf
+    except Exception as e:
+        logger.warning(f"Social router error: {e}")
+        return "none", 0.0
+
+
+def run_social_conversation_agent(question: str, category: str) -> str:
+    """Genera risposta sociale con stile in base alla categoria."""
+    try:
+        response = _invoke_with_profile(
+            agent_name="social_conversation",
+            prompt_text=SOCIAL_CONVERSATION_PROMPT,
+            variables={"question": question, "category": category},
+        )
+        return (response or "").strip()
+    except Exception as e:
+        logger.warning(f"Social conversation error, fallback to general: {e}")
+        return run_general_conversation_agent(question)
 
 
 def run_specialist_router_agent(question: str) -> str:
@@ -2095,7 +2240,68 @@ def run_specialist_router_agent(question: str) -> str:
     return route.strip()
 
 
-def run_coder_agent_2(question: str, relevant_schema: str, prompt_template: str) -> str:
+def run_ambiguity_resolver_agent(
+    user_reply: str, options: List[Dict[str, Any]]
+) -> Optional[Dict[str, Any]]:
+    """
+    Usa LLM per mappare la risposta dell'utente ("il primo", "il cliente")
+    all'opzione strutturata corretta.
+    """
+    logger.info("🤖 Chiamata all'Agente Risolutore Ambiguità...")
+
+    options_str_list = []
+    for i, opt in enumerate(options, start=1):
+        options_str_list.append(f"{i}. {opt['name']} (Tipo: {opt['label']})")
+    options_prompt = "\n".join(options_str_list)
+
+    try:
+        response = _invoke_with_profile(
+            agent_name="contextualizer",  # Riusiamo un modello leggero
+            prompt_text=AMBIGUITY_RESOLVER_PROMPT,
+            variables={
+                "user_reply": user_reply,
+                "options_list": options_prompt,
+                "options_json": json.dumps(options),
+            },
+        )
+
+        raw = (response or "").strip()
+        logger.debug(f"🧠 [AmbiguityResolver RAW output] {raw!r}")
+
+        # Estrai il JSON dalla risposta
+        json_match = re.search(r"\{.*\}", raw, re.DOTALL)
+        if json_match:
+            chosen_data = json.loads(json_match.group(0))
+            # Verifica che sia una delle opzioni valide
+            for opt in options:
+                if opt["name"] == chosen_data.get("name") and opt[
+                    "label"
+                ] == chosen_data.get("label"):
+                    logger.info(f"✅ [AmbiguityResolver] Scelta risolta (JSON): {opt}")
+                    return opt
+
+        # Fallback (se l'LLM non ha restituito JSON valido, prova con euristiche)
+        reply_lower = user_reply.lower()
+        if "1" in reply_lower or "prim" in reply_lower:
+            logger.info(
+                f"✅ [AmbiguityResolver] Scelta risolta (Indice 1): {options[0]}"
+            )
+            return options[0]
+        for opt in options:
+            if opt["label"].lower() in reply_lower:
+                logger.info(
+                    f"✅ [AmbiguityResolver] Scelta risolta (Label match): {opt}"
+                )
+                return opt
+
+        logger.warning("⚠️ [AmbiguityResolver] Impossibile mappare la risposta.")
+        return None
+    except Exception as e:
+        logger.error(f"❌ Ambiguity Resolver fallito: {e}", exc_info=True)
+        return None
+
+
+def run_coder_agent(question: str, relevant_schema: str, prompt_template: str) -> str:
     """Esegue un Coder specializzato assemblando il prompt completo prima di passarlo a LangChain."""
     logger.info(f"🤖 Chiamata a un Coder Specializzato...")
     # 1. Header/Suffix da config
@@ -2288,6 +2494,7 @@ def run_synthesizer_agent(
 
 
 # FUNZIONI AUSILIARIE VARIE
+# Estrazione dell'identità del nodo
 def _extract_node_identity(node: Any) -> Optional[str]:
     """Estrae l'ID univoco del nodo/relazione (compatibile v4/v5)."""
     if node is None:
@@ -2353,6 +2560,7 @@ def _relationship_to_payload(rel: Relationship) -> Dict[str, Any]:
     }
 
 
+# Funzione principale per estrarre snapshot del grafo
 def extract_graph_snapshot(
     records: List[Dict[str, Any]],
 ) -> Dict[str, List[Dict[str, Any]]]:
@@ -2526,6 +2734,7 @@ def _extract_missing_variable_from_error(message: str) -> Optional[str]:
     return None
 
 
+# Ricostruzione grafo da query con aggregazioni
 def _reconstruct_graph_from_query(query: str) -> Dict[str, List[Dict[str, Any]]]:
     """
     Ricostruisce un grafo da query che restituiscono aggregazioni (COUNT, SUM, etc.).
@@ -2716,6 +2925,7 @@ def _assign_variables_to_anonymous_rels(
     return result, rel_var_counter
 
 
+# Estrazione del grafo dai risultati
 def build_graph_payload_from_results(
     query: str, records: List[Dict[str, Any]]
 ) -> Tuple[Dict[str, List[Dict[str, Any]]], str]:
@@ -2881,10 +3091,15 @@ async def health_check():
 
 
 # ENDPOINT PER LE DOMANDE
+
+
+# ENDPOINT PER LE DOMANDE
 @app.post("/ask")
 async def ask_question(user_question: UserQuestionWithSession):
     start_total_time = time.perf_counter()
     timing_details = {}
+    # Definisci le variabili qui, perché verranno popolate
+    # da UNO DEI DUE percorsi (if/else)
     generated_query: Optional[str] = None
     context_completo: List[Dict[str, Any]] = []
     prompt_examples: List[Dict[str, Any]] = []
@@ -2894,168 +3109,350 @@ async def ask_question(user_question: UserQuestionWithSession):
 
     user_id = user_question.user_id or "default_user"
     user_input_text = user_question.question.strip()
-    effective_question_text = user_input_text
-    scope_reset_flag = False
+    session = get_or_create_session(user_id)
+
     requested_examples_top_k = (
         user_question.examples_top_k
         if user_question.examples_top_k and user_question.examples_top_k > 0
         else None
     )
-    session = get_or_create_session(user_id)
 
     logger.info(f"📥 [{user_id}] Domanda: '{user_input_text}'")
 
+    # =======================================================================
+    # === NUOVA LOGICA: BIFORCAZIONE (STATO PENDENTE vs NUOVA DOMANDA) ===
+    # =======================================================================
+
+    pending_state = session.pending_confirmation
+    scope_reset_flag = False  # La definiremo nel percorso 'else'
+
     try:
-        ## == FASE 1: GESTIONE PRELIMINARE (SMALL TALK & PERICOLO)
-
-        # --- MODIFICA CHIAVE 1: GESTIONE SMALL TALK ANTICIPATA ---
-        # Intercettiamo "Grazie mille" ecc. SUBITO, prima di qualsiasi logica di memoria.
-        if _is_small_talk(effective_question_text):
-            logger.info("Small talk rilevato: rotta diretta a GENERAL_CONVERSATION.")
-            start_conv_time = time.perf_counter()
-
-            # Chiamiamo l'agente con la domanda ORIGINALE (es. "Grazie mille")
-            # e il prompt YAML che hai caricato (general_conversation_prompt.yaml)
-            conversation_reply = run_general_conversation_agent(effective_question_text)
-
-            timing_details["small_talk"] = True
-            timing_details["conversazione"] = time.perf_counter() - start_conv_time
-            timing_details["totale"] = time.perf_counter() - start_total_time
-
-            add_message_to_session(
-                user_id,
-                effective_question_text,
-                conversation_reply,
-                [],
-                "",
-                meta={"event": "general_conversation", "small_talk": True},
+        if pending_state and pending_state.get("type") == "entity_ambiguity":
+            # === PERCORSO 1: L'UTENTE STA RISPONDENDO A UNA DOMANDA DI AMBIGUITÀ ===
+            logger.info(
+                f"[{user_id}] Rilevato stato 'pending_confirmation'. Tento di risolvere..."
             )
 
-            response_payload = {
-                "domanda": effective_question_text,
-                "risposta": conversation_reply,
-                "specialist": "GENERAL_CONVERSATION",
-                "query_generata": None,
-                "context": [],
-                "graph_data": {},
-                "timing_details": timing_details,
-                "examples_top_k": None,
-                "examples_used": [],
-                "repair_audit": [],
-                "success": True,
-            }
-
-            # Salva in cache anche questa risposta di cortesia
-            if ENABLE_CACHE:
-                cache_key = _make_cache_key(
-                    user_id, effective_question_text, effective_question_text
+            # 1a. Chiama il NUOVO agente per capire la scelta
+            chosen_option = (
+                run_ambiguity_resolver_agent(  # Devi aggiungere questa funzione
+                    user_reply=user_input_text,  # "il cliente"
+                    options=pending_state["options"],
                 )
-                query_cache[cache_key] = {
-                    "response": copy.deepcopy(response_payload),
+            )
+
+            if chosen_option:
+                # 1b. Ambiguità risolta. Ricostruisci il task originale
+                logger.info(f"Ambiguità risolta. Scelta: {chosen_option}")
+                ambiguous_term = pending_state["ambiguous_term"]
+                resolved_name = chosen_option["name"]
+
+                # Ricrea la domanda contestualizzata "pulita"
+                question_text = re.sub(
+                    re.escape(ambiguous_term),
+                    resolved_name,
+                    pending_state["contextualized_question"],
+                    flags=re.IGNORECASE,
+                )
+
+                # Ricrea il task EN
+                english_task = re.sub(
+                    re.escape(ambiguous_term),
+                    resolved_name,
+                    pending_state["english_task_template"],
+                    flags=re.IGNORECASE,
+                )
+
+                # Ricrea la domanda originale per la cronologia
+                effective_question_text = pending_state["original_question"]
+
+                # 1c. PULISCI LO STATO (CRITICO!)
+                session.pending_confirmation = None
+                logger.info(
+                    f"Stato 'pending_confirmation' risolto. Procedo con la pipeline."
+                )
+
+                # NOTA: Ora il codice salterà l' 'else' e andrà dritto
+                # alla "FASE 3: CORE PIPELINE"
+
+            else:
+                # 1d. L'utente ha risposto ma non abbiamo capito
+                logger.warning("Impossibile risolvere l'ambiguità. Resetto lo stato.")
+                session.pending_confirmation = None
+                risposta = "Non ho capito la tua scelta. Riprova la domanda originale (es. 'fatturato di ferrini')."
+                timing_details["totale"] = time.perf_counter() - start_total_time
+                # Ritorna un payload di errore
+                return {
+                    "domanda": user_input_text,  # La risposta confusa
+                    "risposta": risposta,
+                    "requires_user_confirmation": False,
+                    "specialist": "AMBIGUITY_RESOLVER",
+                    "success": False,
+                    "query_generata": None,
                     "context": [],
                     "graph_data": {},
-                    "query_generata": None,
-                    "specialist": "GENERAL_CONVERSATION",
-                    "examples_top_k": None,
+                    "timing_details": timing_details,
+                    "examples_used": [],
+                    "repair_audit": [],
                 }
-            return response_payload
-        # --- FINE BLOCCO SMALL TALK ---
 
-        if _contains_dangerous_intent(effective_question_text):
-            session.pending_confirmation = None
-            warning_message = (
-                "Posso solo consultare i dati in lettura. "
-                "Per sicurezza non posso creare, modificare o cancellare informazioni nel database."
-            )
-            add_message_to_session(
-                user_id,
-                effective_question_text,
-                warning_message,
-                [],
-                "",
-                meta={
-                    "event": "dangerous_intent",
-                    "stage": "pre_translation",
-                    "scope_reset": scope_reset_flag,
-                },
-            )
-            timing_details["dangerous_intent"] = True
-            timing_details["generazione_query"] = 0.0
-            timing_details["esecuzione_db"] = 0.0
-            timing_details["sintesi_risposta"] = 0.0
-            timing_details["totale"] = time.perf_counter() - start_total_time
-            timing_details["scope_reset"] = scope_reset_flag
-            return {
-                "domanda": effective_question_text,
-                "query_generata": None,
-                "risposta": warning_message,
-                "context": [],
-                "graph_data": {},
-                "timing_details": timing_details,
-                "specialist": "SAFETY_GUARD",
-                "examples_top_k": requested_examples_top_k,
-                "examples_used": [],
-                "repair_audit": [],
-                "success": False,
-                "dangerous_intent": True,
-            }
+        else:
+            # === PERCORSO 2: È UNA NUOVA DOMANDA (IL TUO FLUSSO NORMALE) ===
 
-        start_preprocessing_time = time.perf_counter()
+            # Pulisci qualsiasi stato vecchio per sicurezza
+            if session.pending_confirmation:
+                logger.info(
+                    "Rilevata nuova domanda, pulisco stato di conferma precedente."
+                )
+                session.pending_confirmation = None
 
-        # 1a. Gestione Memoria: Il nuovo Contextualizer riscrive la domanda
-        chat_history = get_conversation_context(user_id, effective_question_text)
-        timing_details["memory_used"] = bool(chat_history)
-        question_text = run_contextualizer_agent(effective_question_text, chat_history)
-        if question_text != effective_question_text:
-            logger.info(f"Domanda riscritta dal Contestualizzatore: '{question_text}'")
+            effective_question_text = user_input_text  # La domanda originale
 
-        # 1b. Correzione Fuzzy
-        question_text, correzioni = correggi_nomi_fuzzy_neo4j(question_text)
-        if correzioni:
-            logger.info(f"Correzioni Fuzzy applicate: {', '.join(correzioni)}")
+            # == FASE 1: ROUTING SOCIALE (senza keyword) & PERICOLO
+            # ... (copia qui il tuo codice per Social Router e _contains_dangerous_intent)
+            # ... (se è sociale o dangerous, fai 'return' come fai già)
 
-        # 1c. Traduzione (fondamentale per la coerenza dei prompt)
-        english_task = run_translator_agent(question_text)
-        logger.info(f"Task tradotto in Inglese: '{english_task}'")
+            # Esempio di come integrare (prendi dal tuo codice originale):
+            sr_cfg = config.system.get("social_router", {}) or {}
+            if bool(sr_cfg.get("enabled", True)):
+                # ... (tua logica social router) ...
+                if bool(sr_cfg.get("enabled", True)):
+                    category, confidence = run_social_router_agent(
+                        effective_question_text
+                    )
+                    th = float(sr_cfg.get("confidence_threshold", 0.7) or 0.7)
+                    if category != "none" and confidence >= th:
+                        logger.info(
+                            f"Social routing: category={category}, conf={confidence:.2f} → social_conversation"
+                        )
+                        start_conv_time = time.perf_counter()
+                        conversation_reply = run_social_conversation_agent(
+                            effective_question_text, category
+                        )
+                        timing_details["social"] = {
+                            "category": category,
+                            "confidence": confidence,
+                        }
+                        timing_details["conversazione"] = (
+                            time.perf_counter() - start_conv_time
+                        )
+                        timing_details["totale"] = (
+                            time.perf_counter() - start_total_time
+                        )
 
-        if _contains_dangerous_intent(english_task):
-            session.pending_confirmation = None
-            warning_message = (
-                "Posso aiutarti solo con analisi e ricerche. "
-                "Non ho il permesso di creare, modificare o cancellare dati."
-            )
-            add_message_to_session(
-                user_id,
-                effective_question_text,
-                warning_message,
-                [],
-                "",
-                meta={
-                    "event": "dangerous_intent",
-                    "stage": "post_translation",
-                    "scope_reset": scope_reset_flag,
-                },
-            )
-            timing_details["dangerous_intent"] = True
-            timing_details["generazione_query"] = 0.0
-            timing_details["esecuzione_db"] = 0.0
-            timing_details["sintesi_risposta"] = 0.0
-            timing_details["totale"] = time.perf_counter() - start_total_time
-            timing_details["scope_reset"] = scope_reset_flag
-            return {
-                "domanda": effective_question_text,
-                "query_generata": None,
-                "risposta": warning_message,
-                "context": [],
-                "graph_data": {},
-                "timing_details": timing_details,
-                "specialist": "SAFETY_GUARD",
-                "examples_top_k": requested_examples_top_k,
-                "examples_used": [],
-                "repair_audit": [],
-                "success": False,
-                "dangerous_intent": True,
-            }
+                        add_message_to_session(
+                            user_id,
+                            effective_question_text,
+                            conversation_reply,
+                            [],
+                            "",
+                            meta={"event": "social", "category": category},
+                        )
+
+                        response_payload = {
+                            "domanda": effective_question_text,
+                            "risposta": conversation_reply,
+                            "specialist": "SOCIAL_CONVERSATION",
+                            "query_generata": None,
+                            "context": [],
+                            "graph_data": {},
+                            "timing_details": timing_details,
+                            "examples_top_k": None,
+                            "examples_used": [],
+                            "repair_audit": [],
+                            "success": True,
+                        }
+                        if ENABLE_CACHE:
+                            cache_key = _make_cache_key(
+                                user_id,
+                                effective_question_text,
+                                effective_question_text,
+                            )
+                            query_cache[cache_key] = {
+                                "response": copy.deepcopy(response_payload),
+                                "context": [],
+                                "graph_data": {},
+                                "query_generata": None,
+                                "specialist": "SOCIAL_CONVERSATION",
+                                "examples_top_k": None,
+                            }
+                        return response_payload
+
+            if _contains_dangerous_intent(effective_question_text):  #
+                session.pending_confirmation = None
+                warning_message = (
+                    "Posso solo consultare i dati in lettura. "
+                    "Per sicurezza non posso creare, modificare o cancellare informazioni nel database."
+                )
+                add_message_to_session(
+                    user_id,
+                    effective_question_text,
+                    warning_message,
+                    [],
+                    "",
+                    meta={
+                        "event": "dangerous_intent",
+                        "stage": "pre_translation",
+                        "scope_reset": scope_reset_flag,
+                    },
+                )
+                timing_details["dangerous_intent"] = True
+                timing_details["generazione_query"] = 0.0
+                timing_details["esecuzione_db"] = 0.0
+                timing_details["sintesi_risposta"] = 0.0
+                timing_details["totale"] = time.perf_counter() - start_total_time
+                timing_details["scope_reset"] = scope_reset_flag
+                return {
+                    "domanda": effective_question_text,
+                    "query_generata": None,
+                    "risposta": warning_message,
+                    "context": [],
+                    "graph_data": {},
+                    "timing_details": timing_details,
+                    "specialist": "SAFETY_GUARD",
+                    "examples_top_k": requested_examples_top_k,
+                    "examples_used": [],
+                    "repair_audit": [],
+                    "success": False,
+                    "dangerous_intent": True,
+                }
+
+            # == FASE 2: PREPROCESSING (Contextualizer -> Translator -> Resolver)
+            # start_preprocessing_time = time.perf_counter()
+
+            # 2a. Contextualizer (Memoria)
+            chat_history = get_conversation_context(user_id, effective_question_text)  #
+            timing_details["memory_used"] = bool(chat_history)
+            question_text = run_contextualizer_agent(
+                effective_question_text, chat_history
+            )  #
+            if question_text != effective_question_text:
+                logger.info(
+                    f"Domanda riscritta dal Contestualizzatore: '{question_text}'"
+                )
+
+            # 2b. Traduzione (ANTICIPATA)
+            # La anticipiamo per poterla salvare nello stato pendente in caso di ambiguità
+            english_task = run_translator_agent(question_text)  #
+            logger.info(f"Task tradotto in Inglese: '{english_task}'")
+
+            entity_hint_map = {}
+            try:
+                # 2c. Entity Resolution
+                question_text_pulita, entity_hint_map = _resolve_entities_in_question(
+                    question_text
+                )  #
+
+                # Se il resolver ha "pulito" i nomi (es. typo), ri-traduce
+                if entity_hint_map and question_text_pulita != question_text:  #
+                    logger.info(
+                        f"Entità verificate: {entity_hint_map}. Ritraduco domanda pulita."
+                    )
+                    english_task = run_translator_agent(
+                        question_text_pulita
+                    )  # Sovrascrive english_task
+                    question_text = question_text_pulita  # Usa la domanda pulita da ora
+
+            except (NoEntityFoundError, AmbiguousEntityError) as e:
+                # 2d. GESTIONE FALLIMENTO RISOLUZIONE
+
+                if isinstance(e, NoEntityFoundError):
+                    risposta = (
+                        f"Non ho trovato nessuna entità che assomigli a '{e.text}'."  #
+                    )
+                    logger.warning(f"Entity Resolution fallita: {risposta}")
+                    timing_details["entity_resolution_failed"] = True
+                    timing_details["totale"] = time.perf_counter() - start_total_time
+                    # Ritorna payload di errore
+                    return {
+                        "domanda": effective_question_text,
+                        "risposta": risposta,
+                        "requires_user_confirmation": False,
+                        "specialist": "ENTITY_RESOLVER",
+                        "success": False,
+                        "query_generata": None,
+                        "context": [],
+                        "graph_data": {},
+                        "timing_details": timing_details,
+                        "examples_used": [],
+                        "repair_audit": [],
+                    }  #
+
+                else:  # === AMBIGUITY DETECTED (AmbiguousEntityError) ===
+                    options_str = [
+                        f"{opt['name']} ({opt['label']})" for opt in e.options
+                    ]
+                    risposta = f"Ho trovato più corrispondenze per '{e.text}': [{', '.join(options_str)}]. A quale ti riferisci?"  #
+
+                    # 2e. SALVA LO STATO IN PAUSA
+                    session.pending_confirmation = {
+                        "type": "entity_ambiguity",
+                        "ambiguous_term": e.text,
+                        "options": e.options,  # La List[Dict] strutturata
+                        "original_question": effective_question_text,
+                        "contextualized_question": question_text,
+                        "english_task_template": english_task,  # Il task EN che abbiamo tradotto prima
+                    }
+                    logger.info(
+                        f"Salvataggio stato 'pending_confirmation' per {user_id}"
+                    )
+
+                    # Ritorna la domanda di chiarimento all'utente
+                    return {
+                        "domanda": effective_question_text,
+                        "risposta": risposta,
+                        "requires_user_confirmation": True,
+                        "specialist": "ENTITY_RESOLVER",
+                        "success": False,
+                        "query_generata": None,
+                        "context": [],
+                        "graph_data": {},
+                        "timing_details": timing_details,
+                        "examples_used": [],
+                        "repair_audit": [],
+                    }  #
+
+            # 2f. Controllo Dangerous Intent (post-traduzione)
+            if _contains_dangerous_intent(english_task):  #
+                session.pending_confirmation = None
+                warning_message = (
+                    "Posso aiutarti solo con analisi e ricerche. "
+                    "Non ho il permesso di creare, modificare o cancellare dati."
+                )
+                add_message_to_session(
+                    user_id,
+                    effective_question_text,
+                    warning_message,
+                    [],
+                    "",
+                    meta={
+                        "event": "dangerous_intent",
+                        "stage": "post_translation",
+                        "scope_reset": scope_reset_flag,
+                    },
+                )
+                timing_details["dangerous_intent"] = True
+                timing_details["generazione_query"] = 0.0
+                timing_details["esecuzione_db"] = 0.0
+                timing_details["sintesi_risposta"] = 0.0
+                timing_details["totale"] = time.perf_counter() - start_total_time
+                timing_details["scope_reset"] = scope_reset_flag
+                return {
+                    "domanda": effective_question_text,
+                    "query_generata": None,
+                    "risposta": warning_message,
+                    "context": [],
+                    "graph_data": {},
+                    "timing_details": timing_details,
+                    "specialist": "SAFETY_GUARD",
+                    "examples_top_k": requested_examples_top_k,
+                    "examples_used": [],
+                    "repair_audit": [],
+                    "success": False,
+                    "dangerous_intent": True,
+                }
+
+        # timing_details["preprocessing"] = time.perf_counter() - start_preprocessing_time
 
         effective_examples_top_k = (
             requested_examples_top_k
@@ -3119,9 +3516,6 @@ async def ask_question(user_question: UserQuestionWithSession):
                     "examples_used": cached_examples,
                     "cached": True,
                 }
-
-        timing_details["preprocessing"] = time.perf_counter() - start_preprocessing_time
-
         ## == FASE 2: ROUTING E GENERAZIONE QUERY SPECIALIZZATA
 
         # 2a. Il Router decide quale specialista usare

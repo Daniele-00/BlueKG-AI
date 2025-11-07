@@ -1,0 +1,2956 @@
+{
+  "config": "specialist-gemini-2.5-flash",
+  "approach": "specialist",
+  "config_name": "gemini-2.5-flash",
+  "timestamp": "20251030_202235",
+  "examples_top_k": 0,
+  "summary": {
+    "total": 106,
+    "success_strict": 65,
+    "success_similarity": 43,
+    "success_jaccard": 53,
+    "failures": 41,
+    "accuracy": 61.32075471698113,
+    "accuracy_strict": 61.32075471698113,
+    "accuracy_similarity": 40.56603773584906,
+    "accuracy_jaccard": 50.0,
+    "min_query_similarity": 0.8,
+    "min_jaccard": 0.8,
+    "avg_time": 15.86557976541742,
+    "avg_jaccard": 0.512453826683154,
+    "avg_query_similarity": 0.7098029380771098
+  },
+  "results": [
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-01-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Qual \u00e8 il fatturato totale del cliente BARONE DI FERRANTE EZIO?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE toLower(trim(c.name)) = 'barone di ferrante ezio' AND dr.tipoValore = 'Fatturato' AND dr.importo > 0\nRETURN sum(dr.importo) AS totale",
+      "expected_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE toLower(trim(c.name)) = 'barone di ferrante ezio' AND dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN sum(dr.importo) AS fatturatoTotale",
+      "time_total": 9.408758861012757,
+      "time_generation": 1.9065969591028988,
+      "time_db": 0.5089817242696881,
+      "time_synthesis": 2.357222872786224,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.9758241758241758,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-02-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Chi \u00e8 il cliente con il maggior fatturato?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0\nRETURN c.name AS cliente, sum(dr.importo) AS totale\nORDER BY totale DESC\nLIMIT 1",
+      "expected_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN c.name AS cliente, sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC LIMIT 1",
+      "time_total": 9.368647132068872,
+      "time_generation": 2.59532288601622,
+      "time_db": 0.6493782089091837,
+      "time_synthesis": 2.046142009086907,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.9513274336283186,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-03-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Elenca i 5 clienti che hanno fatturato di pi\u00f9 che si trovano a Perugia",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo)\nWHERE toLower(trim(l.localita)) = 'perugia'\nMATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0\nRETURN c.name AS cliente, sum(dr.importo) AS totale\nORDER BY totale DESC\nLIMIT 5",
+      "expected_cypher": "MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) WHERE toLower(trim(l.localita)) = 'perugia' MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN c.name AS cliente, sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC LIMIT 5",
+      "time_total": 9.902334424201399,
+      "time_generation": 2.8470813180319965,
+      "time_db": 0.6095915855839849,
+      "time_synthesis": 2.5814451542682946,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.9640522875816994,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-04-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Mostrami i 5 prodotti pi\u00f9 popolari in termini di quantit\u00e0 venduta",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)\nRETURN a.descrizione AS prodotto, sum(dr.quantita) AS quantitaTotale\nORDER BY quantitaTotale DESC\nLIMIT 5",
+      "expected_cypher": "MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo) RETURN a.descrizione AS prodotto, sum(dr.quantita) AS quantitaTotale ORDER BY quantitaTotale DESC LIMIT 5",
+      "time_total": 9.14905026787892,
+      "time_generation": 1.7848927769809961,
+      "time_db": 0.6210721926763654,
+      "time_synthesis": 2.9308584169484675,
+      "jaccard_index": 1.0,
+      "query_similarity": 1.0,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-05-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Mostrami i 5 prodotti meno popolari in termini di quantit\u00e0 venduta",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)\nRETURN a.descrizione AS prodotto, sum(dr.quantita) AS quantitaTotale\nORDER BY quantitaTotale ASC\nLIMIT 5",
+      "expected_cypher": "MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo) RETURN a.descrizione AS prodotto, sum(dr.quantita) AS quantitaTotale ORDER BY quantitaTotale ASC LIMIT 5",
+      "time_total": 12.778331143315881,
+      "time_generation": 2.4177085706032813,
+      "time_db": 0.7036202121526003,
+      "time_synthesis": 2.7281218827702105,
+      "jaccard_index": 1.0,
+      "query_similarity": 1.0,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-06-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Dimmi il fatturato di ogni ditta.",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (d:Ditta)<-[:APPARTIENE_A]-(c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0\nRETURN d.dittaId AS ditta, sum(dr.importo) AS totale\nORDER BY totale DESC, ditta ASC",
+      "expected_cypher": "MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN d.dittaId AS ditta, sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC",
+      "time_total": 11.210492746904492,
+      "time_generation": 2.322939418721944,
+      "time_db": 0.8219590508379042,
+      "time_synthesis": 4.635701559949666,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.8924302788844621,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-07-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Il fatturato di ogni ditta, nel loro anno migliore",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (d:Ditta)<-[:APPARTIENE_A]-(c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0\nWITH d.dittaId AS dittaId, doc.dataEmissione.year AS anno, sum(dr.importo) AS fatturatoAnnuo\nWITH dittaId, max(fatturatoAnnuo) AS fatturatoMigliore\nMATCH (d:Ditta)<-[:APPARTIENE_A]-(c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0\nWITH dittaId, fatturatoMigliore, doc.dataEmissione.year AS anno, sum(dr.importo) AS fatturatoAnnuo\nWHERE fatturatoAnnuo = fatturatoMigliore\nRETURN dittaId, anno AS annoMigliore, fatturatoMigliore\nORDER BY dittaId ASC",
+      "expected_cypher": "MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH d, doc.dataEmissione.year AS anno, sum(dr.importo) AS fatturatoAnnuale ORDER BY d.dittaId, fatturatoAnnuale DESC WITH d, collect({anno: anno, fatturato: fatturatoAnnuale}) AS fatturatiOrdinati RETURN d.dittaId AS ditta, fatturatiOrdinati[0].anno AS annoTop, fatturatiOrdinati[0].fatturato AS fatturatoMassimo",
+      "time_total": 68.64259813306853,
+      "time_generation": 2.906150489114225,
+      "time_db": 2.7002206738106906,
+      "time_synthesis": 1.5822672909125686,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.42480883602378927,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "ditta": "2",
+          "annoTop": 2023,
+          "fatturatoMassimo": 10866139.410000047
+        },
+        {
+          "ditta": "4",
+          "annoTop": 2023,
+          "fatturatoMassimo": 320368.0
+        },
+        {
+          "ditta": "1",
+          "annoTop": 2024,
+          "fatturatoMassimo": 1242423.36
+        }
+      ],
+      "mismatch_extra": []
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-08-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Il fatturato di ogni ditta, nel loro anno peggiore",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (d:Ditta)<-[:APPARTIENE_A]-(c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0\nWITH d.dittaId AS ditta, doc.dataEmissione.year AS anno, sum(dr.importo) AS fatturatoAnnuale\nWITH ditta, min(fatturatoAnnuale) AS fatturatoMinimo\nMATCH (d:Ditta)<-[:APPARTIENE_A]-(c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0\nWITH ditta, fatturatoMinimo, doc.dataEmissione.year AS anno, sum(dr.importo) AS fatturatoAnnoCorrente\nWHERE fatturatoAnnoCorrente = fatturatoMinimo\nRETURN ditta, anno AS annoPeggiore, fatturatoMinimo AS fatturato\nORDER BY ditta ASC, annoPeggiore ASC",
+      "expected_cypher": "MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH d, doc.dataEmissione.year AS anno, sum(dr.importo) AS fatturatoAnnuale ORDER BY d.dittaId, fatturatoAnnuale ASC WITH d, collect({anno: anno, fatturato: fatturatoAnnuale}) AS fatturatiOrdinati RETURN d.dittaId AS ditta, fatturatiOrdinati[0].anno AS annoTop, fatturatiOrdinati[0].fatturato AS fatturatoMassimo",
+      "time_total": 11.374127405229956,
+      "time_generation": 3.754278910346329,
+      "time_db": 2.5043222829699516,
+      "time_synthesis": 1.7245283517986536,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.4175642087821044,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "ditta": "1",
+          "annoTop": 2021,
+          "fatturatoMassimo": 478645.57
+        },
+        {
+          "ditta": "4",
+          "annoTop": 2025,
+          "fatturatoMassimo": 26752.0
+        },
+        {
+          "ditta": "3",
+          "annoTop": 2025,
+          "fatturatoMassimo": 60777.76
+        }
+      ],
+      "mismatch_extra": []
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-09-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Qual \u00e8 la famiglia di prodotti pi\u00f9 acquistata?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(f:Famiglia)\nRETURN f.nome AS famiglia, sum(dr.quantita) AS quantitaTotale\nORDER BY quantitaTotale DESC\nLIMIT 1",
+      "expected_cypher": "MATCH (:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)-[:APPARTIENE_A]->(sf:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia) RETURN fam.nome AS famiglia, sum(dr.quantita) AS quantitaTotale ORDER BY quantitaTotale DESC LIMIT 1",
+      "time_total": 8.975362361874431,
+      "time_generation": 2.949584137648344,
+      "time_db": 0.5010512070730329,
+      "time_synthesis": 1.9809826640412211,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.9875222816399287,
+      "specialist": "PURCHASE_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-10-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Qual \u00e8 la famiglia di prodotti meno acquistata?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(f:Famiglia)\nRETURN f.nome AS famiglia, sum(dr.quantita) AS quantitaTotale\nORDER BY quantitaTotale ASC\nLIMIT 1",
+      "expected_cypher": "MATCH (:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)-[:APPARTIENE_A]->(sf:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia) RETURN fam.nome AS famiglia, sum(dr.quantita) AS quantitaTotale ORDER BY quantitaTotale ASC LIMIT 1",
+      "time_total": 11.07898162305355,
+      "time_generation": 3.9878370207734406,
+      "time_db": 0.6873557660728693,
+      "time_synthesis": 3.0497286869212985,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.9874776386404294,
+      "specialist": "PURCHASE_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-11-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Qual \u00e8 il prodotto pi\u00f9 venduto in generale (per valore)?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0\nRETURN a.descrizione AS prodotto, sum(dr.importo) AS totale\nORDER BY totale DESC\nLIMIT 1",
+      "expected_cypher": "MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN a.descrizione AS prodotto, sum(dr.importo) AS valoreVenduto ORDER BY valoreVenduto DESC LIMIT 1",
+      "time_total": 9.591276695020497,
+      "time_generation": 2.4583553527481854,
+      "time_db": 0.7709562489762902,
+      "time_synthesis": 2.1008102879859507,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.9285714285714286,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-12-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Qual \u00e8 il prodotto meno venduto in generale (per valore)?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0\nRETURN a.descrizione AS prodotto, sum(dr.importo) AS totale\nORDER BY totale ASC\nLIMIT 1",
+      "expected_cypher": "MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN a.descrizione AS prodotto, sum(dr.importo) AS valoreVenduto ORDER BY valoreVenduto ASC LIMIT 1",
+      "time_total": 8.759263821411878,
+      "time_generation": 2.1926617361605167,
+      "time_db": 0.5316775562241673,
+      "time_synthesis": 1.9257093681953847,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.9283018867924528,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-13-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "A quanto ho acquistato il prodotto GAS FREON SOLSTICE N40 R448A?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)\nWHERE toLower(trim(a.descrizione)) = toLower(trim('GAS FREON SOLSTICE N40 R448A'))\nRETURN sum(dr.importo) AS totale",
+      "expected_cypher": "MATCH (a:Articolo)<-[:RIGUARDA_ARTICOLO]-(dr:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore) WHERE toLower(trim(a.descrizione)) = 'gas freon solstice n40 r448a' RETURN sum(dr.importo) AS costoTotaleAcquisto",
+      "time_total": 18.138235691934824,
+      "time_generation": 6.520765628200024,
+      "time_db": 0.33560131723061204,
+      "time_synthesis": 3.998190653976053,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.46551724137931033,
+      "specialist": "PURCHASE_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-14-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "A quanto l'ho venduto il prodotto GAS FREON SOLSTICE N40 R448A?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)\nWHERE toLower(trim(a.descrizione)) = 'gas freon solstice n40 r448a'\n  AND dr.tipoValore = 'Fatturato'\n  AND dr.importo > 0\nRETURN sum(dr.importo) AS totaleVenduto",
+      "expected_cypher": "MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo) WHERE toLower(trim(a.descrizione)) = 'gas freon solstice n40 r448a' AND dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN sum(dr.importo) AS totaleVenduto",
+      "time_total": 12.25323133636266,
+      "time_generation": 2.437318017706275,
+      "time_db": 0.5502547132782638,
+      "time_synthesis": 1.9035084880888462,
+      "jaccard_index": 1.0,
+      "query_similarity": 1.0,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-15-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Situazione attuale della ditta '2'",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (d:Ditta)<-[:APPARTIENE_A]-(c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE d.dittaId = '2'\n  AND dr.tipoValore = 'Fatturato'\n  AND dr.importo > 0\n  AND doc.dataEmissione.year IN [date().year, date().year - 1]\nRETURN d.dittaId AS ditta, sum(dr.importo) AS totaleFatturato",
+      "expected_cypher": "MATCH (d:Ditta {dittaId: '2'})<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 AND doc.dataEmissione.year IN [date().year, date().year - 1] RETURN doc.dataEmissione.year AS anno, sum(dr.importo) AS fatturatoAnnuale ORDER BY anno DESC",
+      "time_total": 12.247934892773628,
+      "time_generation": 3.1581370569765568,
+      "time_db": 0.5305327097885311,
+      "time_synthesis": 3.316763148177415,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.4440993788819876,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "anno": 2025,
+          "fatturatoAnnuale": 1365461.8500000003
+        },
+        {
+          "anno": 2024,
+          "fatturatoAnnuale": 10316724.920000026
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "ditta": "2",
+          "totaleFatturato": 11682186.770000035
+        }
+      ]
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-16-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Quali ditte vendono prodotti della famiglia 'CENTRALI FRIGO'?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia)\nWHERE toLower(trim(fam.nome)) = 'centrali frigo'\nRETURN DISTINCT d.dittaId AS ditta\nORDER BY ditta",
+      "expected_cypher": "MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia) WHERE toLower(trim(fam.nome)) = 'centrali frigo' RETURN DISTINCT d.dittaId AS ditta ORDER BY ditta",
+      "time_total": 11.640567653346807,
+      "time_generation": 3.0692329751327634,
+      "time_db": 0.6692619509994984,
+      "time_synthesis": 2.340263418853283,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.9983579638752053,
+      "specialist": "DITTE_QUERY",
+      "jaccard_success": true,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-17-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Quanti clienti unici ha la ditta '1'?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (d:Ditta {dittaId: '1'})<-[:APPARTIENE_A]-(c:Cliente)\nRETURN count(DISTINCT c) AS conteggio",
+      "expected_cypher": "MATCH (d:Ditta {dittaId: '1'})<-[:APPARTIENE_A]-(c:Cliente) RETURN count(DISTINCT c) AS numeroClientiUnici",
+      "time_total": 9.11430387198925,
+      "time_generation": 1.639774405863136,
+      "time_db": 0.014957356732338667,
+      "time_synthesis": 1.8709479980170727,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.9064039408866995,
+      "specialist": "DITTE_QUERY",
+      "jaccard_success": true,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-18-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Quale fornitore ci ha inviato pi\u00f9 documenti?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(doc:Documento)\nRETURN gf.ragioneSociale AS fornitore, count(DISTINCT doc) AS conteggio\nORDER BY conteggio DESC\nLIMIT 1",
+      "expected_cypher": "MATCH (f:Fornitore)-[:HA_EMESSO]->(doc:Documento) RETURN f.ragioneSociale AS fornitore, count(doc) AS numeroDocumenti ORDER BY numeroDocumenti DESC LIMIT 1",
+      "time_total": 10.845809332095087,
+      "time_generation": 1.7988202506676316,
+      "time_db": 0.14628223283216357,
+      "time_synthesis": 4.238680193200707,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.76,
+      "specialist": "PURCHASE_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-19-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Elenca 5 clienti che non hanno mai acquistato il prodotto 'GAS FREON SOLSTICE N40 R448A'",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (a:Articolo)\nWHERE toLower(trim(a.descrizione)) = 'gas freon solstice n40 r448a'\nWITH a\nMATCH (c:Cliente)\nWHERE NOT (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a)\nRETURN c.name AS cliente\nORDER BY cliente\nLIMIT 5",
+      "expected_cypher": "MATCH (a:Articolo) WHERE toLower(trim(a.descrizione)) = 'gas freon solstice n40 r448a' WITH a MATCH (c:Cliente) WHERE NOT (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a) RETURN c.name AS cliente ORDER BY cliente LIMIT 5",
+      "time_total": 12.075058287009597,
+      "time_generation": 1.7348777218721807,
+      "time_db": 0.3838031548075378,
+      "time_synthesis": 2.031080415006727,
+      "jaccard_index": 1.0,
+      "query_similarity": 1.0,
+      "specialist": "GENERAL_QUERY",
+      "jaccard_success": true,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-20-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Qual \u00e8 la localit\u00e0 con il maggior numero di fornitori?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (f:Fornitore)-[:SI_TROVA_A]->(l:Luogo)\nRETURN l.localita AS localita, count(DISTINCT f) AS numeroFornitori\nORDER BY numeroFornitori DESC\nLIMIT 1",
+      "expected_cypher": "MATCH (f:Fornitore)-[:SI_TROVA_A]->(l:Luogo) WHERE l.localita IS NOT NULL RETURN l.localita AS localita, count(DISTINCT f) AS numeroFornitori ORDER BY numeroFornitori DESC LIMIT 1",
+      "time_total": 8.861459341831505,
+      "time_generation": 1.3857388440519571,
+      "time_db": 0.09785939194262028,
+      "time_synthesis": 2.6264388700947165,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.9118541033434651,
+      "specialist": "PURCHASE_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-21-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Qual \u00e8 l'importo medio per riga documento nelle fatture di vendita?",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType)\nWHERE toLower(trim(dt.codice)) = 'fv' OR toLower(trim(dt.nome)) = 'fattura di vendita'\nMATCH (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0\nRETURN avg(dr.importo) AS mediaImportoRigaDocumento",
+      "expected_cypher": "MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN avg(dr.importo) AS importoMedioRiga",
+      "time_total": 11.617497936356813,
+      "time_generation": 4.497712604701519,
+      "time_db": 0.598589323926717,
+      "time_synthesis": 1.7294277758337557,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.5634408602150538,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "importoMedioRiga": 795.8768425944166
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "mediaImportoRigaDocumento": null
+        }
+      ]
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-22-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Mostrami 10 documenti di tipo 'FVC' emessi a Gennaio 2025 al cliente 'L'ABBONDANZA SRL'",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType)\nWHERE toLower(trim(c.name)) = 'l\\'abbondanza srl'\n  AND dt.codice = 'FVC'\n  AND doc.dataEmissione.year = 2025\n  AND doc.dataEmissione.month = 1\nRETURN DISTINCT doc.documentoId AS documento\nORDER BY documento\nLIMIT 10",
+      "expected_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType) WHERE toLower(trim(c.name)) = 'l\\'abbondanza srl' AND dt.codice = 'FVC' AND doc.dataEmissione.year = 2025 AND doc.dataEmissione.month = 1 RETURN doc.documentoId AS documento LIMIT 10",
+      "time_total": 18.4972933717072,
+      "time_generation": 2.613917193841189,
+      "time_db": 0.2834490668028593,
+      "time_synthesis": 2.8997122603468597,
+      "jaccard_index": 0.05263157894736842,
+      "query_similarity": 0.8856088560885609,
+      "specialist": "GENERAL_QUERY",
+      "jaccard_success": false,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "documento": "2-202500001242"
+        },
+        {
+          "documento": "2-202500000859"
+        },
+        {
+          "documento": "2-202500001227"
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "documento": "2-202500000197"
+        },
+        {
+          "documento": "2-202500000638"
+        },
+        {
+          "documento": "2-202500000195"
+        }
+      ]
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-23-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Qual \u00e8 il margine di profitto del prodotto 'GAS FREON SOLSTICE N40 R448A'?",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (a:Articolo)\nWHERE toLower(trim(a.descrizione)) = toLower(trim('GAS FREON SOLSTICE N40 R448A'))\n\nOPTIONAL MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_sales:RigaDocumento)<-[:CONTIENE_RIGA]-(doc_sales:Documento)<-[:HA_RICEVUTO]-(:Cliente)\nWHERE dr_sales.tipoValore = 'Fatturato' AND dr_sales.importo > 0\nWITH a, sum(dr_sales.importo) AS totalRevenue\n\nOPTIONAL MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_purchases:RigaDocumento)<-[:CONTIENE_RIGA]-(doc_purchases:Documento)<-[:HA_EMESSO]-(:Fornitore)\nWHERE dr_purchases.importo > 0\nWITH a, totalRevenue, sum(dr_purchases.importo) AS totalCost\n\nRETURN a.descrizione AS Prodotto,\n       CASE\n           WHEN totalRevenue IS NULL THEN 0.0\n           ELSE totalRevenue\n       END AS totaleRicavo,\n       CASE\n           WHEN totalCost IS NULL THEN 0.0\n           ELSE totalCost\n       END AS totaleCosto,\n       CASE\n           WHEN totalRevenue IS NULL OR totalCost IS NULL THEN null\n           ELSE totalRevenue - totalCost\n       END AS profitto,\n       CASE\n           WHEN totalRevenue IS NULL OR totalRevenue = 0 THEN null\n           ELSE ((totalRevenue - totalCost) / totalRevenue) * 100\n       END AS margineDiProfittoPercentuale",
+      "expected_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr1:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo) WHERE toLower(trim(a.descrizione)) = 'gas freon solstice n40 r448a' AND dr1.tipoValore = 'Fatturato' AND dr1.importo > 0 WITH a, sum(dr1.importo) AS fatturato MATCH (f:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(dr2:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a) WITH a, fatturato, sum(dr2.importo) AS costo RETURN a.descrizione AS prodotto, fatturato, costo, (fatturato - costo) AS margine",
+      "time_total": 25.514776053838432,
+      "time_generation": 17.680465144105256,
+      "time_db": 0.8267572992481291,
+      "time_synthesis": 2.805848825722933,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.1752109020116807,
+      "specialist": "CROSS_DOMAIN",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "prodotto": "GAS FREON SOLSTICE N40 R448A",
+          "fatturato": 2225420.2,
+          "costo": 578501.2,
+          "margine": 1646919.0000000002
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "Prodotto": "GAS FREON SOLSTICE N40 R448A",
+          "totaleRicavo": 2225420.2,
+          "totaleCosto": 578501.2,
+          "profitto": 1646919.0000000002,
+          "margineDiProfittoPercentuale": 74.00485535271048
+        }
+      ]
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-24-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Quali fornitori ci forniscono prodotti venduti al cliente 'BARONE DI FERRANTE EZIO'?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)\nWHERE toLower(trim(c.name)) = 'barone di ferrante ezio'\nWITH collect(DISTINCT a) AS articoliVenduti\nMATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a)\nWHERE a IN articoliVenduti\nRETURN DISTINCT gf.ragioneSociale AS fornitore\nORDER BY fornitore",
+      "expected_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo) WHERE toLower(trim(c.name)) = 'barone di ferrante ezio' WITH collect(DISTINCT a) AS articoliVenduti MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a) WHERE a IN articoliVenduti RETURN DISTINCT gf.ragioneSociale AS fornitore ORDER BY fornitore",
+      "time_total": 11.301548389252275,
+      "time_generation": 3.554907630197704,
+      "time_db": 0.4529332942329347,
+      "time_synthesis": 2.468365928158164,
+      "jaccard_index": 1.0,
+      "query_similarity": 1.0,
+      "specialist": "CROSS_DOMAIN",
+      "jaccard_success": true,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-25-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Elenca 5 prodotti che abbiamo venduto ma mai acquistato",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (a:Articolo)<-[:RIGUARDA_ARTICOLO]-(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato'\nWITH DISTINCT a\nWHERE NOT (a)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)\nRETURN a.descrizione AS prodotto\nORDER BY prodotto\nLIMIT 5",
+      "expected_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo) WHERE NOT EXISTS { MATCH (a)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore) } RETURN DISTINCT a.descrizione AS prodotto ORDER BY prodotto LIMIT 5",
+      "time_total": 20.246137989219278,
+      "time_generation": 14.650190848857164,
+      "time_db": 0.2812226810492575,
+      "time_synthesis": 2.3762640398927033,
+      "jaccard_index": 0.6666666666666666,
+      "query_similarity": 0.6565143824027073,
+      "specialist": "CROSS_DOMAIN",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "prodotto": "ANTIVIBRANTE D.16"
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "prodotto": "ANTIVIBRANTE D.18"
+        }
+      ]
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-26-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Elenca 5 prodotti che abbiamo acquistato ma mai venduto",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (a:Articolo)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)\nWHERE NOT (a)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento {tipoValore:'Fatturato'})\nRETURN DISTINCT a.descrizione AS prodottoMaiVenduto\nORDER BY prodottoMaiVenduto\nLIMIT 5",
+      "expected_cypher": "MATCH (a:Articolo)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)\nWHERE NOT (a)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento {tipoValore: 'Fatturato'})\nRETURN DISTINCT a.descrizione AS prodottoMaiVenduto\nORDER BY prodottoMaiVenduto\nLIMIT 5",
+      "time_total": 15.153914550784975,
+      "time_generation": 8.575878147035837,
+      "time_db": 0.4313584757037461,
+      "time_synthesis": 2.3822306250222027,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.9982238010657194,
+      "specialist": "CROSS_DOMAIN",
+      "jaccard_success": true,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-27-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Qual \u00e8 il fatturato della sottofamiglia 'COMPRESSORI SEMIERMETICI'?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (sf:Sottofamiglia)<-[:APPARTIENE_A]-(a:Articolo)<-[:RIGUARDA_ARTICOLO]-(dr:RigaDocumento)\nWHERE toLower(trim(sf.nome)) = 'compressori semiermetici' AND dr.tipoValore = 'Fatturato' AND dr.importo > 0\nRETURN sum(dr.importo) AS totale",
+      "expected_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)-[:APPARTIENE_A]->(sf:Sottofamiglia) WHERE toLower(trim(sf.nome)) = 'compressori semiermetici' AND dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN sum(dr.importo) AS fatturatoSottofamiglia",
+      "time_total": 11.374980142805725,
+      "time_generation": 2.4251942350529134,
+      "time_db": 0.4632921749725938,
+      "time_synthesis": 4.895987247116864,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.635036496350365,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-28-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Elenca le sottofamiglie della famiglia 'CENTRALI FRIGO'",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (f:Famiglia)<-[:INCLUSA_IN]-(sf:Sottofamiglia)\nWHERE toLower(trim(f.nome)) = 'centrali frigo'\nRETURN DISTINCT sf.nome AS sottofamiglia\nORDER BY sottofamiglia",
+      "expected_cypher": "MATCH (f:Famiglia)<-[:INCLUSA_IN]-(sf:Sottofamiglia) WHERE toLower(trim(f.nome)) = 'centrali frigo' RETURN DISTINCT sf.nome AS sottofamiglia ORDER BY sottofamiglia",
+      "time_total": 9.667796890717,
+      "time_generation": 2.3329620263539255,
+      "time_db": 0.0318509372882545,
+      "time_synthesis": 4.038129436317831,
+      "jaccard_index": 1.0,
+      "query_similarity": 1.0,
+      "specialist": "GENERAL_QUERY",
+      "jaccard_success": true,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-29-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Qual \u00e8 il fatturato del primo trimestre 2024?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato'\n  AND dr.importo > 0\n  AND doc.dataEmissione.year = 2024\n  AND doc.dataEmissione.month IN [1, 2, 3]\nRETURN sum(dr.importo) AS totale",
+      "expected_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 AND doc.dataEmissione.year = 2024 AND doc.dataEmissione.month >= 1 AND doc.dataEmissione.month <= 3 RETURN sum(dr.importo) AS fatturatoTrimestre",
+      "time_total": 10.243414668831974,
+      "time_generation": 1.6792538072913885,
+      "time_db": 0.27086112508550286,
+      "time_synthesis": 3.9509066278114915,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.8716981132075472,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-30-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Qual \u00e8 il fatturato tra Gennaio 2024 e Marzo 2024?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE doc.dataEmissione.year = 2024\n  AND doc.dataEmissione.month >= 1\n  AND doc.dataEmissione.month <= 3\n  AND dr.tipoValore = 'Fatturato'\n  AND dr.importo > 0\nRETURN sum(dr.importo) AS totale",
+      "expected_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 AND doc.dataEmissione >= date('2024-01-01') AND doc.dataEmissione <= date('2024-03-31') RETURN sum(dr.importo) AS fatturatoPeriodo",
+      "time_total": 8.624845157843083,
+      "time_generation": 2.206367038656026,
+      "time_db": 0.2795840841718018,
+      "time_synthesis": 2.6599432602524757,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.46210720887245843,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-31-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Elenca i clienti con fatturato superiore a 50000 euro",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0\nWITH c.name AS cliente, sum(dr.importo) AS totale\nWHERE totale > 50000\nRETURN cliente, totale\nORDER BY totale DESC\nLIMIT 10",
+      "expected_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH c, sum(dr.importo) AS fatturatoTotale WHERE fatturatoTotale > 50000 RETURN c.name AS cliente, fatturatoTotale ORDER BY fatturatoTotale DESC",
+      "time_total": 15.132841671817005,
+      "time_generation": 4.528865548316389,
+      "time_db": 0.5130892060697079,
+      "time_synthesis": 5.814651292283088,
+      "jaccard_index": 0.019230769230769232,
+      "query_similarity": 0.8539741219963032,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "cliente": "CAPRERA SUPERMARKET SRL",
+          "fatturatoTotale": 54947.829999999994
+        },
+        {
+          "cliente": "GREENCORE I.E. SRL",
+          "fatturatoTotale": 52044.0
+        },
+        {
+          "cliente": "SUPERMERCATO PERUGIA SRL",
+          "fatturatoTotale": 128716.39999999998
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "cliente": "BNL LEASING SPA",
+          "totale": 1874460.0
+        },
+        {
+          "cliente": "SEGIT SRL",
+          "totale": 1096036.1999999995
+        },
+        {
+          "cliente": "NUOVA C.R.SUPERMERCATI SRL",
+          "totale": 755351.4899999999
+        }
+      ]
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-32-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Quali sono i 3 prodotti pi\u00f9 venduti al cliente 'BARONE DI FERRANTE EZIO'?",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)\nWHERE toLower(trim(c.name)) = 'barone di ferrante ezio'\nRETURN a.descrizione AS prodotto, sum(dr.quantita) AS quantitaTotale\nORDER BY quantitaTotale DESC\nLIMIT 3",
+      "expected_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo) WHERE toLower(trim(c.name)) = 'barone di ferrante ezio' AND dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN a.descrizione AS prodotto, sum(dr.importo) AS totaleVenduto ORDER BY totaleVenduto DESC LIMIT 3",
+      "time_total": 16.716326302848756,
+      "time_generation": 2.228849198203534,
+      "time_db": 0.14649260602891445,
+      "time_synthesis": 7.22397865075618,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.6842105263157895,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "prodotto": "Articolo placeholder: ID_NON_DISPONIBILE",
+          "totaleVenduto": 1557.38
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "prodotto": "Articolo placeholder: ID_NON_DISPONIBILE",
+          "quantitaTotale": 1.0
+        }
+      ]
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-33-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Quali sono i 3 prodotti meno venduti al cliente 'BARONE DI FERRANTE EZIO'?",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)\nWHERE toLower(trim(c.name)) = toLower(trim('BARONE DI FERRANTE EZIO'))\nRETURN a.descrizione AS prodotto, sum(dr.quantita) AS quantitaTotale\nORDER BY quantitaTotale ASC\nLIMIT 3",
+      "expected_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo) WHERE toLower(trim(c.name)) = 'barone di ferrante ezio' AND dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN a.descrizione AS prodotto, sum(dr.importo) AS totaleVenduto ORDER BY totaleVenduto ASC LIMIT 3",
+      "time_total": 12.866473406087607,
+      "time_generation": 2.749464720953256,
+      "time_db": 0.1562215592712164,
+      "time_synthesis": 6.628130344673991,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.5861513687600645,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "prodotto": "Articolo placeholder: ID_NON_DISPONIBILE",
+          "totaleVenduto": 1557.38
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "prodotto": "Articolo placeholder: ID_NON_DISPONIBILE",
+          "quantitaTotale": 1.0
+        }
+      ]
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-34-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Quanti fornitori appartengono a ciascun gruppo di fornitori?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(f:Fornitore)\nRETURN gf.ragioneSociale AS gruppoFornitore, count(DISTINCT f) AS conteggio",
+      "expected_cypher": "MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(f:Fornitore) RETURN gf.ragioneSociale AS gruppo, count(f) AS numeroFornitori ORDER BY numeroFornitori DESC",
+      "time_total": 14.126261677592993,
+      "time_generation": 1.6306478823535144,
+      "time_db": 0.7353740041144192,
+      "time_synthesis": 3.2493392028845847,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.7755102040816326,
+      "specialist": "PURCHASE_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-35-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Qual \u00e8 l'importo minimo registrato in una singola riga di fattura di vendita?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0\nRETURN min(dr.importo) AS importoMinimo",
+      "expected_cypher": "MATCH (dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN min(dr.importo) AS importoMinimo",
+      "time_total": 9.24717322923243,
+      "time_generation": 4.095293228048831,
+      "time_db": 0.1154904249124229,
+      "time_synthesis": 1.6228112098760903,
+      "jaccard_index": 1.0,
+      "query_similarity": 1.0,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-36-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Qual \u00e8 l'importo massimo registrato in una singola riga di fattura di vendita?",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento),\n      (doc)-[:IS_TYPE]->(dt:DocType)\nWHERE dt.codice = 'FATTURA'\n  AND dr.tipoValore = 'Fatturato'\n  AND dr.importo > 0\nRETURN max(dr.importo) AS importoMassimo",
+      "expected_cypher": "MATCH (dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN max(dr.importo) AS importoMassimo",
+      "time_total": 14.78769424604252,
+      "time_generation": 8.20340907201171,
+      "time_db": 0.17606983613222837,
+      "time_synthesis": 1.5677805743180215,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.6629213483146067,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "importoMassimo": 980000.0
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "importoMassimo": null
+        }
+      ]
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-37-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Qual \u00e8 la quantit\u00e0 media di articoli per riga nei documenti di acquisto?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nRETURN avg(dr.quantita) AS media",
+      "expected_cypher": "MATCH (:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) RETURN avg(dr.quantita) AS quantitaMediaAcquisto",
+      "time_total": 21.866313073784113,
+      "time_generation": 3.6520054982975125,
+      "time_db": 0.17307964339852333,
+      "time_synthesis": 12.034457761328667,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.926829268292683,
+      "specialist": "PURCHASE_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-38-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Quanti articoli unici sono presenti nel catalogo?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (a:Articolo)\nRETURN count(DISTINCT a) AS conteggio",
+      "expected_cypher": "MATCH (a:Articolo) RETURN count(DISTINCT a) AS totaleArticoli",
+      "time_total": 24.81595302373171,
+      "time_generation": 1.0939777540042996,
+      "time_db": 0.051222768146544695,
+      "time_synthesis": 2.3153797308914363,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.8547008547008547,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-39-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Elenca i clienti dell'azienda '1' situati nella provincia di 'PG'",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (c:Cliente)-[:APPARTIENE_A]->(d:Ditta),\n      (c)-[:HAS_ADDRESS]->(l:Luogo)\nWHERE d.dittaId = '1'\n  AND toLower(trim(l.provincia)) = 'pg'\nRETURN DISTINCT c.name AS cliente\nORDER BY cliente\nLIMIT 10",
+      "expected_cypher": "MATCH (d:Ditta {dittaId: '1'})<-[:APPARTIENE_A]-(c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) WHERE toLower(trim(l.provincia)) = 'pg' RETURN c.name AS cliente ORDER BY cliente",
+      "time_total": 9.753317866008729,
+      "time_generation": 2.144660587888211,
+      "time_db": 0.16000453615561128,
+      "time_synthesis": 3.3780654021538794,
+      "jaccard_index": 0.008203445447087777,
+      "query_similarity": 0.7679558011049724,
+      "specialist": "GENERAL_QUERY",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "cliente": "BARDELLI GIANFRANCO SNC"
+        },
+        {
+          "cliente": "PESCHERIA LA SCOGLIERA"
+        },
+        {
+          "cliente": "FLORA FLOWERS SAS"
+        }
+      ],
+      "mismatch_extra": []
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-40-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Calcola il fatturato totale per il secondo trimestre del 2024 (aprile, maggio, giugno).",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE doc.dataEmissione.year = 2024\n  AND doc.dataEmissione.month IN [4, 5, 6]\n  AND dr.tipoValore = 'Fatturato'\n  AND dr.importo > 0\nRETURN sum(dr.importo) AS totale",
+      "expected_cypher": "MATCH (:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 AND doc.dataEmissione.year = 2024 AND doc.dataEmissione.month IN [4, 5, 6] RETURN sum(dr.importo) AS fatturatoTrimestre",
+      "time_total": 9.849700852762908,
+      "time_generation": 3.0201106062158942,
+      "time_db": 0.2665151893161237,
+      "time_synthesis": 2.2919203001074493,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.75,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-41-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Trova tutti gli articoli la cui descrizione inizia con 'TUBO'",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (a:Articolo)\nWHERE toLower(trim(a.descrizione)) STARTS WITH 'tubo'\nRETURN DISTINCT a.descrizione AS articolo\nORDER BY articolo\nLIMIT 20",
+      "expected_cypher": "MATCH (a:Articolo) WHERE toLower(trim(a.descrizione)) STARTS WITH 'tubo' RETURN a.descrizione AS articolo",
+      "time_total": 9.373864734079689,
+      "time_generation": 1.3972923629917204,
+      "time_db": 0.13328526820987463,
+      "time_synthesis": 2.59786644205451,
+      "jaccard_index": 0.0711743772241993,
+      "query_similarity": 0.8536585365853658,
+      "specialist": "GENERAL_QUERY",
+      "jaccard_success": false,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "articolo": "TUBO RAME RIC. D.18"
+        },
+        {
+          "articolo": "TUBO NEON 36W/79"
+        },
+        {
+          "articolo": "TUBO RAME DA 10"
+        }
+      ],
+      "mismatch_extra": []
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-42-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Mostrami i documenti di tipo 'FNA' ricevuti dal fornitore 'FORNITORE ESEMPIO SPA'",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (f:Fornitore)-[:HA_EMESSO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType)\nWHERE toLower(trim(f.ragioneSociale)) = 'fornitore esempio spa'\n  AND toLower(trim(dt.codice)) = 'fna'\nRETURN DISTINCT doc.documentoId AS documento\nORDER BY documento\nLIMIT 20",
+      "expected_cypher": "MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType) WHERE toLower(trim(gf.ragioneSociale)) = 'fornitore esempio spa' AND dt.codice = 'FNA' RETURN doc.documentoId AS documento",
+      "time_total": 11.97080804174766,
+      "time_generation": 1.7290648617781699,
+      "time_db": 0.1659606141038239,
+      "time_synthesis": 2.062498955987394,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.731006160164271,
+      "specialist": "GENERAL_QUERY",
+      "jaccard_success": true,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-43-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Chi sono i 3 clienti con il fatturato pi\u00f9 basso?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0\nRETURN c.name AS cliente, sum(dr.importo) AS totale\nORDER BY totale ASC\nLIMIT 3",
+      "expected_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN c.name AS cliente, sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale ASC LIMIT 3",
+      "time_total": 8.946299906820059,
+      "time_generation": 1.8131766938604414,
+      "time_db": 0.6320373420603573,
+      "time_synthesis": 2.6126507739536464,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.9511111111111111,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-44-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Chi sono i 3 clienti con il fatturato pi\u00f9 alto?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0\nRETURN c.name AS cliente, sum(dr.importo) AS totale\nORDER BY totale DESC\nLIMIT 3",
+      "expected_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN c.name AS cliente, sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC LIMIT 3",
+      "time_total": 11.185307234991342,
+      "time_generation": 2.4388161757960916,
+      "time_db": 0.5712491697631776,
+      "time_synthesis": 3.7480618907138705,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.9513274336283186,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-45-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Quali sono i 5 articoli con il costo totale di acquisto pi\u00f9 alto?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)\nRETURN a.descrizione AS articolo, sum(dr.importo) AS totale\nORDER BY totale DESC\nLIMIT 5",
+      "expected_cypher": "MATCH (a:Articolo)<-[:RIGUARDA_ARTICOLO]-(dr:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore) RETURN a.descrizione AS articolo, sum(dr.importo) AS costoTotale ORDER BY costoTotale DESC LIMIT 5",
+      "time_total": 11.645100915804505,
+      "time_generation": 2.517501298803836,
+      "time_db": 0.32046409975737333,
+      "time_synthesis": 4.60820297896862,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.5545023696682464,
+      "specialist": "PURCHASE_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-46-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Quali sono i 5 articoli con il costo totale di acquisto pi\u00f9 basso?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)\nRETURN a.descrizione AS articolo, sum(dr.importo) AS totaleAcquisto\nORDER BY totaleAcquisto ASC\nLIMIT 5",
+      "expected_cypher": "MATCH (a:Articolo)<-[:RIGUARDA_ARTICOLO]-(dr:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore) RETURN a.descrizione AS articolo, sum(dr.importo) AS costoTotale ORDER BY costoTotale ASC LIMIT 5",
+      "time_total": 8.826831100974232,
+      "time_generation": 2.107224376872182,
+      "time_db": 0.3586838822811842,
+      "time_synthesis": 2.3814875432290137,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.48623853211009177,
+      "specialist": "PURCHASE_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-47-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Quale fornitore ci vende la gamma pi\u00f9 ampia di articoli unici?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)\nRETURN gf.ragioneSociale AS fornitore, count(DISTINCT a) AS conteggioArticoliUnici\nORDER BY conteggioArticoliUnici DESC\nLIMIT 1",
+      "expected_cypher": "MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo) RETURN gf.ragioneSociale AS fornitore, count(DISTINCT a) AS varietaProdotti ORDER BY varietaProdotti DESC LIMIT 1",
+      "time_total": 11.377087271772325,
+      "time_generation": 1.5199119877070189,
+      "time_db": 0.30821796227246523,
+      "time_synthesis": 3.8480483409948647,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.8745519713261649,
+      "specialist": "PURCHASE_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-48-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Quale fornitore ci vende la gamma meno ampia di articoli unici?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)\nRETURN gf.ragioneSociale AS gruppoFornitore, count(DISTINCT a.descrizione) AS conteggio\nORDER BY conteggio ASC\nLIMIT 1",
+      "expected_cypher": "MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo) RETURN gf.ragioneSociale AS fornitore, count(DISTINCT a) AS varietaProdotti ORDER BY varietaProdotti ASC LIMIT 1",
+      "time_total": 9.81562667293474,
+      "time_generation": 2.399079142138362,
+      "time_db": 0.38260568119585514,
+      "time_synthesis": 2.318608622997999,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.8613138686131386,
+      "specialist": "PURCHASE_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-49-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Ordina le aziende in base al numero totale di documenti di vendita emessi.",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (d:Ditta)<-[:APPARTIENE_A]-(c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)\nRETURN d.dittaId AS ditta, count(DISTINCT doc) AS conteggio\nORDER BY conteggio DESC",
+      "expected_cypher": "MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(doc:Documento) RETURN d.dittaId AS ditta, count(doc) AS numeroDocumenti ORDER BY numeroDocumenti DESC",
+      "time_total": 13.86465384811163,
+      "time_generation": 3.004428671207279,
+      "time_db": 0.15671213204041123,
+      "time_synthesis": 1.9911380195990205,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.8695652173913043,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-50-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Qual \u00e8 il fornitore con il maggior numero di articoli forniti?",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nRETURN gf.ragioneSociale AS fornitore, sum(dr.quantita) AS conteggio\nORDER BY conteggio DESC\nLIMIT 1",
+      "expected_cypher": "MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo) RETURN gf.ragioneSociale AS fornitore, count(DISTINCT a) AS numeroArticoli ORDER BY numeroArticoli DESC LIMIT 1",
+      "time_total": 9.784411787055433,
+      "time_generation": 2.633922463748604,
+      "time_db": 0.24491897923871875,
+      "time_synthesis": 2.434063084423542,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.7580645161290323,
+      "specialist": "PURCHASE_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "fornitore": "MORELLI SPA",
+          "numeroArticoli": 383
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "fornitore": "MORELLI SPA",
+          "conteggio": 274056.15
+        }
+      ]
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-51-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Chi sono i principali fornitori degli articoli venduti al nostro miglior cliente?",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0\nWITH c, sum(dr.importo) AS totalSales\nORDER BY totalSales DESC\nLIMIT 1\nMATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a_sold:Articolo)\nWITH collect(DISTINCT a_sold) AS articlesSoldToBestCustomer\nMATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(dr_f:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a_supplied:Articolo)\nWHERE a_supplied IN articlesSoldToBestCustomer\nWITH gf, sum(dr_f.importo) AS totale\nORDER BY totale DESC\nRETURN gf.ragioneSociale AS fornitore, totale\nLIMIT 10",
+      "expected_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH c, sum(dr.importo) AS fatturatoCliente ORDER BY fatturatoCliente DESC LIMIT 1 WITH c AS topCliente MATCH (topCliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo) WITH topCliente, collect(DISTINCT a) AS articoliDelTopCliente MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo) WHERE a IN articoliDelTopCliente RETURN gf.ragioneSociale AS fornitore, count(DISTINCT a) AS numeroArticoliDiversiForniti ORDER BY numeroArticoliDiversiForniti DESC",
+      "time_total": 24.356383222155273,
+      "time_generation": 12.667911184951663,
+      "time_db": 0.818812282755971,
+      "time_synthesis": 3.3222121479921043,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.6958904109589041,
+      "specialist": "CROSS_DOMAIN",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "fornitore": "CHENGDU YUEHONGSHUN SHANGMAO YOUXIAN GONGSI",
+          "numeroArticoliDiversiForniti": 1
+        },
+        {
+          "fornitore": "YUANJIE",
+          "numeroArticoliDiversiForniti": 1
+        },
+        {
+          "fornitore": "ADOBE SYSTEMS SOFTWARE IRELAND LTD",
+          "numeroArticoliDiversiForniti": 1
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "fornitore": "ARCI SRL",
+          "totale": 262622.66
+        },
+        {
+          "fornitore": "POLISTAMP INFISSI SRL",
+          "totale": 616056.0299999999
+        },
+        {
+          "fornitore": "SALDOGAS SRL",
+          "totale": 749096.67
+        }
+      ]
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-52-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Quali sono le famiglie di prodotti vendute sia dalla ditta '1' che dalla ditta '2'?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(f:Famiglia)\nWHERE d.dittaId IN ['1', '2']\nWITH f.nome AS familyName, COLLECT(DISTINCT d.dittaId) AS companiesSellingFamily\nWHERE SIZE(companiesSellingFamily) = 2\nRETURN familyName AS famiglia\nORDER BY famiglia",
+      "expected_cypher": "MATCH (fam1:Famiglia)<-[:INCLUSA_IN*0..]-(:Sottofamiglia)<-[:APPARTIENE_A]-(:Articolo)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(:Cliente)-[:APPARTIENE_A]->(:Ditta {dittaId: '1'}) WITH collect(DISTINCT fam1) AS famiglieDitta1 MATCH (fam2:Famiglia)<-[:INCLUSA_IN*0..]-(:Sottofamiglia)<-[:APPARTIENE_A]-(:Articolo)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(:Cliente)-[:APPARTIENE_A]->(:Ditta {dittaId: '2'}) WHERE fam2 IN famiglieDitta1 RETURN DISTINCT fam2.nome AS famigliaComune ORDER BY famigliaComune",
+      "time_total": 38.19409807911143,
+      "time_generation": 17.279996315017343,
+      "time_db": 8.411052166949958,
+      "time_synthesis": 2.6954289507120848,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.12890231621349446,
+      "specialist": "GENERAL_QUERY",
+      "jaccard_success": true,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-53-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Mostrami 5 prodotti che abbiamo acquistato ma mai venduto.",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (a:Articolo)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)\nWHERE NOT (a)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento {tipoValore:'Fatturato'})\nRETURN DISTINCT a.descrizione AS prodottoMaiVenduto\nORDER BY prodottoMaiVenduto\nLIMIT 5",
+      "expected_cypher": "MATCH (a:Articolo)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore) WITH DISTINCT a WHERE NOT (a)<-[:RIGUARDA_ARTICOLO]-(:RigaDocumento {tipoValore: 'Fatturato'}) RETURN a.descrizione AS prodottoMaiVenduto LIMIT 5",
+      "time_total": 18.63219497492537,
+      "time_generation": 11.838606347329915,
+      "time_db": 0.23222620505839586,
+      "time_synthesis": 2.56137195462361,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.9003690036900369,
+      "specialist": "CROSS_DOMAIN",
+      "jaccard_success": false,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "prodottoMaiVenduto": "SERB.ACC A/REFR.LT1000"
+        },
+        {
+          "prodottoMaiVenduto": "FABBRICATORE TIPO SG230A"
+        },
+        {
+          "prodottoMaiVenduto": "COMPR.COPELAND ZF13K4E"
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "prodottoMaiVenduto": "ACCESSORIO-ZRP-M6"
+        },
+        {
+          "prodottoMaiVenduto": "AEROEVAPORATORE HDI 406 E 3"
+        },
+        {
+          "prodottoMaiVenduto": "ACCESSORIO-P5"
+        }
+      ]
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-54-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Mostrami il fatturato totale per ogni mese dell'anno corrente della ditta '1'.",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (d:Ditta)<-[:APPARTIENE_A]-(c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE d.dittaId = '1'\n  AND doc.dataEmissione.year = date().year\n  AND dr.tipoValore = 'Fatturato'\n  AND dr.importo > 0\nRETURN doc.dataEmissione.month AS mese, sum(dr.importo) AS totale\nORDER BY mese",
+      "expected_cypher": "MATCH (d:Ditta {dittaId: '1'})<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE date(doc.dataEmissione).year = date().year AND dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN date(doc.dataEmissione).month AS mese, sum(dr.importo) AS fatturatoMensile ORDER BY mese ASC",
+      "time_total": 11.41995559213683,
+      "time_generation": 3.3399247340857983,
+      "time_db": 0.24863429507240653,
+      "time_synthesis": 2.304227556101978,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.4668769716088328,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-55-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Confronta il fatturato totale del 2024 con quello del 2023.",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0\nAND doc.dataEmissione.year IN [2023, 2024]\nWITH doc.dataEmissione.year AS anno, sum(dr.importo) AS totaleAnno\nRETURN\n    sum(CASE WHEN anno = 2023 THEN totaleAnno ELSE 0 END) AS fatturato2023,\n    sum(CASE WHEN anno = 2024 THEN totaleAnno ELSE 0 END) AS fatturato2024",
+      "expected_cypher": "MATCH (:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 AND doc.dataEmissione.year IN [2023, 2024] RETURN doc.dataEmissione.year AS anno, sum(dr.importo) AS fatturatoTotale ORDER BY anno",
+      "time_total": 12.4618628770113,
+      "time_generation": 5.200232396367937,
+      "time_db": 0.4193184692412615,
+      "time_synthesis": 4.051781129091978,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.56875,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "anno": 2023,
+          "fatturatoTotale": 12882538.920000063
+        },
+        {
+          "anno": 2024,
+          "fatturatoTotale": 12683756.870000148
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "fatturato2023": 12882538.920000063,
+          "fatturato2024": 12683756.870000148
+        }
+      ]
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-56-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Quale fornitore \u00e8 stato il pi\u00f9 attivo (per valore di acquisto) nell'ultimo trimestre?",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE doc.dataEmissione >= date({year: 2024, month: 1, day: 1})\n  AND doc.dataEmissione <= date({year: 2024, month: 3, day: 31})\nRETURN gf.ragioneSociale AS fornitore, sum(dr.importo) AS totaleAcquisto\nORDER BY totaleAcquisto DESC\nLIMIT 1",
+      "expected_cypher": "WITH date() - duration({months: 3}) AS dataInizioTrimestre MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE doc.dataEmissione >= dataInizioTrimestre RETURN gf.ragioneSociale AS fornitore, sum(dr.importo) AS totaleAcquistato ORDER BY totaleAcquistato DESC LIMIT 1",
+      "time_total": 21.232565680053085,
+      "time_generation": 14.508654224686325,
+      "time_db": 0.23311604605987668,
+      "time_synthesis": 2.6071656341664493,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.7545582047685835,
+      "specialist": "PURCHASE_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [],
+      "mismatch_extra": [
+        {
+          "fornitore": "MORELLI SPA",
+          "totaleAcquisto": 109819.5
+        }
+      ]
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-57-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Mostrami i clienti il cui primo documento di vendita \u00e8 stato emesso negli ultimi 6 mesi.",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato'\nWITH c, min(doc.dataEmissione) AS firstSalesDocumentDate\nWHERE firstSalesDocumentDate >= date() - duration({months: 6})\nRETURN c.name AS cliente\nORDER BY cliente",
+      "expected_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento) WITH c, min(doc.dataEmissione) AS primoAcquisto WHERE primoAcquisto >= date() - duration({months: 6}) RETURN c.name AS clienteRecente, primoAcquisto ORDER BY primoAcquisto DESC",
+      "time_total": 14.092855857219547,
+      "time_generation": 8.829152304213494,
+      "time_db": 0.5450946870259941,
+      "time_synthesis": 1.6477389689534903,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.6299212598425197,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-58-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Ci sono aziende che non hanno registrato alcun fatturato?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (d:Ditta)\nOPTIONAL MATCH (d)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0\nWITH d, dr\nWHERE dr IS NULL\nRETURN d.dittaId AS dittaSenzaFatturato\nORDER BY dittaSenzaFatturato\nLIMIT 10",
+      "expected_cypher": "MATCH (d:Ditta) WHERE NOT (d)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento {tipoValore: 'Fatturato'}) RETURN d.dittaId AS dittaSenzaFatturato",
+      "time_total": 24.372443829663098,
+      "time_generation": 4.141006478108466,
+      "time_db": 11.658151657320559,
+      "time_synthesis": 1.9043610910885036,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.7130801687763713,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-59-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Ultimo documento emesso nel 2024",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (doc:Documento)\nWHERE doc.dataEmissione.year = 2024\nRETURN doc.documentoId AS documentoId, doc.dataEmissione AS dataEmissione\nORDER BY doc.dataEmissione DESC\nLIMIT 1",
+      "expected_cypher": "MATCH (doc:Documento) WHERE doc.dataEmissione.year = 2024 WITH doc ORDER BY doc.dataEmissione DESC LIMIT 1 OPTIONAL MATCH (doc)<-[:HA_RICEVUTO]-(c:Cliente) OPTIONAL MATCH (doc)<-[:HA_EMESSO]-(f:Fornitore)-[:RAGGRUPPATO_SOTTO]->(gf:GruppoFornitore) RETURN doc.documentoId AS UltimodocumentoId,  doc.dataEmissione AS DataEmissione, CASE WHEN gf IS NOT NULL THEN gf.ragioneSociale ELSE 'Nostra Azienda (Vendita)' END AS EmessoDa, CASE WHEN c IS NOT NULL THEN c.name ELSE 'Nostra Azienda (Acquisto)' END AS EmessoA",
+      "time_total": 10.8385262908414,
+      "time_generation": 1.4628484873101115,
+      "time_db": 0.13039491092786193,
+      "time_synthesis": 2.1465355791151524,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.3029411764705882,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "UltimodocumentoId": "2-202400020704",
+          "DataEmissione": "2024-12-31",
+          "EmessoDa": "Nostra Azienda (Vendita)",
+          "EmessoA": "ROMI S.R.L."
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "documentoId": "2-202400020704",
+          "dataEmissione": "2024-12-31"
+        }
+      ]
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-60-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Trova i fornitori che non ci hanno mai venduto prodotti della famiglia 'CENTRALI FRIGO'",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (fam:Famiglia)<-[:INCLUSA_IN]-(sf:Sottofamiglia)<-[:APPARTIENE_A]-(a:Articolo)\nWHERE toLower(trim(fam.nome)) = 'centrali frigo'\nWITH collect(a) AS centraliFrigoArticles\n\nMATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(f:Fornitore)\nWHERE NOT EXISTS {\n    (f)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(article)\n    WHERE article IN centraliFrigoArticles\n}\nRETURN DISTINCT gf.ragioneSociale AS gruppoFornitore\nORDER BY gruppoFornitore\nLIMIT 10",
+      "expected_cypher": "MATCH (fam:Famiglia) WHERE toLower(trim(fam.nome)) = 'centrali frigo' WITH fam MATCH (gf:GruppoFornitore) WHERE NOT (gf)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam) RETURN gf.ragioneSociale AS fornitore",
+      "time_total": 20.07311286497861,
+      "time_generation": 9.648036169353873,
+      "time_db": 0.2919525019824505,
+      "time_synthesis": 2.275846533011645,
+      "jaccard_index": 0.002631578947368421,
+      "query_similarity": 0.5181598062953995,
+      "specialist": "GENERAL_QUERY",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "fornitore": "FRIGOPANNELLI SRL"
+        },
+        {
+          "fornitore": "NEXT STORE SRL"
+        },
+        {
+          "fornitore": "Zero Limits srl"
+        }
+      ],
+      "mismatch_extra": []
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-61-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Quali clienti appartengono esclusivamente all'azienda '1' e non ad altre?",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (c:Cliente)-[:APPARTIENE_A]->(d:Ditta)\nWITH c, COLLECT(d.dittaId) AS dittaIds\nWHERE '1' IN dittaIds AND SIZE(dittaIds) = 1\nRETURN DISTINCT c.name AS cliente\nORDER BY cliente\nLIMIT 20",
+      "expected_cypher": "MATCH (c:Cliente)-[:APPARTIENE_A]->(d:Ditta) WITH c, collect(d.dittaId) AS ditte WHERE size(ditte) = 1 AND ditte[0] = '1' RETURN c.name AS clienteEsclusivo",
+      "time_total": 26.790213516913354,
+      "time_generation": 4.824327076319605,
+      "time_db": 7.386699327733368,
+      "time_synthesis": 2.086455793119967,
+      "jaccard_index": 0.010610079575596816,
+      "query_similarity": 0.6938775510204082,
+      "specialist": "GENERAL_QUERY",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "clienteEsclusivo": "BARDELLI GIANFRANCO SNC"
+        },
+        {
+          "clienteEsclusivo": "MARAPON GMBH"
+        },
+        {
+          "clienteEsclusivo": "PESCHERIA LA SCOGLIERA"
+        }
+      ],
+      "mismatch_extra": []
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-62-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Per ogni famiglia di prodotto, chi \u00e8 il cliente che ha generato il fatturato maggiore?",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (f:Famiglia)<-[:INCLUSA_IN]-(:Sottofamiglia)<-[:APPARTIENE_A]-(:Articolo)<-[:RIGUARDA_ARTICOLO]-(dr:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(c:Cliente)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0\nWITH f.nome AS famiglia, c.name AS cliente, sum(dr.importo) AS fatturatoCliente\nORDER BY fatturatoCliente DESC\nWITH famiglia, collect({cliente: cliente, fatturato: fatturatoCliente})[0] AS clienteTopFatturato\nRETURN famiglia, clienteTopFatturato.cliente AS cliente, clienteTopFatturato.fatturato AS totaleFatturato\nORDER BY famiglia",
+      "expected_cypher": "MATCH (fam:Famiglia)<-[:INCLUSA_IN]-(:Sottofamiglia)<-[:APPARTIENE_A]-(:Articolo)<-[:RIGUARDA_ARTICOLO]-(dr:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(c:Cliente) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH fam, c, sum(dr.importo) AS fatturato ORDER BY fam.nome, fatturato DESC WITH fam, collect({cliente: c.name, fatturato: fatturato}) AS clientiOrdinati RETURN fam.nome AS famiglia, clientiOrdinati[0].cliente AS topCliente, clientiOrdinati[0].fatturato AS fatturatoMassimo",
+      "time_total": 20.084759382996708,
+      "time_generation": 6.654824200086296,
+      "time_db": 2.532530630007386,
+      "time_synthesis": 6.895304580684751,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.5666356011183598,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "famiglia": "TERMOSTATI",
+          "topCliente": "GMF SRL UNIPERSONALE",
+          "fatturatoMassimo": 2501148.450000005
+        },
+        {
+          "famiglia": "MONITORE",
+          "topCliente": "GMF SRL UNIPERSONALE",
+          "fatturatoMassimo": 2501148.450000005
+        },
+        {
+          "famiglia": "GAS",
+          "topCliente": "GMF SRL UNIPERSONALE",
+          "fatturatoMassimo": 2501148.450000005
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "famiglia": "BOYLER",
+          "cliente": "GMF SRL UNIPERSONALE",
+          "totaleFatturato": 2501758.8500000047
+        },
+        {
+          "famiglia": "UNITA CONDENSATRICI",
+          "cliente": "GMF SRL UNIPERSONALE",
+          "totaleFatturato": 2501758.8500000047
+        },
+        {
+          "famiglia": "ARMAFLEX",
+          "cliente": "GMF SRL UNIPERSONALE",
+          "totaleFatturato": 2501758.8500000047
+        }
+      ]
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-63-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Calcola il rapporto tra costo totale e fatturato totale per il prodotto 'GAS FREON SOLSTICE N40 R448A'",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (a:Articolo)\nWHERE toLower(trim(a.descrizione)) = toLower(trim('GAS FREON SOLSTICE N40 R448A'))\n\nOPTIONAL MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_rev:RigaDocumento)-[:CONTIENE_RIGA]->(:Documento)<-[:HA_RICEVUTO]-(:Cliente)\nWHERE dr_rev.tipoValore = 'Fatturato' AND dr_rev.importo > 0\nWITH a, sum(dr_rev.importo) AS totaleFatturato\n\nOPTIONAL MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_cost:RigaDocumento)-[:CONTIENE_RIGA]->(:Documento)<-[:HA_EMESSO]-(:Fornitore)\nWITH a, totaleFatturato, sum(dr_cost.importo) AS totaleCosto\n\nRETURN a.descrizione AS prodotto,\n       CASE\n           WHEN totaleFatturato IS NULL OR totaleFatturato = 0 THEN null\n           ELSE toFloat(totaleCosto) / totaleFatturato\n       END AS rapportoCostoFatturato",
+      "expected_cypher": "MATCH (a:Articolo) WHERE toLower(trim(a.descrizione)) = 'gas freon solstice n40 r448a' OPTIONAL MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_acq:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore) WITH a, sum(dr_acq.importo) AS costoTotale OPTIONAL MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_ven:RigaDocumento {tipoValore: 'Fatturato'})<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(:Cliente) WHERE dr_ven.importo > 0 WITH costoTotale, sum(dr_ven.importo) AS fatturatoTotale RETURN  costoTotale, fatturatoTotale, CASE WHEN costoTotale <> 0 THEN fatturatoTotale / costoTotale ELSE null END AS rapporto",
+      "time_total": 24.643578287679702,
+      "time_generation": 16.565802320837975,
+      "time_db": 0.41285874182358384,
+      "time_synthesis": 2.7700274558737874,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.3904320987654321,
+      "specialist": "CROSS_DOMAIN",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "costoTotale": 578501.2,
+          "fatturatoTotale": 2225420.2,
+          "rapporto": 3.846872227749917
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "prodotto": "GAS FREON SOLSTICE N40 R448A",
+          "rapportoCostoFatturato": null
+        }
+      ]
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-64-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Quale provincia ha generato il volume di fatturato pi\u00f9 alto?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo)\nMATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0\nRETURN l.provincia AS provincia, sum(dr.importo) AS totale\nORDER BY totale DESC\nLIMIT 1",
+      "expected_cypher": "MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN l.provincia AS provincia, sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC LIMIT 1",
+      "time_total": 9.207148298155516,
+      "time_generation": 3.0556220123544335,
+      "time_db": 0.6697874460369349,
+      "time_synthesis": 2.17382425814867,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.9591078066914498,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-65-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Quale provincia ha generato il volume di fatturato pi\u00f9 basso?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo)\nMATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0\nRETURN l.provincia AS provincia, sum(dr.importo) AS totale\nORDER BY totale ASC\nLIMIT 1",
+      "expected_cypher": "MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN l.provincia AS provincia, sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale ASC LIMIT 1",
+      "time_total": 8.728830078151077,
+      "time_generation": 2.5691617322154343,
+      "time_db": 0.7467982759699225,
+      "time_synthesis": 2.200094391591847,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.9589552238805971,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-66-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Lista dei clienti il cui fatturato totale \u00e8 superiore al fatturato medio di tutti i clienti.",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0\nWITH c.name AS customerName, sum(dr.importo) AS customerTotalRevenue\n\nWITH collect({name: customerName, revenue: customerTotalRevenue}) AS allCustomers,\n     avg(customerTotalRevenue) AS overallAverageRevenue\n\nUNWIND allCustomers AS customerData\nWITH customerData, overallAverageRevenue\nWHERE customerData.revenue > overallAverageRevenue\nRETURN customerData.name AS cliente, customerData.revenue AS totaleFatturato\nORDER BY totaleFatturato DESC\nLIMIT 10",
+      "expected_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH count(DISTINCT c) AS totalCustomers, sum(dr.importo) AS totalRevenue WITH CASE WHEN totalCustomers = 0 THEN null ELSE totalRevenue / totalCustomers END AS avgRevenue WHERE avgRevenue IS NOT NULL MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH c, sum(dr.importo) AS customerRevenue, avgRevenue WHERE customerRevenue > avgRevenue RETURN c.name AS cliente, customerRevenue ORDER BY customerRevenue DESC",
+      "time_total": 88.20738762430847,
+      "time_generation": 11.999416024424136,
+      "time_db": 67.81252787820995,
+      "time_synthesis": 3.646917099133134,
+      "jaccard_index": 0.023529411764705882,
+      "query_similarity": 0.367816091954023,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "cliente": "SUPERMERCATO PERUGIA SRL",
+          "customerRevenue": 128716.39999999998
+        },
+        {
+          "cliente": "EPTA SPA",
+          "customerRevenue": 100734.53
+        },
+        {
+          "cliente": "MAGESTIC SRL",
+          "customerRevenue": 64244.23000000002
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "cliente": "BNL LEASING SPA",
+          "totaleFatturato": 1874460.0
+        },
+        {
+          "cliente": "SEGIT SRL",
+          "totaleFatturato": 1096036.1999999995
+        },
+        {
+          "cliente": "NUOVA C.R.SUPERMERCATI SRL",
+          "totaleFatturato": 755351.4899999999
+        }
+      ]
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-67-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Mostrami il numero di documenti per ciascun tipo (codice).",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType)\nRETURN dt.codice AS tipoDocumento, count(doc) AS conteggio\nORDER BY tipoDocumento",
+      "expected_cypher": "MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType) RETURN dt.codice AS tipoDocumento, count(doc) AS numeroDocumenti ORDER BY numeroDocumenti DESC",
+      "time_total": 23.409340596292168,
+      "time_generation": 1.8208856312558055,
+      "time_db": 0.10899279313161969,
+      "time_synthesis": 4.427732927724719,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.8847583643122676,
+      "specialist": "PURCHASE_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-68-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Qual \u00e8 il fatturato totale associato ai documenti di tipo 'FVC'?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nMATCH (doc)-[:IS_TYPE]->(dt:DocType)\nWHERE dt.codice = 'FVC' AND dr.tipoValore = 'Fatturato' AND dr.importo > 0\nRETURN sum(dr.importo) AS totale",
+      "expected_cypher": "MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType {codice: 'FVC'}) MATCH (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN sum(dr.importo) AS fatturatoFVC",
+      "time_total": 7.320741040632129,
+      "time_generation": 2.0023011630401015,
+      "time_db": 0.3858513277955353,
+      "time_synthesis": 1.6872629020363092,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.2660098522167488,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-69-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Quale cliente ha ricevuto il maggior numero di note di credito (codice 'NCC')?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType)\nWHERE toLower(trim(dt.codice)) = 'ncc'\nRETURN c.name AS cliente, count(DISTINCT doc) AS conteggio\nORDER BY conteggio DESC\nLIMIT 1",
+      "expected_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType {codice: 'NCC'}) RETURN c.name AS cliente, count(doc) AS numeroNoteCredito ORDER BY numeroNoteCredito DESC LIMIT 1",
+      "time_total": 9.031088210176677,
+      "time_generation": 2.287915305700153,
+      "time_db": 0.12040163623169065,
+      "time_synthesis": 2.0585839548148215,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.6887755102040817,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-70-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Calcola il valore medio di un documento per ciascun tipo (considerando solo il fatturato).",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0\nWITH doc, sum(dr.importo) AS documentTurnover\nMATCH (doc)-[:IS_TYPE]->(dt:DocType)\nRETURN dt.codice AS tipoDocumento,\n       avg(documentTurnover) AS mediaValoreDocumento\nORDER BY tipoDocumento",
+      "expected_cypher": "MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType) MATCH (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH dt, doc, sum(dr.importo) AS valoreDocumento RETURN dt.codice AS tipoDocumento, avg(valoreDocumento) AS valoreMedio ORDER BY valoreMedio DESC",
+      "time_total": 27.71220437483862,
+      "time_generation": 6.490461626090109,
+      "time_db": 0.40085034584626555,
+      "time_synthesis": 16.405246747191995,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.375,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-71-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Chi \u00e8 il cliente con il fatturato pi\u00f9 alto?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0\nRETURN c.name AS cliente, sum(dr.importo) AS totale\nORDER BY totale DESC\nLIMIT 1",
+      "expected_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN c.name AS cliente, sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC LIMIT 1",
+      "time_total": 7.419398015830666,
+      "time_generation": 1.8684576181694865,
+      "time_db": 0.36387819377705455,
+      "time_synthesis": 1.8846618868410587,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.9513274336283186,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-72-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Elenca 5 clienti situati a Perugia",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo)\nWHERE toLower(trim(l.localita)) = 'perugia'\nRETURN DISTINCT c.name AS cliente\nORDER BY cliente\nLIMIT 5",
+      "expected_cypher": "MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) WHERE toLower(trim(l.localita)) = 'perugia' RETURN DISTINCT c.name AS cliente ORDER BY cliente LIMIT 5",
+      "time_total": 6.871320524252951,
+      "time_generation": 1.8266663756221533,
+      "time_db": 0.043979036156088114,
+      "time_synthesis": 1.7475525992922485,
+      "jaccard_index": 1.0,
+      "query_similarity": 1.0,
+      "specialist": "GENERAL_QUERY",
+      "jaccard_success": true,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-73-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Mostrami i 5 prodotti pi\u00f9 popolari in termini di quantit\u00e0 venduta",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)\nRETURN a.descrizione AS prodotto, sum(dr.quantita) AS quantitaTotale\nORDER BY quantitaTotale DESC\nLIMIT 5",
+      "expected_cypher": "MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo) RETURN a.descrizione AS prodotto, sum(dr.quantita) AS quantitaTotale ORDER BY quantitaTotale DESC LIMIT 5",
+      "time_total": 10.30103152198717,
+      "time_generation": 1.813565708231181,
+      "time_db": 0.6734361262060702,
+      "time_synthesis": 2.7353168046101928,
+      "jaccard_index": 0.1111111111111111,
+      "query_similarity": 0.9355608591885441,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "prodotto": "Articolo placeholder: ID_NON_DISPONIBILE",
+          "quantitaTotale": 127861.05
+        },
+        {
+          "prodotto": "NASTRO ARMAFLEX",
+          "quantitaTotale": 18638.0
+        },
+        {
+          "prodotto": "TUBO ARMAFLEX 19X12",
+          "quantitaTotale": 18520.0
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "prodotto": "GAS FREON SOLSTICE N40 R448A",
+          "quantitaTotale": 124422.5
+        },
+        {
+          "prodotto": "Articolo placeholder: ID_NON_DISPONIBILE",
+          "quantitaTotale": 390024.56999999995
+        },
+        {
+          "prodotto": "NASTRO ARMAFLEX",
+          "quantitaTotale": 31898.0
+        }
+      ]
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-74-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Dimmi il fatturato di ciascuna azienda.",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (d:Ditta)<-[:APPARTIENE_A]-(c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0\nRETURN d.dittaId AS ditta, sum(dr.importo) AS totale\nORDER BY totale DESC, ditta ASC",
+      "expected_cypher": "MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN d.dittaId AS ditta, sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC",
+      "time_total": 8.294878900051117,
+      "time_generation": 1.7623169398866594,
+      "time_db": 0.4634240483865142,
+      "time_synthesis": 2.9435175228863955,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.8924302788844621,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-75-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Quanto ho speso per acquistare il prodotto GAS FREON SOLSTICE N40 R448A?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)\nWHERE toLower(trim(a.descrizione)) = 'gas freon solstice n40 r448a'\nRETURN sum(dr.importo) AS totale",
+      "expected_cypher": "MATCH (a:Articolo)<-[:RIGUARDA_ARTICOLO]-(dr:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore) WHERE toLower(trim(a.descrizione)) = 'gas freon solstice n40 r448a' RETURN sum(dr.importo) AS costoTotaleAcquisto",
+      "time_total": 9.902055841870606,
+      "time_generation": 3.3458298188634217,
+      "time_db": 0.3090641410090029,
+      "time_synthesis": 1.913222650066018,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.579064587973274,
+      "specialist": "PURCHASE_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-76-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Quanto ho guadagnato vendendo il prodotto GAS FREON SOLSTICE N40 R448A?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)\nWHERE toLower(trim(a.descrizione)) = 'gas freon solstice n40 r448a'\n  AND dr.tipoValore = 'Fatturato'\n  AND dr.importo > 0\nRETURN sum(dr.importo) AS totale",
+      "expected_cypher": "MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo) WHERE toLower(trim(a.descrizione)) = 'gas freon solstice n40 r448a' AND dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN sum(dr.importo) AS totaleVenduto",
+      "time_total": 9.76793497800827,
+      "time_generation": 2.627664681058377,
+      "time_db": 0.5293544977903366,
+      "time_synthesis": 1.655967160128057,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.9871559633027523,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-77-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Quali aziende vendono prodotti della famiglia 'CENTRALI FRIGO'?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia)\nWHERE toLower(trim(fam.nome)) = 'centrali frigo'\nRETURN DISTINCT d.dittaId AS ditta\nORDER BY ditta",
+      "expected_cypher": "MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia) WHERE toLower(trim(fam.nome)) = 'centrali frigo' RETURN DISTINCT d.dittaId AS ditta ORDER BY ditta",
+      "time_total": 8.85488816909492,
+      "time_generation": 3.1042530150152743,
+      "time_db": 0.6248885900713503,
+      "time_synthesis": 1.7353332764469087,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.9983579638752053,
+      "specialist": "DITTE_QUERY",
+      "jaccard_success": true,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-78-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Qual \u00e8 l'importo medio per riga documento nelle fatture di vendita?",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nMATCH (doc)-[:IS_TYPE]->(dt:DocType)\nWHERE dt.codice = 'FV'\n  AND dr.tipoValore = 'Fatturato'\n  AND dr.importo > 0\nRETURN avg(dr.importo) AS media",
+      "expected_cypher": "MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN avg(dr.importo) AS importoMedioRiga",
+      "time_total": 12.115272184833884,
+      "time_generation": 5.080342642962933,
+      "time_db": 0.1440502991899848,
+      "time_synthesis": 2.267825786024332,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.712401055408971,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "importoMedioRiga": 795.8768425944166
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "media": null
+        }
+      ]
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-79-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Per ogni azienda, classifica il suo fatturato totale come 'Alto' se supera i 10 milioni, 'Medio' se \u00e8 tra 1 e 10 milioni, e 'Basso' altrimenti.",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (d:Ditta)<-[:APPARTIENE_A]-(c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0\nWITH d.dittaId AS ditta, sum(dr.importo) AS fatturatoTotale\nRETURN ditta, \n       CASE \n         WHEN fatturatoTotale > 10000000 THEN 'Alto'\n         WHEN fatturatoTotale >= 1000000 AND fatturatoTotale <= 10000000 THEN 'Medio'\n         ELSE 'Basso'\n       END AS classificazioneFatturato\nORDER BY ditta ASC",
+      "expected_cypher": "MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH d, sum(dr.importo) AS fatturatoTotale RETURN d.dittaId AS ditta, fatturatoTotale, CASE WHEN fatturatoTotale > 10000000 THEN 'Alto' WHEN fatturatoTotale > 1000000 THEN 'Medio' ELSE 'Basso' END AS categoriaFatturato",
+      "time_total": 11.088212316855788,
+      "time_generation": 2.8211148572154343,
+      "time_db": 0.7722905608825386,
+      "time_synthesis": 2.9814975927583873,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.8292079207920792,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "ditta": "2",
+          "fatturatoTotale": 37155291.67000106,
+          "categoriaFatturato": "Alto"
+        },
+        {
+          "ditta": "3",
+          "fatturatoTotale": 2235052.6599999964,
+          "categoriaFatturato": "Medio"
+        },
+        {
+          "ditta": "1",
+          "fatturatoTotale": 3871373.63,
+          "categoriaFatturato": "Medio"
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "ditta": "1",
+          "classificazioneFatturato": "Medio"
+        },
+        {
+          "ditta": "2",
+          "classificazioneFatturato": "Alto"
+        },
+        {
+          "ditta": "4",
+          "classificazioneFatturato": "Medio"
+        }
+      ]
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-80-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Qual \u00e8 il primo e l'ultimo documento di vendita mai registrato per il cliente 'ACME SRL'?",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE toLower(trim(c.name)) = toLower(trim('ACME SRL'))\n  AND dr.tipoValore = 'Fatturato'\n  AND dr.importo > 0\nWITH DISTINCT doc, c\nORDER BY doc.dataEmissione ASC\nWITH c, collect(doc) AS sortedDocs\nRETURN\n  c.name AS cliente,\n  head(sortedDocs).documentoId AS primoDocumentoId,\n  head(sortedDocs).dataEmissione AS primaDataEmissione,\n  last(sortedDocs).documentoId AS ultimoDocumentoId,\n  last(sortedDocs).dataEmissione AS ultimaDataEmissione",
+      "expected_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento) WHERE toLower(trim(c.name)) = 'acme srl' RETURN min(doc.dataEmissione) AS primoDocumento, max(doc.dataEmissione) AS ultimoDocumento",
+      "time_total": 21.077474967110902,
+      "time_generation": 12.163533514831215,
+      "time_db": 0.70671998988837,
+      "time_synthesis": 2.759356054943055,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.3160919540229885,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "primoDocumento": null,
+          "ultimoDocumento": null
+        }
+      ],
+      "mismatch_extra": []
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-81-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Qual \u00e8 la media del fatturato mensile per il cliente 'ACME SRL' nel 2024?",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE toLower(trim(c.name)) = 'acme srl'\n  AND doc.dataEmissione.year = 2024\n  AND dr.tipoValore = 'Fatturato'\n  AND dr.importo > 0\nWITH doc.dataEmissione.month AS month, sum(dr.importo) AS monthlyTurnover\nRETURN avg(monthlyTurnover) AS mediaFatturatoMensile",
+      "expected_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE toLower(trim(c.name)) = 'l\\'abbondanza srl' AND dr.tipoValore = 'Fatturato' AND dr.importo > 0 AND doc.dataEmissione.year = 2024 WITH date(doc.dataEmissione).month AS mese, sum(dr.importo) AS fatturatoMensile RETURN avg(fatturatoMensile) AS mediaFatturatoMensile",
+      "time_total": 14.394577455241233,
+      "time_generation": 5.484737245831639,
+      "time_db": 0.17632915498688817,
+      "time_synthesis": 3.859981521964073,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.6311239193083573,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "mediaFatturatoMensile": 170779.8825
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "mediaFatturatoMensile": null
+        }
+      ]
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-82-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Per i primi 3 clienti per fatturato, mostra il loro prodotto pi\u00f9 acquistato per valore.",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0\nWITH c, sum(dr.importo) AS totaleFatturatoCliente\nORDER BY totaleFatturatoCliente DESC\nLIMIT 3\n\nMATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0\nWITH c, totaleFatturatoCliente, a.descrizione AS descrizioneProdotto, sum(dr.importo) AS valoreProdotto\nORDER BY c.name, valoreProdotto DESC\n\nWITH c.name AS cliente, totaleFatturatoCliente, collect({prodotto: descrizioneProdotto, valore: valoreProdotto}) AS prodottiAcquistati\nRETURN cliente,\n       totaleFatturatoCliente,\n       head(prodottiAcquistati).prodotto AS prodottoPiuAcquistato,\n       head(prodottiAcquistati).valore AS valoreProdottoAcquistato\nORDER BY totaleFatturatoCliente DESC",
+      "expected_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH c, sum(dr.importo) AS fatturatoCliente ORDER BY fatturatoCliente DESC LIMIT 3 MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr2:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo) WHERE dr2.tipoValore = 'Fatturato' AND dr2.importo > 0 WITH c, a, sum(dr2.importo) AS valoreProdotto ORDER BY c.name, valoreProdotto DESC WITH c, head(collect({prodotto: a.descrizione, valore: valoreProdotto})) AS topProdotto RETURN c.name AS cliente, topProdotto.prodotto AS prodottoTop, topProdotto.valore AS valoreTop ORDER BY c.name",
+      "time_total": 24.828105591703206,
+      "time_generation": 15.880319060757756,
+      "time_db": 0.7858335869386792,
+      "time_synthesis": 3.226226696744561,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.6497395833333334,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "cliente": "L'ABBONDANZA SRL",
+          "prodottoTop": "Articolo placeholder: ID_NON_DISPONIBILE",
+          "valoreTop": 3322468.1200000006
+        },
+        {
+          "cliente": "I.G.E.S. S.R.L.",
+          "prodottoTop": "Articolo placeholder: ID_NON_DISPONIBILE",
+          "valoreTop": 3478623.8499999996
+        },
+        {
+          "cliente": "GMF SRL UNIPERSONALE",
+          "prodottoTop": "Articolo placeholder: ID_NON_DISPONIBILE",
+          "valoreTop": 3123097.5900000003
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "cliente": "GMF SRL UNIPERSONALE",
+          "totaleFatturatoCliente": 5649146.039999996,
+          "prodottoPiuAcquistato": "Articolo placeholder: ID_NON_DISPONIBILE",
+          "valoreProdottoAcquistato": 3123097.5900000003
+        },
+        {
+          "cliente": "L'ABBONDANZA SRL",
+          "totaleFatturatoCliente": 5785617.85999999,
+          "prodottoPiuAcquistato": "Articolo placeholder: ID_NON_DISPONIBILE",
+          "valoreProdottoAcquistato": 3322468.1200000006
+        },
+        {
+          "cliente": "I.G.E.S. S.R.L.",
+          "totaleFatturatoCliente": 4753375.079999999,
+          "prodottoPiuAcquistato": "Articolo placeholder: ID_NON_DISPONIBILE",
+          "valoreProdottoAcquistato": 3478623.8499999996
+        }
+      ]
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-83-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Quali clienti hanno effettuato ordini ma non hanno ancora ricevuto una fattura?",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc_order:Documento)-[:IS_TYPE]->(dt_order:DocType)\nWHERE toLower(trim(dt_order.codice)) = 'ordine'\nWITH DISTINCT c AS customerWithOrder\nWHERE NOT (customerWithOrder)-[:HA_RICEVUTO]->(:Documento)-[:IS_TYPE]->(:DocType {codice: 'FATTURA'})\nRETURN customerWithOrder.name AS cliente\nORDER BY cliente\nLIMIT 10",
+      "expected_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento {tipoValore: 'Ordinato'}) WITH DISTINCT c MATCH (c) WHERE NOT (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento {tipoValore: 'Fatturato'}) RETURN c.name AS clienteSenzaFattura",
+      "time_total": 14.746552186086774,
+      "time_generation": 8.515151401050389,
+      "time_db": 0.2912840158678591,
+      "time_synthesis": 1.2696720380336046,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.22185970636215335,
+      "specialist": "GENERAL_QUERY",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "clienteSenzaFattura": "MACELLERIA SAN SECONDO"
+        },
+        {
+          "clienteSenzaFattura": "HONG KONG UGREEN LIMITED"
+        }
+      ],
+      "mismatch_extra": []
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-84-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Chi \u00e8 il fornitore principale per ogni famiglia di prodotto, in base al valore acquistato?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(f:Famiglia)\nWITH f.nome AS famiglia, gf.ragioneSociale AS fornitore, sum(dr.importo) AS valoreAcquistato\nORDER BY famiglia, valoreAcquistato DESC\nWITH famiglia, collect({fornitore: fornitore, valore: valoreAcquistato}) AS suppliersPerFamily\nRETURN famiglia, suppliersPerFamily[0].fornitore AS fornitorePrincipale, suppliersPerFamily[0].valore AS valoreAcquistato\nORDER BY famiglia",
+      "expected_cypher": "MATCH (fam:Famiglia)<-[:INCLUSA_IN]-(:Sottofamiglia)<-[:APPARTIENE_A]-(:Articolo)<-[:RIGUARDA_ARTICOLO]-(dr:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore)-[:RAGGRUPPATO_SOTTO]->(gf:GruppoFornitore) WITH fam, gf, sum(dr.importo) AS valoreAcquistato ORDER BY fam.nome, valoreAcquistato DESC WITH fam, collect({fornitore: gf.ragioneSociale, valore: valoreAcquistato})[0] AS fornitoreTop RETURN fam.nome AS famiglia, fornitoreTop.fornitore AS fornitorePrincipale",
+      "time_total": 24.070675199385732,
+      "time_generation": 14.003708315081894,
+      "time_db": 0.776026058010757,
+      "time_synthesis": 4.659531604964286,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.1787709497206704,
+      "specialist": "PURCHASE_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-85-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Qual \u00e8 il valore totale degli ordini in sospeso (ordinati ma non fatturati)?",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Ordinato'\nAND NOT EXISTS {\n    (doc)-[:CONTIENE_RIGA]->(dr_invoice:RigaDocumento)\n    WHERE dr_invoice.tipoValore = 'Fatturato'\n}\nRETURN sum(dr.importo) AS totale",
+      "expected_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Ordinato' WITH c, doc, sum(dr.importo) AS valoreOrdinato WHERE NOT (doc)<-[:CONTIENE_RIGA]-(:RigaDocumento {tipoValore:'Fatturato'}) RETURN sum(valoreOrdinato) AS totaleOrdiniSospesi",
+      "time_total": 33.391530259978026,
+      "time_generation": 25.84292294178158,
+      "time_db": 1.031222490593791,
+      "time_synthesis": 2.249949002172798,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.5189393939393939,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "totaleOrdiniSospesi": 2376823.710000001
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "totale": 9526589.930000026
+        }
+      ]
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-86-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Mostrami i clienti che acquistano pi\u00f9 di 10 articoli unici diversi.",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)\nWITH c, count(DISTINCT a) AS uniqueItemsCount\nWHERE uniqueItemsCount > 10\nRETURN c.name AS cliente\nORDER BY cliente",
+      "expected_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo) WITH c, count(DISTINCT a) AS numeroArticoliUnici WHERE numeroArticoliUnici > 10 RETURN c.name AS cliente, numeroArticoliUnici ORDER BY numeroArticoliUnici DESC",
+      "time_total": 11.672302704304457,
+      "time_generation": 2.323041824158281,
+      "time_db": 0.6325660049915314,
+      "time_synthesis": 2.4436205131933093,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.7598425196850394,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "cliente": "2PG DISTRIBUZIONE SRL",
+          "numeroArticoliUnici": 38
+        },
+        {
+          "cliente": "F B SRL",
+          "numeroArticoliUnici": 46
+        },
+        {
+          "cliente": "MAF 5 SRL",
+          "numeroArticoliUnici": 16
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "cliente": "CONAD CITY CARFAGNA PAOLA"
+        },
+        {
+          "cliente": "CR ITALY SRL"
+        },
+        {
+          "cliente": "EMAX SRL"
+        }
+      ]
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-87-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Per il prodotto pi\u00f9 venduto per quantit\u00e0, qual \u00e8 il suo costo medio di acquisto?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)\nWITH a.descrizione AS prodottoPiuVenduto, sum(dr.quantita) AS quantitaTotale\nORDER BY quantitaTotale DESC\nLIMIT 1\nMATCH (f:Fornitore)-[:HA_EMESSO]->(doc_p:Documento)-[:CONTIENE_RIGA]->(dr_p:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a_p:Articolo)\nWHERE a_p.descrizione = prodottoPiuVenduto\nRETURN\n    CASE\n        WHEN count(dr_p) = 0 THEN null\n        ELSE avg(\n            CASE\n                WHEN dr_p.quantita = 0 OR dr_p.quantita IS NULL THEN null\n                ELSE dr_p.importo / dr_p.quantita\n            END\n        )\n    END AS costoMedioAcquisto",
+      "expected_cypher": "MATCH (:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo) WITH a, sum(dr.quantita) AS quantitaTotale ORDER BY quantitaTotale DESC LIMIT 1 MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_acq:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore) RETURN a.descrizione AS prodotto, avg(CASE WHEN dr_acq.quantita = 0 OR dr_acq.quantita IS NULL THEN null ELSE dr_acq.importo / dr_acq.quantita END) AS costoMedioUnitario",
+      "time_total": 16.33169349702075,
+      "time_generation": 8.721780830994248,
+      "time_db": 1.0413623820059001,
+      "time_synthesis": 1.869842927902937,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.6310861423220974,
+      "specialist": "CROSS_DOMAIN",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-88-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Elenca i fornitori che trattano solo prodotti di una singola famiglia.",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(f:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia)\nWITH gf, COLLECT(DISTINCT fam.nome) AS famiglieTrattate\nWHERE size(famiglieTrattate) = 1\nRETURN gf.ragioneSociale AS fornitore\nORDER BY fornitore\nLIMIT 10",
+      "expected_cypher": "MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(:Fornitore)-[:HA_EMESSO]->(:Documento)-[:CONTIENE_RIGA]->(:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(:Articolo)-[:APPARTIENE_A]->(:Sottofamiglia)-[:INCLUSA_IN]->(fam:Famiglia) WITH gf, count(DISTINCT fam) AS numeroFamiglie WHERE numeroFamiglie = 1 RETURN gf.ragioneSociale AS fornitoreMonoFamiglia",
+      "time_total": 15.011132762301713,
+      "time_generation": 2.719470624346286,
+      "time_db": 0.5591751532629132,
+      "time_synthesis": 1.7722851000726223,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.7833333333333333,
+      "specialist": "PURCHASE_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-89-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Qual \u00e8 la percentuale di fatturato generata dai clienti nella regione 'Umbria' sul totale?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo),\n      (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0\nWITH sum(CASE WHEN toLower(trim(l.regione)) = 'umbria' THEN dr.importo ELSE 0.0 END) AS fatturatoUmbria,\n     sum(dr.importo) AS fatturatoTotale\nRETURN CASE\n         WHEN fatturatoTotale = 0.0 THEN 0.0\n         ELSE (fatturatoUmbria * 100.0) / fatturatoTotale\n       END AS percentualeFatturatoUmbria",
+      "expected_cypher": "MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo),(c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH sum(dr.importo) AS totaleFatturato,  sum(CASE WHEN toLower(trim(l.regione)) = 'umbria' THEN dr.importo ELSE 0 END) AS fatturatoUmbria RETURN CASE WHEN totaleFatturato = 0 THEN 0.0 ELSE (fatturatoUmbria * 100.0 / totaleFatturato) END AS percentualeUmbria",
+      "time_total": 11.212096619885415,
+      "time_generation": 3.4239501007832587,
+      "time_db": 0.8075850908644497,
+      "time_synthesis": 1.6950438572093844,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.4709976798143852,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-90-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Trova il cliente con il valore medio degli ordini pi\u00f9 alto.",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Ordinato' AND dr.importo > 0\nWITH c, doc, sum(dr.importo) AS valoreOrdine\nRETURN c.name AS cliente, \n       CASE \n         WHEN count(doc) = 0 THEN null\n         ELSE sum(valoreOrdine) / count(doc) \n       END AS media\nORDER BY media DESC\nLIMIT 1",
+      "expected_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 WITH c, doc, sum(dr.importo) AS valoreOrdine RETURN c.name AS cliente, avg(valoreOrdine) AS valoreMedioOrdine ORDER BY valoreMedioOrdine DESC LIMIT 1",
+      "time_total": 13.384662141092122,
+      "time_generation": 3.113301227800548,
+      "time_db": 0.23842351837083697,
+      "time_synthesis": 6.131815328262746,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.7245901639344262,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "cliente": "CREDEMLEASING SPA",
+          "valoreMedioOrdine": 201600.0
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "cliente": "ARCA SNC",
+          "media": 105000.0
+        }
+      ]
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-91-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Mostrami i 3 mesi con il maggior numero di documenti di acquisto registrati.",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (:Fornitore)-[:HA_EMESSO]->(doc:Documento)\nRETURN doc.dataEmissione.month AS mese, count(DISTINCT doc) AS conteggio\nORDER BY conteggio DESC\nLIMIT 3",
+      "expected_cypher": "MATCH (:Fornitore)-[:HA_EMESSO]->(doc:Documento) RETURN doc.dataEmissione.year AS anno, doc.dataEmissione.month AS mese, count(doc) AS numeroDocumenti ORDER BY numeroDocumenti DESC LIMIT 3",
+      "time_total": 9.116971785202622,
+      "time_generation": 1.4936955249868333,
+      "time_db": 0.11609194800257683,
+      "time_synthesis": 2.359889135695994,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.7859237536656891,
+      "specialist": "PURCHASE_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "anno": 2024,
+          "mese": 2,
+          "numeroDocumenti": 266
+        },
+        {
+          "anno": 2024,
+          "mese": 9,
+          "numeroDocumenti": 269
+        },
+        {
+          "anno": 2021,
+          "mese": 3,
+          "numeroDocumenti": 270
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "mese": 1,
+          "conteggio": 925
+        },
+        {
+          "mese": 2,
+          "conteggio": 945
+        },
+        {
+          "mese": 5,
+          "conteggio": 924
+        }
+      ]
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-92-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Ci sono prodotti venduti a un prezzo inferiore al loro costo medio di acquisto?",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (f:Fornitore)-[:HA_EMESSO]->(doc_p:Documento)-[:CONTIENE_RIGA]->(dr_p:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a_p:Articolo)\nWHERE dr_p.quantita IS NOT NULL AND dr_p.quantita > 0 AND dr_p.importo IS NOT NULL AND dr_p.importo > 0\nWITH a_p AS prodotto,\n     sum(dr_p.importo) AS totaleImportoAcquisto,\n     sum(dr_p.quantita) AS totaleQuantitaAcquisto\nWHERE totaleQuantitaAcquisto > 0\nWITH prodotto,\n     CASE\n         WHEN totaleQuantitaAcquisto = 0 THEN null\n         ELSE totaleImportoAcquisto / totaleQuantitaAcquisto\n     END AS costoMedioAcquisto\nWHERE costoMedioAcquisto IS NOT NULL\n\nMATCH (c:Cliente)-[:HA_RICEVUTO]->(doc_s:Documento)-[:CONTIENE_RIGA]->(dr_s:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(prodotto)\nWHERE dr_s.tipoValore = 'Fatturato'\n  AND dr_s.quantita IS NOT NULL AND dr_s.quantita > 0\n  AND dr_s.importo IS NOT NULL AND dr_s.importo > 0\n\nWITH prodotto, costoMedioAcquisto, dr_s,\n     CASE\n         WHEN dr_s.quantita = 0 THEN null\n         ELSE dr_s.importo / dr_s.quantita\n     END AS prezzoVenditaUnitario\nWHERE prezzoVenditaUnitario IS NOT NULL\n  AND prezzoVenditaUnitario < costoMedioAcquisto\n\nRETURN DISTINCT prodotto.descrizione AS prodotto\nORDER BY prodotto\nLIMIT 10",
+      "expected_cypher": "MATCH (a:Articolo) OPTIONAL MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_acq:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_EMESSO]-(:Fornitore) WITH a, avg(CASE WHEN dr_acq.quantita = 0 OR dr_acq.quantita IS NULL THEN null ELSE dr_acq.importo / dr_acq.quantita END) AS costoMedio OPTIONAL MATCH (a)<-[:RIGUARDA_ARTICOLO]-(dr_ven:RigaDocumento)<-[:CONTIENE_RIGA]-(:Documento)<-[:HA_RICEVUTO]-(:Cliente) WHERE dr_ven.tipoValore = 'Fatturato' AND dr_ven.importo > 0 WITH a, costoMedio, avg(CASE WHEN dr_ven.quantita = 0 OR dr_ven.quantita IS NULL THEN null ELSE dr_ven.importo / dr_ven.quantita END) AS prezzoMedioVendita WHERE prezzoMedioVendita < costoMedio RETURN a.descrizione AS prodottoInPerdita",
+      "time_total": 27.407649474218488,
+      "time_generation": 18.665546648204327,
+      "time_db": 0.9314141692593694,
+      "time_synthesis": 3.317496077157557,
+      "jaccard_index": 0.26666666666666666,
+      "query_similarity": 0.3219404630650496,
+      "specialist": "CROSS_DOMAIN",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "prodottoInPerdita": "VENTILATORE EBM-PAPST"
+        },
+        {
+          "prodottoInPerdita": "TERMICA GV3P 40"
+        },
+        {
+          "prodottoInPerdita": "SILICONE ACETICO UNIV.TRASP.310ML-48PZ"
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "prodotto": "FABBRICATORE DI GHIACCIO GR560 SPLIT"
+        },
+        {
+          "prodotto": "CAVO SCHERMATO CAREL"
+        },
+        {
+          "prodotto": "Articolo placeholder: ID_NON_DISPONIBILE"
+        }
+      ]
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-93-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Quale tipo di documento (codice) \u00e8 pi\u00f9 frequentemente associato al ciclo di acquisto?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (:Fornitore)-[:HA_EMESSO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType)\nRETURN dt.codice AS tipoDocumento, count(DISTINCT doc) AS conteggio\nORDER BY conteggio DESC\nLIMIT 1",
+      "expected_cypher": "MATCH (:Fornitore)-[:HA_EMESSO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType) RETURN dt.codice AS tipoDocumento, count(doc) AS frequenza ORDER BY frequenza DESC LIMIT 1",
+      "time_total": 9.399679412133992,
+      "time_generation": 2.263215676881373,
+      "time_db": 0.15108910109847784,
+      "time_synthesis": 2.8076812070794404,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.8783382789317508,
+      "specialist": "PURCHASE_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-94-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Elenca i fornitori situati in un luogo dove non abbiamo clienti.",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo)\nWITH collect(DISTINCT toLower(trim(l.localita))) AS customerLocalities\nMATCH (f:Fornitore)-[:SI_TROVA_A]->(l_f:Luogo)\nWHERE NOT toLower(trim(l_f.localita)) IN customerLocalities\nMATCH (f)-[:RAGGRUPPATO_SOTTO]->(gf:GruppoFornitore)\nRETURN DISTINCT gf.ragioneSociale AS fornitore\nORDER BY fornitore\nLIMIT 10",
+      "expected_cypher": "MATCH (gf:GruppoFornitore)<-[:RAGGRUPPATO_SOTTO]-(f:Fornitore)-[:SI_TROVA_A]->(lf:Luogo) WHERE NOT EXISTS { MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo {localita: lf.localita}) } RETURN DISTINCT gf.ragioneSociale AS fornitore ORDER BY fornitore",
+      "time_total": 12.732856819871813,
+      "time_generation": 6.149762489832938,
+      "time_db": 0.2480019060894847,
+      "time_synthesis": 1.8908770522102714,
+      "jaccard_index": 0.00998003992015968,
+      "query_similarity": 0.3885135135135135,
+      "specialist": "CROSS_DOMAIN",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "fornitore": "AUTOLAVAGGIO MINELLI ANDREA"
+        },
+        {
+          "fornitore": "T.T.srl"
+        },
+        {
+          "fornitore": "BLUPOINT SRL"
+        }
+      ],
+      "mismatch_extra": []
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-95-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Quante note di credito clienti (NCC) abbiamo emesso in totale?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType)\nWHERE toLower(trim(dt.codice)) = 'ncc' OR toLower(trim(dt.nome)) = 'ncc'\nRETURN count(DISTINCT doc) AS conteggio",
+      "expected_cypher": "MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType {codice: 'NCC'}) RETURN count(doc) AS numeroNoteCredito",
+      "time_total": 8.321905592922121,
+      "time_generation": 2.4622621200978756,
+      "time_db": 0.11512869270518422,
+      "time_synthesis": 1.8564095138572156,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.5763888888888888,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-96-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Mostrami tutti gli ordini fornitori (OF) per maggio 2024.",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType)\nWHERE dt.codice = 'OF'\n  AND doc.dataEmissione.year = 2024\n  AND doc.dataEmissione.month = 5\nRETURN doc.documentoId AS documentoId, doc.dataEmissione AS dataEmissione\nORDER BY dataEmissione, documentoId",
+      "expected_cypher": "MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType {codice: 'OF'}) WHERE doc.dataEmissione.year = 2024 AND doc.dataEmissione.month = 5 RETURN doc.documentoId AS ordine",
+      "time_total": 17.502581176813692,
+      "time_generation": 2.226700192783028,
+      "time_db": 0.18277106108143926,
+      "time_synthesis": 4.78274495806545,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.683046683046683,
+      "specialist": "PURCHASE_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "ordine": "2-202400006994"
+        },
+        {
+          "ordine": "2-202400007923"
+        },
+        {
+          "ordine": "2-202400007621"
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "documentoId": "2-202400007222",
+          "dataEmissione": "2024-05-16"
+        },
+        {
+          "documentoId": "2-202400006260",
+          "dataEmissione": "2024-05-02"
+        },
+        {
+          "documentoId": "2-202400007943",
+          "dataEmissione": "2024-05-24"
+        }
+      ]
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-97-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Qual \u00e8 il valore totale delle fatture fornitori (FFA) ricevute?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (:Fornitore)-[:HA_EMESSO]->(doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento),\n      (doc)-[:IS_TYPE]->(dt:DocType)\nWHERE toLower(trim(dt.codice)) = 'ffa'\nRETURN sum(dr.importo) AS totale",
+      "expected_cypher": "MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType {codice: 'FFA'}) MATCH (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento) RETURN sum(dr.importo) AS totaleFattureFornitore",
+      "time_total": 11.544883028138429,
+      "time_generation": 2.8151135887019336,
+      "time_db": 0.18332034489139915,
+      "time_synthesis": 4.167585777118802,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.5214899713467048,
+      "specialist": "PURCHASE_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-98-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Elenca i clienti a cui abbiamo inviato una nota di consegna clienti (DDTV) a Roma.",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType)\nMATCH (c)-[:HAS_ADDRESS]->(l:Luogo)\nWHERE toLower(trim(l.localita)) = 'roma'\n  AND dt.codice = 'DDTV'\nRETURN DISTINCT c.name AS cliente\nORDER BY cliente\nLIMIT 10",
+      "expected_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType {codice: 'DDTV'}) WHERE toLower(trim(doc.tipoOriginale)) CONTAINS 'roma' RETURN DISTINCT c.name AS cliente",
+      "time_total": 12.311020377092063,
+      "time_generation": 3.336287678219378,
+      "time_db": 0.2095119939185679,
+      "time_synthesis": 2.288827952928841,
+      "jaccard_index": 0.07766990291262135,
+      "query_similarity": 0.391304347826087,
+      "specialist": "GENERAL_QUERY",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "cliente": "SIMAN SRL"
+        },
+        {
+          "cliente": "CONAD CITY CARFAGNA PAOLA"
+        },
+        {
+          "cliente": "SODISI SRL"
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "cliente": "ANTES SRL"
+        },
+        {
+          "cliente": "A.B.I. TECNOLOGIES P&C SRL"
+        }
+      ]
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-99-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Qual \u00e8 il valore fatturato presente solo nelle fatture clienti (FVC)?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType)\nWHERE dt.codice = 'FVC'\nMATCH (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0\nRETURN sum(dr.importo) AS totale",
+      "expected_cypher": "MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType {codice: 'FVC'}) MATCH (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' RETURN sum(dr.importo) AS totaleFatturatoInFVC",
+      "time_total": 10.939694423228502,
+      "time_generation": 2.3542410163208842,
+      "time_db": 0.4048857977613807,
+      "time_synthesis": 2.7698672832921147,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.7877358490566038,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-100-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Mostrami il totale ordinato attraverso gli ordini clienti (OC) per la ditta '1'.",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (d:Ditta)<-[:APPARTIENE_A]-(c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE d.dittaId = '1' AND dr.tipoValore = 'Ordinato'\nRETURN sum(dr.importo) AS totale",
+      "expected_cypher": "MATCH (d:Ditta {dittaId: '1'})<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType {codice: 'OC'}) MATCH (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Ordinato' RETURN sum(dr.importo) AS totaleOrdinatoDitta1",
+      "time_total": 10.521105736028403,
+      "time_generation": 1.886918489355594,
+      "time_db": 0.15185387711971998,
+      "time_synthesis": 3.6058979290537536,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.7692307692307693,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-101-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Qual \u00e8 il valore medio delle righe fatturate nelle note di consegna clienti (DDTV)?",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType)\nWHERE toLower(trim(dt.codice)) = 'ddtv'\nMATCH (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0\nRETURN avg(dr.importo) AS media",
+      "expected_cypher": "MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType {codice: 'DDTV'}) MATCH (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Bollato' RETURN avg(dr.importo) AS valoreMedioBollato",
+      "time_total": 13.733778828755021,
+      "time_generation": 1.8173044957220554,
+      "time_db": 0.6612863009795547,
+      "time_synthesis": 5.963147986214608,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.7090464547677262,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [
+        {
+          "valoreMedioBollato": 287.930263878516
+        }
+      ],
+      "mismatch_extra": [
+        {
+          "media": null
+        }
+      ]
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-102-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Chi \u00e8 il cliente con il valore fatturato pi\u00f9 alto considerando solo le fatture immediate (FVC)?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType),\n      (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE dt.codice = 'FVC'\n  AND dr.tipoValore = 'Fatturato'\n  AND dr.importo > 0\nRETURN c.name AS cliente, sum(dr.importo) AS totale\nORDER BY totale DESC\nLIMIT 1",
+      "expected_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(doc:Documento)-[:IS_TYPE]->(dt:DocType {codice: 'FVC'}) MATCH (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN c.name AS cliente, sum(dr.importo) AS totale ORDER BY totale DESC LIMIT 1",
+      "time_total": 12.41858385503292,
+      "time_generation": 2.035355128813535,
+      "time_db": 0.6476403418928385,
+      "time_synthesis": 5.0186707829125226,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.7568555758683729,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-103-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Per il cliente 'ACME SRL', confronta il totale ordinato e il totale fatturato.",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nWHERE toLower(trim(c.name)) = 'acme srl'\nRETURN\n    c.name AS cliente,\n    sum(CASE WHEN dr.tipoValore = 'Ordinato' THEN dr.importo ELSE 0 END) AS totaleOrdinato,\n    sum(CASE WHEN dr.tipoValore = 'Fatturato' AND dr.importo > 0 THEN dr.importo ELSE 0 END) AS totaleFatturato",
+      "expected_cypher": "MATCH (c:Cliente) WHERE toLower(trim(c.name)) = 'acme srl' OPTIONAL MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr_ord:RigaDocumento {tipoValore: 'Ordinato'}) WITH c, sum(dr_ord.importo) AS totaleOrdinato OPTIONAL MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr_fat:RigaDocumento {tipoValore: 'Fatturato'}) WHERE dr_fat.importo > 0 RETURN totaleOrdinato, sum(dr_fat.importo) AS totaleFatturato",
+      "time_total": 13.504080483689904,
+      "time_generation": 6.33520432561636,
+      "time_db": 0.1698379684239626,
+      "time_synthesis": 1.827005451079458,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.3002610966057441,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-104-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Elenca i documenti d'ordine clienti (OC) che non sono ancora stati completamente fatturati.",
+      "success": false,
+      "error": "Results mismatch",
+      "generated_cypher": "MATCH (oc_doc:Documento)-[:IS_TYPE]->(dt_oc:DocType)\nWHERE toLower(trim(dt_oc.codice)) = 'oc'\nMATCH (oc_doc)-[:CONTIENE_RIGA]->(oc_dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a:Articolo)\nMATCH (c:Cliente)-[:HA_RICEVUTO]->(oc_doc)\nWHERE NOT EXISTS {\n    MATCH (c)-[:HA_RICEVUTO]->(ft_doc:Documento)-[:IS_TYPE]->(dt_ft:DocType)\n    WHERE toLower(trim(dt_ft.codice)) = 'ft'\n    MATCH (ft_doc)-[:CONTIENE_RIGA]->(ft_dr:RigaDocumento)-[:RIGUARDA_ARTICOLO]->(a)\n    WHERE ft_dr.tipoValore = 'Fatturato'\n}\nRETURN DISTINCT oc_doc.documentoId AS documento\nORDER BY documento\nLIMIT 10",
+      "expected_cypher": "MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType {codice: 'OC'}) MATCH (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento {tipoValore: 'Ordinato'}) WITH doc, sum(dr.importo) AS valoreOrdinato MATCH (doc)-[:CONTIENE_RIGA]->(dr_fat:RigaDocumento {tipoValore: 'Fatturato'}) WITH doc, valoreOrdinato, sum(dr_fat.importo) AS valoreFatturato WHERE valoreOrdinato > valoreFatturato RETURN doc.documentoId AS ordineNonSaldato",
+      "time_total": 64.95128732779995,
+      "time_generation": 52.1101942230016,
+      "time_db": 2.636815099976957,
+      "time_synthesis": 3.0864045629277825,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.2625,
+      "specialist": "GENERAL_QUERY",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": null,
+      "strict_success": false,
+      "mismatch_missing": [],
+      "mismatch_extra": [
+        {
+          "documento": "2-202100000875"
+        },
+        {
+          "documento": "2-202100000991"
+        },
+        {
+          "documento": "2-202100001536"
+        }
+      ]
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-105-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Quale tipo di documento (nome) ha il valore medio pi\u00f9 alto per riga (considerando solo i valori fatturati)?",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (doc:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nMATCH (doc)-[:IS_TYPE]->(dt:DocType)\nWHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0\nRETURN dt.nome AS tipoDocumento, avg(dr.importo) AS mediaValorePerRiga\nORDER BY mediaValorePerRiga DESC\nLIMIT 1",
+      "expected_cypher": "MATCH (doc:Documento)-[:IS_TYPE]->(dt:DocType) MATCH (doc)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN dt.nome AS nomeTipoDocumento, avg(dr.importo) AS valoreMedioRiga ORDER BY valoreMedioRiga DESC LIMIT 1",
+      "time_total": 14.85433066310361,
+      "time_generation": 2.286079220008105,
+      "time_db": 0.6049651671200991,
+      "time_synthesis": 6.931823017075658,
+      "jaccard_index": 0.0,
+      "query_similarity": 0.694980694980695,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": false,
+      "similarity_success": false,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    },
+    {
+      "config": "specialist-gemini-2.5-flash",
+      "test_id": "TEST-106-Genera la query Cypher per rispondere a questo input in italiano",
+      "question": "Mostrami il totale fatturato e il totale ordinato per ciascuna ditta.",
+      "success": true,
+      "error": null,
+      "generated_cypher": "MATCH (d:Ditta)<-[:APPARTIENE_A]-(c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)\nRETURN\n    d.dittaId AS ditta,\n    SUM(CASE WHEN dr.tipoValore = 'Fatturato' AND dr.importo > 0 THEN dr.importo ELSE 0 END) AS totaleFatturato,\n    SUM(CASE WHEN dr.tipoValore = 'Ordinato' AND dr.importo > 0 THEN dr.importo ELSE 0 END) AS totaleOrdinato\nORDER BY\n    ditta",
+      "expected_cypher": "MATCH (d:Ditta)<-[:APPARTIENE_A]-(:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) RETURN d.dittaId AS ditta, sum(CASE dr.tipoValore WHEN 'Fatturato' THEN dr.importo ELSE 0 END) AS totaleFatturato, sum(CASE dr.tipoValore WHEN 'Ordinato' THEN dr.importo ELSE 0 END) AS totaleOrdinato ORDER BY ditta ASC",
+      "time_total": 33.33588259713724,
+      "time_generation": 4.14743232075125,
+      "time_db": 0.586981413885951,
+      "time_synthesis": 4.229653534013778,
+      "jaccard_index": 1.0,
+      "query_similarity": 0.8633093525179856,
+      "specialist": "SALES_CYCLE",
+      "jaccard_success": true,
+      "similarity_success": true,
+      "examples_top_k": null,
+      "success_reason": "strict",
+      "strict_success": true
+    }
+  ]
+}
