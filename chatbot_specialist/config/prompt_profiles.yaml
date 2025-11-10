@@ -66,6 +66,6 @@ model_aliases:
   llama-8b-groq-instant: llama3
   llama3-8b-vertex: llama3
   gemini-2.5-pro: openai
-  gemini-2.5-flash: openai
+  gemini-2.5-flash: llama3
   llama3-8b-chat-mg-one-click-deploy: llama3
   publishers/meta/models/llama-3-8b-instruct: llama3

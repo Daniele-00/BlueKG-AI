@@ -6,6 +6,83 @@ entity_resolver:
   fuzzy_min_score: 0.65
   fuzzy_max_results: 3
   ambiguity_delta: 0.08
+
+  intent_label_preferences:
+      # Intento vendite: si cercano Clienti, Articoli venduti, Famiglie, Luoghi, Ditte
+      SALES_CYCLE: 
+        - Cliente
+        - Articolo
+        - Famiglia
+        - Sottofamiglia
+        - Luogo
+        - Ditta
+      
+      # Intento acquisti: si cercano Fornitori, Articoli acquistati, Famiglie, Luoghi, Ditte, Tipi Documento
+      PURCHASE_CYCLE:
+        - GruppoFornitore
+        - Fornitore
+        - Articolo
+        - Famiglia
+        - Sottofamiglia
+        - Luogo
+        - Ditta
+        - DocType
+        
+      # Intento cross: può cercare qualsiasi entità di business
+      CROSS_DOMAIN:
+        - Cliente
+        - GruppoFornitore
+        - Fornitore
+        - Articolo
+        - Famiglia
+        - Sottofamiglia
+        - Luogo
+        - Ditta
+
+      # Intento Ditte: si cercano Ditte, Clienti (per conteggi), Famiglie
+      DITTE_QUERY:
+        - Ditta
+        - Cliente
+        - Famiglia
+        - Sottofamiglia
+        - Articolo
+        - Luogo
+
+      # Nessuna preferenza: cerca ovunque.
+      GENERAL_QUERY: []
+
+      # Nessuna entità
+      GENERAL_CONVERSATION: []
+
+  entity_label_roles_en:
+    Cliente:
+      role: customer
+      property: name
+    Fornitore:
+      role: supplier
+      property: ragioneSociale
+    GruppoFornitore:
+      role: "supplier group"
+      property: ragioneSociale
+    Articolo:
+      role: product
+      property: descrizione
+    Famiglia:
+      role: "product family"
+      property: nome
+    Sottofamiglia:
+      role: "product subfamily"
+      property: nome
+    DocType:
+      role: "document type"
+      property: nome
+    Ditta:
+      role: company
+      property: dittaId
+    Luogo:
+      role: location
+      property: localita
+
   
   # Mappa ogni LABEL alle sue proprietà uniche
   entity_definitions:

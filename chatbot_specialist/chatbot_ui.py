@@ -906,6 +906,7 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
 
     nodes_json = json.dumps(nodes, ensure_ascii=False)
     edges_json = json.dumps(edges, ensure_ascii=False)
+    meta_json = json.dumps(graph_data.get("meta") or {}, ensure_ascii=False)
     element_id = element_id or f"neo4j-graph-{uuid.uuid4().hex[:8]}"
 
     html = f"""
@@ -918,6 +919,8 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
         <button id="{element_id}-fit"      class="btn">Adatta</button>
         <button id="{element_id}-reset"    class="btn">Reset</button>
         <button id="{element_id}-back"     class="btn">Indietro</button>
+        <button id="{element_id}-freeze"   class="btn">Freeze</button>
+        <button id="{element_id}-restore"  class="btn">Ripristina</button>
       </div>
 
       <!-- TOOLTIP -->
@@ -937,6 +940,17 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
           border-radius:8px; padding:8px 12px; color:#e2e8f0;
           font-size:12px; font-family:'Inter',sans-serif;
           z-index:1001; max-width:300px;"></div>
+
+      <!-- INFO PANEL -->
+      <div id="{element_id}-info" class="graph-info-panel" style="
+          position:absolute; bottom:12px; right:12px;
+          width:340px; max-height:70%; overflow:auto;
+          background:rgba(10,16,28,0.92); border:1px solid rgba(59,130,246,0.35);
+          border-radius:12px; padding:14px 18px; color:#e2e8f0;
+          font-size:12px; font-family:'Inter',sans-serif;
+          z-index:1002; display:none; box-shadow:0 18px 38px rgba(0,0,0,0.35);
+        "></div>
+
     </div>
 
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -956,7 +970,11 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
       const viewport = svg.append("g").attr("class", "viewport");
       viewport.append("rect")
         .attr("x",-5000).attr("y",-5000).attr("width",10000).attr("height",10000)
-        .attr("fill","transparent").style("cursor","grab");
+        .attr("fill","transparent").style("cursor","grab")
+        .on("click", () => {{
+          clearSelection();
+          tooltip.style('display','none');
+        }});
 
       const linkGroup = viewport.append("g").attr("class","links");
       const nodeGroup = viewport.append("g").attr("class","nodes");
@@ -964,7 +982,13 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
       const edgeLabelGroup = viewport.append("g").attr("class","edge-labels");
 
       const tooltip = d3.select("#{element_id}-tooltip");
+      const infoPanel = d3.select("#{element_id}-info");
+      infoPanel.on("click", ev => ev.stopPropagation());
       const color = d3.scaleOrdinal(d3.schemeCategory10);
+      const meta = {meta_json};
+
+      let selectedNode = null;
+      let selectedEdge = null;
 
       // --- NODI E ARCHI ---
       const nodes = rawNodes.map(n => ({{...n, id:String(n.id)}}));
@@ -976,11 +1000,18 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
       }}).filter(Boolean);
 
       // --- SIMULAZIONE ---
+      const linkForce = d3.forceLink(links)
+        .id(d=>d.id)
+        .distance(120)
+        .strength(0.35);
+
       const simulation = d3.forceSimulation(nodes)
-        .force("link", d3.forceLink(links).id(d=>d.id).distance(150))
-        .force("charge", d3.forceManyBody().strength(-400))
+        .force("link", linkForce)
+        .force("charge", d3.forceManyBody().strength(-220))
         .force("center", d3.forceCenter(width/2, height/2))
-        .force("collision", d3.forceCollide().radius(50));
+        .force("collision", d3.forceCollide().radius(44).strength(0.9))
+        .velocityDecay(0.32)
+        .alphaDecay(0.08);
 
       // --- FRECCE ---
       svg.append("defs").append("marker")
@@ -992,8 +1023,10 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
 
       const link = linkGroup.selectAll("line")
         .data(links).enter().append("line")
-        .attr("stroke","#475569").attr("stroke-opacity",0.6)
-        .attr("stroke-width",2).attr("marker-end","url(#arrowhead)");
+        .attr("stroke","#475569").attr("stroke-opacity",0.65)
+        .attr("stroke-width",2).attr("marker-end","url(#arrowhead)")
+        .style("cursor","pointer")
+        .on("click", handleEdgeClick);
 
       const edgeLabel = edgeLabelGroup.selectAll("text")
         .data(links).enter().append("text")
@@ -1012,11 +1045,12 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
         .attr("fill", d => color((d.labels && d.labels[0]) || "Node"))
         .attr("stroke","#0f172a").attr("stroke-width",2)
         .style("cursor","pointer")
+        .classed("result-node", d => !!d.isResult)
         .call(drag)
         .on("mouseover", showTooltip)
         .on("mousemove", moveTooltip)
         .on("mouseout", hideTooltip)
-        .on("click", focusNode)
+        .on("click", handleNodeClick)
         .on("dblclick", expandNode);
 
       const label = labelGroup.selectAll("text")
@@ -1063,6 +1097,49 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
         const ty=(height - scale*(minY+maxY))/2;
         smooth(d3.zoomIdentity.translate(tx,ty).scale(scale));
       }}
+      function togglePin(d, element){{
+        const circle = d3.select(element);
+        if(d.fx!=null && d.fy!=null){{
+          d.fx = null;
+          d.fy = null;
+          circle.classed("pinned", false);
+        }} else {{
+          d.fx = d.x;
+          d.fy = d.y;
+          circle.classed("pinned", true);
+          if(!layoutFrozen){{
+            simulation.alphaTarget(0.3).restart();
+          }}
+        }}
+      }}
+      function handleEdgeClick(ev,d){{
+        ev.stopPropagation();
+        selectedNode = null;
+        selectedEdge = d;
+        node.classed("selected", false);
+        link.classed("selected", l => l === d);
+        renderEdgeInfo(d);
+      }}
+      function handleNodeClick(ev,d){{
+        ev.stopPropagation();
+        if(ev.altKey || ev.metaKey){{
+          focusNode(ev,d);
+          return;
+        }}
+        if(ev.shiftKey || ev.ctrlKey){{
+          togglePin(d, ev.currentTarget);
+          return;
+        }}
+        selectNode(d, ev.currentTarget);
+      }}
+      function selectNode(d, element){{
+        selectedNode = d;
+        selectedEdge = null;
+        node.classed("selected", n => n === d);
+        link.classed("selected", false);
+        renderNodeInfo(d);
+      }}
+
       function focusNode(ev,d){{
         pushCam(d3.zoomTransform(svg.node()));
         const k=1.5;
@@ -1076,9 +1153,13 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
         const props=d.properties||{{}};
         let html=`<strong style='color:#38bdf8;font-size:14px;'>${{labels}}</strong><br/>`;
         html+=`<span style='color:#94a3b8;font-size:11px;'>ID: ${{String(d.id).substring(0,12)}}</span><br/><br/>`;
+        let count = 0;
         for(const [k,v] of Object.entries(props)){{
+          if(k === '_origin') continue;
+          if(count >= 6) break;
           const s=typeof v==='object'?JSON.stringify(v):String(v);
           html+=`<div style='margin:2px 0;'><span style='color:#cbd5e1;'>${{k}}:</span> <span style='color:#e2e8f0;'>${{s.length>50?s.substring(0,50)+'...':s}}</span></div>`;
+          count += 1;
         }}
         tooltip.html(html).style('display','block');
         moveTooltip(ev);
@@ -1093,18 +1174,114 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
         alert("Espansione nodo (todo) — "+((d.labels&&d.labels[0])||d.id));
       }}
 
+      function renderNodeInfo(d){{
+        if(!d){{
+          infoPanel.style('display','none').html('');
+          return;
+        }}
+        const props = Object.entries(d.properties || {{}})
+          .filter(([k]) => k !== '_origin')
+          .map(([k,v]) => {{
+            const value = typeof v === 'object' ? JSON.stringify(v) : String(v);
+            return `<div class="info-row"><span>${{k}}</span><span>${{value}}</span></div>`;
+          }}).join('') || "<div class='info-empty'>Nessuna proprietà disponibile.</div>";
+        const mainLabel = (d.labels&&d.labels[0]) || 'Nodo';
+        const title = d.properties?.name || d.properties?.descrizione || d.properties?.ragioneSociale || d.id;
+        const isStub = (d.properties && d.properties._origin === 'stub');
+        const stubNote = isStub ? "<div class='info-note'>Nodo segnaposto: l'entità non è stata trovata direttamente nel grafo. Controlla la grafia o aggiungi un filtro più specifico.</div>" : "";
+        infoPanel.style('display','block').html(`
+          <div class="info-title">${{title}}</div>
+          <div class="info-subtitle">${{mainLabel}}</div>
+          ${{stubNote}}
+          <div class="info-block">
+            ${{props}}
+          </div>
+        `);
+      }}
+
+      function renderEdgeInfo(d){{
+        if(!d){{
+          infoPanel.style('display','none').html('');
+          return;
+        }}
+        const props = Object.entries(d.properties || {{}})
+          .map(([k,v]) => {{
+            const value = typeof v === 'object' ? JSON.stringify(v) : String(v);
+            return `<div class="info-row"><span>${{k}}</span><span>${{value}}</span></div>`;
+          }}).join('') || "<div class='info-empty'>Nessuna proprietà disponibile.</div>";
+        infoPanel.style('display','block').html(`
+          <div class="info-title">${{d.type || 'Relazione'}}</div>
+          <div class="info-subtitle">Collega</div>
+          <div class="info-block">
+            <div class="info-row"><span>Origine</span><span>${{d.source.id}}</span></div>
+            <div class="info-row"><span>Destinazione</span><span>${{d.target.id}}</span></div>
+          </div>
+          <div class="info-block">${{props}}</div>
+        `);
+      }}
+
+      function clearSelection(){{
+        selectedNode = null;
+        selectedEdge = null;
+        node.classed("selected", false);
+        link.classed("selected", false);
+        infoPanel.style('display','none').html('');
+      }}
+
+      const freezeBtn = document.getElementById("{element_id}-freeze");
+      const restoreBtn = document.getElementById("{element_id}-restore");
+      let layoutFrozen = false;
+
+      function updateFreezeButton(){{
+        if(!freezeBtn) return;
+        freezeBtn.textContent = layoutFrozen ? "Riprendi" : "Freeze";
+        if(layoutFrozen){{
+          freezeBtn.classList.add("active");
+        }} else {{
+          freezeBtn.classList.remove("active");
+        }}
+      }}
+
+      function toggleFreeze(){{
+        layoutFrozen = !layoutFrozen;
+        if(layoutFrozen){{
+          simulation.stop();
+        }} else {{
+          simulation.alpha(0.6).restart();
+        }}
+        updateFreezeButton();
+      }}
+
+      function restoreLayout(){{
+        layoutFrozen = false;
+        updateFreezeButton();
+        clearSelection();
+        node.each(d => {{
+          d.fx = null;
+          d.fy = null;
+        }});
+        node.classed("pinned", false);
+        camStack.length = 0;
+        simulation.alpha(0.9).restart();
+        fit();
+      }}
+
       document.getElementById("{element_id}-zoom-in").onclick=()=>zoomBy(1.2);
       document.getElementById("{element_id}-zoom-out").onclick=()=>zoomBy(1/1.2);
       document.getElementById("{element_id}-reset").onclick=()=>reset();
       document.getElementById("{element_id}-fit").onclick=()=>fit();
       document.getElementById("{element_id}-back").onclick=()=>{{const p=popCam();if(p)smooth(p);}};
 
+      if(freezeBtn) freezeBtn.onclick=()=>toggleFreeze();
+      if(restoreBtn) restoreBtn.onclick=()=>restoreLayout();
+      updateFreezeButton();
+
       simulation.on("end", fit) 
 
       // --- LEGENDA AUTOMATICA ---
       const uniqueLabels = Array.from(new Set(nodes.flatMap(n => n.labels || ["Node"])));
       const legend = d3.select("#{element_id}-legend");
-      legend.html("<strong style='color:#38bdf8; font-size: 1.1rem;'>Legenda nodi:</strong><br/>" +
+      let legendHtml = "<strong style='color:#38bdf8; font-size: 1.1rem;'>Legenda nodi:</strong><br/>" +
         uniqueLabels.map(lbl => {{
           const col = color(lbl);
           return `<span style='display:inline-flex;align-items:center;margin-right:14px; font-size: 1.1rem;'>
@@ -1112,9 +1289,105 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
                     border-radius:50%;display:inline-block;margin-right:6px;border:1px solid #334155;'></span>
                     ${{lbl}}
                   </span>`;
-        }}).join("<br/>"));
+        }}).join("<br/>");
+      if(meta && meta.stub_nodes_added){{
+        legendHtml += "<hr style='border-color:rgba(59,130,246,0.35);margin:6px 0;' />";
+        legendHtml += "<span style='display:flex;align-items:center;gap:8px;font-size:0.95rem;'><span style='width:12px;height:12px;border-radius:50%;border:2px dashed rgba(148,163,184,0.9);'></span>Segnaposto (nessun nodo Neo4j trovato)</span>";
+      }}
+      legend.html(legendHtml);
     }})();
     </script>
+        <style>
+      #{element_id} .btn {{
+        background: rgba(15,23,42,0.85);
+        color: #cbd5f5;
+        border: 1px solid rgba(59,130,246,0.35);
+        border-radius: 8px;
+        padding: 6px 10px;
+        font-size: 13px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }}
+      #{element_id} .btn:hover {{
+        background: rgba(59,130,246,0.25);
+        color: #e0ecff;
+      }}
+      #{element_id} .btn.active {{
+        background: rgba(59,130,246,0.35);
+        color: #f8fafc;
+        border-color: rgba(148,197,255,0.9);
+        box-shadow: 0 0 12px rgba(59,130,246,0.3);
+      }}
+      #{element_id} .nodes circle {{
+        transition: transform 0.2s ease, stroke-width 0.2s ease;
+      }}
+      #{element_id} .nodes circle:hover {{
+        transform: scale(1.04);
+        stroke-width: 2.4;
+      }}
+      #{element_id} .nodes circle.result-node {{
+        stroke: #38bdf8;
+        stroke-width: 3;
+        filter: drop-shadow(0 0 8px rgba(56,189,248,0.4));
+      }}
+      #{element_id} .nodes circle.pinned {{
+        stroke: #facc15;
+        stroke-width: 3;
+        filter: drop-shadow(0 0 8px rgba(250,204,21,0.35));
+      }}
+      #{element_id} .nodes circle.selected {{
+        stroke: #f97316;
+        stroke-width: 3;
+        filter: drop-shadow(0 0 10px rgba(249,115,22,0.45));
+      }}
+      #{element_id} .links line.selected {{
+        stroke: #f97316;
+        stroke-width: 2.4;
+      }}
+      #{element_id} .graph-info-panel .info-title {{
+        font-weight: 700;
+        font-size: 1.1rem;
+        margin-bottom: 4px;
+        color: #f8fafc;
+      }}
+      #{element_id} .graph-info-panel .info-subtitle {{
+        color: #93c5fd;
+        font-size: 0.9rem;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }}
+      #{element_id} .graph-info-panel .info-block {{
+        border-top: 1px solid rgba(59,130,246,0.2);
+        margin-top: 10px;
+        padding-top: 8px;
+      }}
+      #{element_id} .graph-info-panel .info-row {{
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        font-size: 0.88rem;
+        padding: 2px 0;
+        color: #e2e8f0;
+      }}
+      #{element_id} .graph-info-panel .info-row span:first-child {{
+        color: #94a3b8;
+        font-weight: 500;
+      }}
+      #{element_id} .graph-info-panel .info-note {{
+        background: rgba(59,130,246,0.12);
+        border: 1px solid rgba(59,130,246,0.3);
+        border-radius: 8px;
+        padding: 8px;
+        margin-bottom: 10px;
+        font-size: 0.85rem;
+        color: #dbeafe;
+      }}
+      #{element_id} .graph-info-panel .info-empty {{
+        font-style: italic;
+        color: #94a3b8;
+      }}
+    </style>
     """
 
     components.html(html, height=660)

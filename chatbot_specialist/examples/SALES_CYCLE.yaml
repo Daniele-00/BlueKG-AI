@@ -1,20 +1,19 @@
 examples:
 - id: sales_cycle_001
-  question: Qual è il fatturato totale del cliente BARONE DI FERRANTE EZIO?
+  question: Qual è il fatturato del cliente X?
   cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
-    WHERE toLower(trim(c.name)) = 'barone di ferrante ezio' AND dr.tipoValore = 'Fatturato'
+    WHERE toLower(trim(c.name)) = 'x' AND dr.tipoValore = 'Fatturato'
     AND dr.importo > 0 RETURN sum(dr.importo) AS fatturatoTotale
 - id: sales_cycle_001_var1
   question: 'Variant 1: Qual è l''ammontare complessivo del fatturato del cliente
-    BARONE DI FERRANTE EZIO?'
+    X?'
   cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
-    WHERE toLower(trim(c.name)) = 'barone di ferrante ezio' AND dr.tipoValore = 'Fatturato'
+    WHERE toLower(trim(c.name)) = 'x' AND dr.tipoValore = 'Fatturato'
     AND dr.importo > 0 RETURN sum(dr.importo) AS fatturatoTotale
 - id: sales_cycle_001_var2
-  question: 'Variant 2: Quanto ammonta il fatturato totale del cliente BARONE DI FERRANTE
-    EZIO?'
+  question: 'Variant 2: Quanto ammonta il fatturato totale del cliente X?'
   cypher: MATCH (c:Cliente)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento)
-    WHERE toLower(trim(c.name)) = 'barone di ferrante ezio' AND dr.tipoValore = 'Fatturato'
+    WHERE toLower(trim(c.name)) = 'x' AND dr.tipoValore = 'Fatturato'
     AND dr.importo > 0 RETURN sum(dr.importo) AS fatturatoTotale
 - id: sales_cycle_002
   question: Chi è il cliente con il maggior fatturato?

@@ -6,7 +6,7 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.prompts import ChatPromptTemplate
 from cachetools import TTLCache
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple, Set, Literal, Pattern
+from typing import Dict, List, Optional, Tuple, Set, Literal, Pattern, Iterable
 from pydantic import BaseModel
 import re
 import logging
@@ -15,6 +15,8 @@ import json
 from datetime import date
 import copy
 import hashlib
+import difflib
+import unicodedata
 import numpy as np
 from neo4j.time import Date, DateTime, Time, Duration
 from neo4j.exceptions import Neo4jError
@@ -341,6 +343,11 @@ SAFE_REWRITE_LIMIT = int(QUERY_SAFETY_CFG.get("safe_rewrite_limit", 200) or 200)
 SLOW_QUERY_LOG_PATH = QUERY_SAFETY_CFG.get(
     "slow_query_log", "diagnostics/slow_queries.log"
 )
+GRAPH_CFG = config.system.get("graph", {}) or {}
+GRAPH_DEFAULT_LIMIT = int(GRAPH_CFG.get("default_limit", 10) or 10)
+GRAPH_MAX_LIMIT = int(GRAPH_CFG.get("max_limit", 50) or 50)
+GRAPH_HIGHLIGHT_RESULTS = bool(GRAPH_CFG.get("highlight_results", True))
+GRAPH_LAYOUT_MODE = str(GRAPH_CFG.get("layout", "radial") or "").lower()
 
 FEEDBACK_CFG = config.system.get("feedback", {}) or {}
 FEEDBACK_ENABLED = bool(FEEDBACK_CFG.get("enabled", True))
@@ -388,6 +395,10 @@ def _escape_lucene_query(text: str) -> str:
 
     # Escaping Lucene
     escaped_text = re.sub(special_chars, r"\\\g<0>", cleaned)
+
+    # 2. Escaping SPECIFICO per l'apostrofo (che rompe Cypher)
+    escaped_text = escaped_text.replace("'", r"\'")
+    # === FINE FIX ===
 
     if not escaped_text:
         return ""
@@ -1238,6 +1249,9 @@ class ConversationSession(BaseModel):
     created_at: datetime
     last_activity: datetime
     pending_confirmation: Optional[Dict[str, Any]] = None
+    resolved_entities: Dict[str, Dict[str, Dict[str, Any]]] = Field(
+        default_factory=dict
+    )
 
 
 class FeedbackPayload(BaseModel):
@@ -1254,7 +1268,7 @@ class FeedbackPayload(BaseModel):
 conversation_sessions: Dict[str, ConversationSession] = {}
 
 # Controlla quante interazioni recenti passiamo al contextualizer
-MAX_HISTORY_FOR_CONTEXTUALIZER = 4
+MAX_HISTORY_FOR_CONTEXTUALIZER = 10
 # Lunghezza massima (caratteri) per sintesi testo memorizzata nel prompt
 MAX_CONTEXT_SNIPPET_LENGTH = 220
 
@@ -1579,168 +1593,635 @@ ENTITY_DEFINITIONS = RESOLVER_CFG.get("entity_definitions", {})
 MIN_SCORE = RESOLVER_CFG.get("fuzzy_min_score", 0.65)
 MAX_RESULTS = RESOLVER_CFG.get("fuzzy_max_results", 3)
 DELTA_MIN = RESOLVER_CFG.get("ambiguity_delta", 0.08)
+ENTITY_LABEL_ROLES_EN = RESOLVER_CFG.get("entity_label_roles_en", {})
 
 
-def _resolve_entities_in_question(question: str) -> Tuple[str, dict]:
+def _normalize_entity_key(name: str) -> str:
     """
-    Funzione "Entity Resolver". Estrae entità dalla domanda e le verifica sul DB.
-    Restituisce: (domanda_pulita, mappa_hint)
-    Solleva AmbiguousEntityError o NoEntityFoundError se fallisce.
+    Normalizzazione leggera per le chiavi di memoria:
+    - NFKC
+    - apostrofi strani → '
+    - lowercase
+    - spazi collassati
     """
+    if not name:
+        return ""
+    s = unicodedata.normalize("NFKC", name)
+    for ch in ("’", "‘", "´", "`"):
+        s = s.replace(ch, "'")
+    s = s.lower().strip()
+    s = re.sub(r"\s+", " ", s)
+    return s
 
-    # 1. Estrai i nomi con l'LLM
+
+def _get_intent_label_preferences() -> Dict[str, List[str]]:
+    """Ritorna la mappa {specialist_route: [label preferite]} dal fuzzy.yaml."""
+    return RESOLVER_CFG.get("intent_label_preferences", {}) or {}
+
+
+def _get_preferred_labels_for_route(specialist_route: str) -> List[str]:
+    intent_map = _get_intent_label_preferences()
+    return intent_map.get(specialist_route, []) or []
+
+
+MEMORY_KEY_MIN_SIMILARITY = RESOLVER_CFG.get("memory_key_min_similarity", 0.90)
+
+
+def _find_best_memory_key(
+    mem_store: Dict[str, Any],
+    term_key: str,
+) -> Optional[str]:
+    """
+    Cerca in mem_store una chiave 'simile' a term_key.
+    Se la similarità max >= MEMORY_KEY_MIN_SIMILARITY, ritorna quella chiave.
+    Altrimenti None.
+    """
+    best_key = None
+    best_score = 0.0
+
+    for existing_key in mem_store.keys():
+        score = difflib.SequenceMatcher(None, term_key, existing_key).ratio()
+        if score > best_score:
+            best_score = score
+            best_key = existing_key
+
+    if best_key is not None and best_score >= MEMORY_KEY_MIN_SIMILARITY:
+        logger.info(
+            "[Resolver Memory] Alias '%s' → '%s' (sim=%.3f).",
+            term_key,
+            best_key,
+            best_score,
+        )
+        return best_key
+
+    return None
+
+
+def _get_memory_resolution(
+    session,
+    term_key: str,
+    preferred_labels: List[str],
+) -> Optional[Dict[str, Any]]:
+    """
+    Recupera l'entità dalla memoria, MA solo se compatibile con le preferred_labels.
+    Compatibile = nessuna preferenza OPPURE label salvata ∈ preferred_labels.
+    """
+    # Usa lo stesso store usato in _save_memory_resolution
+    mem_store = getattr(session, "resolved_entities", None)
+    if not mem_store:
+        return None
+
+    effective_key = term_key
+    alias_key = _find_best_memory_key(mem_store, term_key)
+    if alias_key is not None:
+        effective_key = alias_key
+
+    entry = mem_store.get(effective_key)
+    if not entry:
+        return None
+
+    # entry può essere:
+    # - formato vecchio: {"name": "...", "label": "..."}
+    # - formato nuovo:  {"Cliente": {...}, "GruppoFornitore": {...}}
+    if "name" in entry and "label" in entry:
+        # compat vecchio formato
+        saved_label = entry.get("label")
+        if not preferred_labels or saved_label in preferred_labels:
+            return entry
+        else:
+            logger.info(
+                "[Resolver P1 Memory] '%s' in memoria solo come %s, non compatibile con preferenze %s. Non la uso.",
+                term_key,
+                saved_label,
+                preferred_labels,
+            )
+            return None
+
+    # formato nuovo: multi-ruolo
+    # Nessuna preferenza → puoi prendere qualcosa a caso (es. prima entry)
+    if not preferred_labels:
+        # prendi il primo ruolo salvato
+        first = next(iter(entry.values()))
+        return first
+
+    # Con preferenze: prova a trovare un ruolo compatibile
+    for label in preferred_labels:
+        if label in entry:
+            return entry[label]
+
+    # Qui: memoria esiste ma solo con ruoli non compatibili
+    logger.info(
+        "[Resolver P1 Memory] '%s' in memoria solo con ruoli %s, non compatibili con preferenze %s. Non la uso.",
+        term_key,
+        list(entry.keys()),
+        preferred_labels,
+    )
+    return None
+
+
+def _save_memory_resolution(
+    session: ConversationSession,
+    term_key: str,
+    resolution: Dict[str, Any],
+) -> None:
+    """
+    Salva (o aggiorna) la memoria multi-ruolo per un termine.
+    """
+    existing = session.resolved_entities.get(term_key)
+
+    # Compat vecchio formato
+    if isinstance(existing, dict) and "name" in existing and "label" in existing:
+        existing = {existing["label"]: existing}
+
+    if not existing:
+        existing = {}
+
+    label = resolution.get("label") or "UNKNOWN"
+    existing[label] = resolution
+    session.resolved_entities[term_key] = existing
+
+    logger.info(f"[Resolver Memory] Salvataggio: '{term_key}'[{label}] = {resolution}")
+
+
+def _augment_english_task_with_entity_hints(
+    english_task: str,
+    mappa_hint: Dict[str, Dict[str, Any]],
+    specialist_route: str,
+) -> str:
+    """
+    Aggiunge al task EN una sezione 'Entity hints' basata su mappa_hint.
+
+    mappa_hint[original_name] = {
+        "name": "L'ABBONDANZA SRL",
+        "label": "Cliente" | None,
+        "property": "name" | None,
+        "role_mismatch_for_intent": bool,
+        "available_labels": [...],
+    }
+    """
+    if not mappa_hint:
+        return english_task
+
+    lines = [english_task.strip(), "", "Entity hints (from previous resolver step):"]
+
+    for original, info in mappa_hint.items():
+        name = info.get("name", original)
+        label = info.get("label")
+        prop = info.get("property")
+        mismatch = info.get("role_mismatch_for_intent", False)
+        available_labels = info.get("available_labels") or []
+
+        if not mismatch:
+            # ✅ Caso "normale" – stesso stile di prima
+            if not prop and label:
+                # fallback, nel caso property non sia stata messa
+                prop = ENTITY_DEFINITIONS.get(label, {}).get("property", "name")
+
+            lines.append(
+                f"- '{name}' is a {label} (label `{label}`, use property `{prop}`)."
+            )
+        else:
+            # ⚠️ Caso ROLE MISMATCH: esiste ma con ruolo non compatibile
+            labels_str = (
+                ", ".join(available_labels) if available_labels else "unknown role"
+            )
+            lines.append(
+                f"- '{name}' exists in the DB only with roles: {labels_str}. "
+                f"For this task type (`{specialist_route}`) this is NOT a valid role. "
+                f"Do not fabricate data for this entity in this role; "
+                f"prefer explaining that no such data is available."
+            )
+
+    return "\n".join(lines)
+
+
+def _graph_search_raw_candidates(nome: str) -> List[Dict[str, Any]]:
+    """
+    Cerca l'entità 'nome' su TUTTE le label configurate in ENTITY_DEFINITIONS,
+    con la stessa logica di prima:
+    - match esatto
+    - fuzzy fulltext
+    - fallback Levenshtein su Cliente
+    Ritorna una lista di dict: { "name": str, "label": str, "score": float }.
+    """
+    risultati: List[Dict[str, Any]] = []
+    logger.debug(f"[Resolver] Inizio risoluzione per nome: {nome!r}")
+
+    # 2a. MATCH ESATTO
+    union_parts: List[str] = []
+    for label, definition in ENTITY_DEFINITIONS.items():
+        prop = definition.get("property")
+        if not prop:
+            continue
+
+        union_parts.append(
+            f"""
+            MATCH (n:{label}) 
+            WHERE toLower(n.{prop}) = '{nome.lower()}'
+            RETURN n.{prop} AS name, '{label}' AS label, 10.0 AS score
+            """
+        )
+
+    if union_parts:
+        query_esatta = "\nUNION\n".join(union_parts)
+        logger.debug(f"[Resolver] Query esatta per {nome!r}:\n{query_esatta}")
+        try:
+            res_esatto = execute_cypher_with_timeout(query_esatta)
+            logger.debug(
+                f"[Resolver] Risultati match esatto per {nome!r}: {res_esatto}"
+            )
+            risultati.extend(res_esatto)
+        except Exception as e:
+            logger.debug(f"[Resolver] Probe esatto fallito per '{nome}': {e}")
+
+    # 2b. FUZZY FULLTEXT, se il match esatto è vuoto
+    if not risultati:
+        for label, definition in ENTITY_DEFINITIONS.items():
+            index_name = definition.get("index")
+            prop_name = definition.get("property")
+
+            if not index_name or not prop_name:
+                continue
+
+            query_fuzzy = f"""
+                CALL db.index.fulltext.queryNodes('{index_name}', '{_escape_lucene_query(nome)}') 
+                YIELD node, score
+                WHERE node:{label} AND score > {MIN_SCORE} 
+                RETURN node.{prop_name} AS name, '{label}' AS label, score 
+                ORDER BY score DESC LIMIT {MAX_RESULTS}
+            """
+
+            logger.debug(
+                f"[Resolver] Query fuzzy per {nome!r} su label {label}, "
+                f"index {index_name}:\n{query_fuzzy}"
+            )
+
+            try:
+                res_fuzzy = execute_cypher_with_timeout(query_fuzzy)
+                logger.debug(
+                    f"[Resolver] Risultati fuzzy per {nome!r} (label {label}): {res_fuzzy}"
+                )
+                risultati.extend(res_fuzzy)
+            except Exception as e:
+                logger.warning(f"Errore su indice fuzzy {index_name} per '{nome}': {e}")
+
+    # 2c. FALLBACK LEVENSHTEIN su Cliente se ancora nulla
+    if not risultati:
+        try:
+            lev_min = RESOLVER_CFG.get("levenshtein_min_similarity", 0.4)
+
+            query_lev = f"""
+                MATCH (n:Cliente)
+                WITH n,
+                     apoc.text.levenshteinSimilarity(
+                         toLower(n.name),
+                         '{nome.lower()}'
+                     ) AS sim
+                WHERE sim >= {lev_min}
+                RETURN n.name AS name, 'Cliente' AS label, sim AS score
+                ORDER BY sim DESC LIMIT {MAX_RESULTS}
+            """
+
+            logger.debug(
+                f"[Resolver] Query Levenshtein fallback per {nome!r}:\n{query_lev}"
+            )
+
+            res_lev = execute_cypher_with_timeout(query_lev)
+            logger.debug(f"[Resolver] Risultati Levenshtein per {nome!r}: {res_lev}")
+            risultati.extend(res_lev)
+
+        except Exception as e:
+            logger.warning(
+                f"[Resolver] Errore nel fallback Levenshtein per '{nome}': {e}"
+            )
+
+    # DEDUPE (name, label)
+    dedup: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    for r in risultati:
+        key = (r.get("name"), r.get("label"))
+        if key in dedup:
+            if r.get("score", 0) > dedup[key].get("score", 0):
+                dedup[key] = r
+        else:
+            dedup[key] = r
+
+    return list(dedup.values())
+
+
+def _normalize_for_exact_match(name: str) -> str:
+    """
+    Normalizzazione minimale per l'uguaglianza testuale:
+    - unicode NFKC
+    - apostrofi strani → '
+    - lowercase e strip
+    """
+    if not name:
+        return ""
+    s = unicodedata.normalize("NFKC", name)
+    for ch in ("’", "‘", "´", "`"):
+        s = s.replace(ch, "'")
+    s = s.lower().strip()
+    return s
+
+
+def _resolve_single_entity(
+    nome: str,
+    specialist_route: str,
+    session,
+) -> Dict[str, Any]:
+    """
+    Risolve UNA entità:
+      - prova prima dalla memoria (solo se ruolo compatibile col dominio)
+      - altrimenti cerca sul grafo (esatto + fuzzy + Levenshtein)
+      - applica le preferenze di ruolo per il dominio
+      - gestisce la role_mismatch_for_intent
+    """
+    term_key = _normalize_entity_key(nome)
+    preferred_labels = _get_preferred_labels_for_route(specialist_route)
+
+    # 1) PROVA DALLA MEMORIA (P1) ------------------------------------------
+    mem_res = _get_memory_resolution(session, term_key, preferred_labels)
+    if mem_res:
+        logger.info(
+            "Entity Resolver: '%s' -> '%s' (%s) per intent '%s' (da memoria).",
+            nome,
+            mem_res.get("name"),
+            mem_res.get("label"),
+            specialist_route,
+        )
+        return mem_res
+
+    # 2) NESSUNA MEMORIA VALIDA → CERCA SUL GRAFO -------------------------
+    risultati: List[Dict[str, Any]] = []
+    logger.debug(f"[Resolver] Inizio risoluzione per nome: {nome!r}")
+
+    # 2a. MATCH ESATTO su tutte le entity_definitions
+    union_parts: List[str] = []
+    for label, definition in ENTITY_DEFINITIONS.items():
+        prop = definition.get("property")
+        if not prop:
+            continue
+
+        match_value = _normalize_for_exact_match(nome)
+
+        union_parts.append(
+            f"""
+        MATCH (n:{label}) 
+        WHERE toLower(trim(n.{prop})) = '{match_value}'
+        RETURN n.{prop} AS name, '{label}' AS label, 10.0 AS score
+        """
+        )
+
+    if union_parts:
+        query_esatta = "\nUNION\n".join(union_parts)
+        logger.debug(f"[Resolver] Query esatta per {nome!r}:\n{query_esatta}")
+        try:
+            res_esatto = execute_cypher_with_timeout(query_esatta)
+            logger.debug(
+                f"[Resolver] Risultati match esatto per {nome!r}: {res_esatto}"
+            )
+            risultati.extend(res_esatto)
+        except Exception as e:
+            logger.debug(f"[Resolver] Probe esatto fallito per '{nome}': {e}")
+
+    # 2b. FUZZY FULLTEXT, se il match esatto non ha trovato nulla
+    if not risultati:
+        for label, definition in ENTITY_DEFINITIONS.items():
+            index_name = definition.get("index")
+            prop_name = definition.get("property")
+
+            if not index_name or not prop_name:
+                continue
+
+            query_fuzzy = f"""
+                CALL db.index.fulltext.queryNodes('{index_name}', '{_escape_lucene_query(nome)}') 
+                YIELD node, score
+                WHERE node:{label} AND score > {MIN_SCORE} 
+                RETURN node.{prop_name} AS name, '{label}' AS label, score 
+                ORDER BY score DESC LIMIT {MAX_RESULTS}
+            """
+
+            logger.debug(
+                f"[Resolver] Query fuzzy per {nome!r} su label {label}, "
+                f"index {index_name}:\n{query_fuzzy}"
+            )
+
+            try:
+                res_fuzzy = execute_cypher_with_timeout(query_fuzzy)
+                logger.debug(
+                    f"[Resolver] Risultati fuzzy per {nome!r} (label {label}): {res_fuzzy}"
+                )
+                risultati.extend(res_fuzzy)
+            except Exception as e:
+                logger.warning(f"Errore su indice fuzzy {index_name} per '{nome}': {e}")
+
+    # 2c. FALLBACK LEVENSHTEIN su Cliente se ancora nulla
+    if not risultati:
+        try:
+            lev_min = RESOLVER_CFG.get("levenshtein_min_similarity", 0.4)
+
+            query_lev = f"""
+                MATCH (n:Cliente)
+                WITH n,
+                     apoc.text.levenshteinSimilarity(
+                         toLower(n.name),
+                         '{nome.lower()}'
+                     ) AS sim
+                WHERE sim >= {lev_min}
+                RETURN n.name AS name, 'Cliente' AS label, sim AS score
+                ORDER BY sim DESC LIMIT {MAX_RESULTS}
+            """
+
+            logger.debug(
+                f"[Resolver] Query Levenshtein fallback per {nome!r}:\n{query_lev}"
+            )
+
+            res_lev = execute_cypher_with_timeout(query_lev)
+            logger.debug(f"[Resolver] Risultati Levenshtein per {nome!r}: {res_lev}")
+            risultati.extend(res_lev)
+
+        except Exception as e:
+            logger.warning(
+                f"[Resolver] Errore nel fallback Levenshtein per '{nome}': {e}"
+            )
+
+    # 3) NESSUN RISULTATO ASSOLUTO ---------------------------------------
+    if not risultati:
+        logger.warning(
+            f"[Resolver] Nessun risultato per {nome!r} dopo esatto + fuzzy + fallback."
+        )
+        raise NoEntityFoundError(nome)
+
+    # 4) DEDUPE: stessi (name, label) NON devono creare ambiguità cosmetica
+    dedup: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    for r in risultati:
+        key = (r.get("name"), r.get("label"))
+        if key in dedup:
+            if r.get("score", 0) > dedup[key].get("score", 0):
+                dedup[key] = r
+        else:
+            dedup[key] = r
+    risultati = list(dedup.values())
+
+    raw_candidates = risultati  # li teniamo per available_labels
+
+    # 5) FILTRO PER INTENT (dominio) -------------------------------------
+    if preferred_labels:
+        filtered = [r for r in raw_candidates if r["label"] in preferred_labels]
+    else:
+        filtered = list(raw_candidates)
+
+    if filtered:
+        # Ok: abbiamo candidati compatibili col dominio
+        risultati_da_controllare = filtered
+    else:
+        risultati_da_controllare = []
+
+    # 6) CASO ROLE MISMATCH: esistono candidati ma nessuno compatibile ----
+    if not risultati_da_controllare and raw_candidates and preferred_labels:
+        available_labels = sorted({c["label"] for c in raw_candidates})
+        logger.info(
+            "[Resolver RoleMismatch] '%s' trovato solo come %s, "
+            "ma intent '%s' richiede uno di %s.",
+            nome,
+            available_labels,
+            specialist_route,
+            preferred_labels,
+        )
+
+        # Non salviamo in memoria, segnaliamo mismatch
+        return {
+            "name": raw_candidates[0]["name"],  # nome rappresentativo
+            "label": None,
+            "property": None,
+            "role_mismatch_for_intent": True,
+            "available_labels": available_labels,
+        }
+
+    # 7) DA QUI IN POI: abbiamo candidati compatibili con l'intent --------
+    if not risultati_da_controllare:
+        # Nessuna preferenza oppure nessun candidato serio
+        risultati_da_controllare = raw_candidates
+
+    # Controllo se è una sola entità logica (stesso name+label)
+    unique_pairs = {(r["name"], r["label"]) for r in risultati_da_controllare}
+    if len(unique_pairs) == 1:
+        risultati_da_controllare.sort(key=lambda x: x["score"], reverse=True)
+        best_match = risultati_da_controllare[0]
+    else:
+        risultati_da_controllare.sort(key=lambda x: x["score"], reverse=True)
+        best_match = risultati_da_controllare[0]
+        top_score = best_match["score"]
+
+        if len(risultati_da_controllare) > 1:
+            second_score = risultati_da_controllare[1]["score"]
+            delta = top_score - second_score
+            if delta < DELTA_MIN:
+                ambiguous_options = [
+                    {
+                        "name": r["name"],
+                        "label": r["label"],
+                        "score": r["score"],
+                    }
+                    for r in risultati_da_controllare
+                    if r["score"] >= second_score
+                ]
+                logger.warning(
+                    f"[Resolver] Ambiguità per {nome!r}: "
+                    f"top_score={top_score}, second_score={second_score}, delta={delta}"
+                )
+                raise AmbiguousEntityError(nome, ambiguous_options)
+
+    # 8) MATCH CERTO → SALVA MEMORIA + RITORNA ---------------------------
+    nome_corretto = best_match["name"]
+    label_corretta = best_match["label"]
+    entity_def = ENTITY_DEFINITIONS.get(label_corretta, {})
+    property_name = entity_def.get("property")
+
+    risultato_certo = {
+        "name": nome_corretto,
+        "label": label_corretta,
+        "property": property_name,
+        "role_mismatch_for_intent": False,
+        "available_labels": sorted({c["label"] for c in raw_candidates}),
+    }
+
+    logger.info(
+        "Entity Resolver: '%s' -> '%s' (%s) per intent '%s'.",
+        nome,
+        nome_corretto,
+        label_corretta,
+        specialist_route,
+    )
+
+    _save_memory_resolution(session, term_key, risultato_certo)
+    return risultato_certo
+
+
+def _resolve_entities_in_question(
+    question: str,
+    specialist_route: str = "GENERAL_QUERY",
+    user_id: str = "default_user",
+) -> Tuple[str, dict]:
+    """
+    Usa l'LLM per estrarre i nomi, poi per ciascuno chiama _resolve_single_entity.
+    Ritorna:
+      - domanda_pulita
+      - mappa_hint: { nome_originale: { name, label, property, role_mismatch_for_intent, available_labels } }
+    """
+    session = get_or_create_session(user_id)
+
     nomi_da_cercare = run_entity_extractor_agent(question)
-
     if not nomi_da_cercare:
-        # Nessuna entità riconosciuta: la domanda è generica, passo così com'è
         return question, {}
 
     logger.info(f"Entity Resolver: LLM ha estratto candidati {nomi_da_cercare}")
-    logger.warning(f"ENTITY_DEFINITIONS from config: {ENTITY_DEFINITIONS}")
-    logger.warning(
+    logger.debug(f"ENTITY_DEFINITIONS from config: {ENTITY_DEFINITIONS}")
+    logger.debug(
         f"MIN_SCORE={MIN_SCORE}, MAX_RESULTS={MAX_RESULTS}, DELTA_MIN={DELTA_MIN}"
     )
 
-    mappa_hint: dict = {}
+    original_question_temp = question
     domanda_pulita = question
+    mappa_hint: Dict[str, Dict[str, Any]] = {}
 
     for nome in nomi_da_cercare:
-        risultati: List[Dict[str, Any]] = []
-        logger.debug(f"[Resolver] Inizio risoluzione per nome: {nome!r}")
-
-        # 2. MATCH ESATTO (su tutte le entity_definitions)
-        union_parts: List[str] = []
-        for label, definition in ENTITY_DEFINITIONS.items():
-            prop = definition.get("property")
-            if not prop:
-                continue
-
-            union_parts.append(
-                f"""
-                MATCH (n:{label}) 
-                WHERE toLower(n.{prop}) = '{nome.lower()}'
-                RETURN n.{prop} AS name, '{label}' AS label, 10.0 AS score
-                """
-            )
-
-        if union_parts:
-            query_esatta = "\nUNION\n".join(union_parts)
-            logger.debug(f"[Resolver] Query esatta per {nome!r}:\n{query_esatta}")
-            try:
-                res_esatto = execute_cypher_with_timeout(query_esatta)
-                logger.debug(
-                    f"[Resolver] Risultati match esatto per {nome!r}: {res_esatto}"
-                )
-                risultati.extend(res_esatto)
-            except Exception as e:
-                logger.debug(f"[Resolver] Probe esatto fallito per '{nome}': {e}")
-
-        # 3. FUZZY FULLTEXT, se il match esatto non ha trovato nulla
-        if not risultati:
-            for label, definition in ENTITY_DEFINITIONS.items():
-                index_name = definition.get("index")
-                prop_name = definition.get("property")
-
-                # Se per quel label non c'è indice o proprietà, salto
-                if not index_name or not prop_name:
-                    continue
-
-                query_fuzzy = f"""
-                    CALL db.index.fulltext.queryNodes('{index_name}', '{_escape_lucene_query(nome)}') 
-                    YIELD node, score
-                    WHERE node:{label} AND score > {MIN_SCORE} 
-                    RETURN node.{prop_name} AS name, '{label}' AS label, score 
-                    ORDER BY score DESC LIMIT {MAX_RESULTS}
-                """
-
-                logger.debug(
-                    f"[Resolver] Query fuzzy per {nome!r} su label {label}, "
-                    f"index {index_name}:\n{query_fuzzy}"
-                )
-
-                try:
-                    res_fuzzy = execute_cypher_with_timeout(query_fuzzy)
-                    logger.debug(
-                        f"[Resolver] Risultati fuzzy per {nome!r} (label {label}): {res_fuzzy}"
-                    )
-                    risultati.extend(res_fuzzy)
-                except Exception as e:
-                    logger.warning(
-                        f"Errore su indice fuzzy {index_name} per '{nome}': {e}"
-                    )
-
-        # 3.bis FALLBACK LEVENSHTEIN su Cliente se ancora nulla
-        if not risultati:
-            try:
-                lev_min = RESOLVER_CFG.get("levenshtein_min_similarity", 0.4)
-
-                query_lev = f"""
-                    MATCH (n:Cliente)
-                    WITH n,
-                         apoc.text.levenshteinSimilarity(
-                             toLower(n.name),
-                             '{nome.lower()}'
-                         ) AS sim
-                    WHERE sim >= {lev_min}
-                    RETURN n.name AS name, 'Cliente' AS label, sim AS score
-                    ORDER BY sim DESC LIMIT {MAX_RESULTS}
-                """
-
-                logger.debug(
-                    f"[Resolver] Query Levenshtein fallback per {nome!r}:\n{query_lev}"
-                )
-
-                res_lev = execute_cypher_with_timeout(query_lev)
-                logger.debug(
-                    f"[Resolver] Risultati Levenshtein per {nome!r}: {res_lev}"
-                )
-                risultati.extend(res_lev)
-
-            except Exception as e:
-                logger.warning(
-                    f"[Resolver] Errore nel fallback Levenshtein per '{nome}': {e}"
-                )
-
-        # 4. DECISIONE
-        if not risultati:
-            logger.warning(
-                f"[Resolver] Nessun risultato per {nome!r} dopo esatto + fuzzy + fallback."
-            )
-            raise NoEntityFoundError(nome)  # nessuna entità trovata
-
-        risultati.sort(key=lambda x: x["score"], reverse=True)
-        best_match = risultati[0]
-        top_score = best_match["score"]
-
-        # Controllo ambiguità (delta tra primo e secondo)
-        if len(risultati) > 1:
-            second_score = risultati[1]["score"]
-            delta = top_score - second_score
-            if delta < DELTA_MIN:
-                # opzioni = list({f"{r['name']} ({r['label']})" for r in risultati})
-                ambiguous_options = [
-                    {"name": r["name"], "label": r["label"], "score": r["score"]}
-                    for r in risultati
-                    if r["score"] >= second_score  # Passa tutti i contendenti
-                ]
-        logger.warning(
-            f"[Resolver] Ambiguità per {nome!r}: "
-            f"top_score={top_score}, second_score={second_score}, delta={delta}"
-        )
-        raise AmbiguousEntityError(nome, ambiguous_options)
-
-        nome_corretto = best_match["name"]
-        label_corretta = best_match["label"]
-        logger.info(
-            f"Entity Resolver: '{nome}' -> '{nome_corretto}' ({label_corretta})"
+        risultato = _resolve_single_entity(
+            nome=nome,
+            specialist_route=specialist_route,
+            session=session,
         )
 
-        # Hint per il Coder (passiamo nome pulito + label)
-        mappa_hint[nome] = {"name": nome_corretto, "label": label_corretta}
+        nome_corretto = risultato["name"]
+        label_corretta = risultato["label"]
 
-        # Sostituisco nella domanda il nome sporco con quello pulito
-        # (attenzione: qui è una sostituzione semplice, va bene per i tuoi casi)
-        domanda_pulita = domanda_pulita.replace(nome, nome_corretto)
+        if risultato["role_mismatch_for_intent"]:
+            logger.info(
+                "Entity Resolver: '%s' esiste solo come %s, ma non è valido per l'intent '%s'.",
+                nome,
+                risultato["available_labels"],
+                specialist_route,
+            )
+        else:
+            logger.info(
+                "Entity Resolver: '%s' -> '%s' (%s)",
+                nome,
+                nome_corretto,
+                label_corretta,
+            )
+
+        mappa_hint[nome] = risultato
+
+        # Normalizza comunque il testo col nome del DB
+        domanda_pulita = re.sub(
+            r"(\b)" + re.escape(nome) + r"(\b)",
+            nome_corretto,
+            domanda_pulita,
+            flags=re.IGNORECASE,
+        )
+
+    if question != domanda_pulita and original_question_temp != domanda_pulita:
+        logger.info(f"Domanda pulita dal Resolver: '{domanda_pulita}'")
 
     return domanda_pulita, mappa_hint
 
@@ -2147,15 +2628,22 @@ def run_entity_extractor_agent(question: str) -> List[str]:
 
         if m:
             json_str = m.group(0)
-            # Normalizza apici singoli in doppi per sicurezza
-            json_str = json_str.replace("'", '"')
             logger.debug(f"🧩 [EntityExtractor JSON candidate] {json_str!r}")
 
+            # 4a) Primo tentativo: JSON standard
             try:
                 nomi = json.loads(json_str)
-            except Exception as e:
-                logger.error(f"❌ Errore nel json.loads della risposta LLM: {e}")
-                return []
+            except Exception as e_json:
+                # 4b) Secondo tentativo: lista stile Python (apici singoli) con ast.literal_eval
+                try:
+                    import ast
+
+                    nomi = ast.literal_eval(json_str)
+                except Exception:
+                    logger.error(
+                        f"❌ Errore nel parsing della risposta LLM (json e literal_eval falliti): {e_json}"
+                    )
+                    return []
 
             if isinstance(nomi, list):
                 cleaned = [str(x).strip() for x in nomi if str(x).strip()]
@@ -2646,6 +3134,322 @@ def extract_graph_snapshot(
     return {"nodes": list(nodes.values()), "edges": list(edges.values())}
 
 
+def _apply_result_highlight(
+    graph_payload: Dict[str, Any], highlight_node_ids: Optional[Set[str]]
+) -> None:
+    if not highlight_node_ids:
+        return
+    highlight_ids = {str(x) for x in highlight_node_ids if x}
+    if not highlight_ids:
+        return
+    for node in graph_payload.get("nodes", []) or []:
+        node_id = node.get("id")
+        if node_id and node_id in highlight_ids:
+            node["isResult"] = True
+
+
+def _enrich_graph_meta(
+    graph_payload: Dict[str, Any],
+    *,
+    source: str,
+    limit: Optional[int],
+    highlight_ids: Optional[Set[str]],
+    layout: Optional[str],
+    record_count: int,
+) -> None:
+    meta = graph_payload.setdefault("meta", {})
+    if source:
+        meta["source"] = source
+    if limit is not None:
+        meta["limit"] = limit
+    meta["record_count"] = record_count
+    if highlight_ids:
+        meta["result_node_ids"] = list({str(x) for x in highlight_ids if x})
+    if layout:
+        meta["layout"] = layout
+
+
+def _collect_node_element_ids_from_records(records: List[Dict[str, Any]]) -> Set[str]:
+    ids: Set[str] = set()
+
+    def visit(value: Any) -> None:
+        if value is None:
+            return
+        if isinstance(value, Node):
+            node_id = _extract_node_identity(value)
+            if node_id:
+                ids.add(node_id)
+        elif isinstance(value, Path):
+            for node in value.nodes:
+                visit(node)
+        elif isinstance(value, (list, tuple, set)):
+            for item in value:
+                visit(item)
+        elif isinstance(value, dict):
+            for item in value.values():
+                visit(item)
+
+    for record in records or []:
+        if isinstance(record, dict):
+            for value in record.values():
+                visit(value)
+
+    return ids
+
+
+def _collect_entity_candidates_from_records(
+    records: List[Dict[str, Any]],
+) -> List[Dict[str, str]]:
+    """Estrae possibili candidati (label, property, value) dai record testuali."""
+
+    resolver_cfg = (config.fuzzy or {}).get("entity_resolver", {}) or {}
+    definitions = resolver_cfg.get("entity_definitions", {}) or {}
+    if not definitions:
+        return []
+
+    roles = resolver_cfg.get("entity_label_roles_en", {}) or {}
+
+    label_hints: Dict[str, Set[str]] = {}
+    for label, defn in definitions.items():
+        hints: Set[str] = set()
+        lbl = str(label).lower()
+        hints.add(lbl)
+        hints.add(re.sub(r"[^a-z0-9]", "", lbl))
+        prop = str(defn.get("property") or "").lower()
+        if prop:
+            hints.add(prop)
+            hints.add(re.sub(r"[^a-z0-9]", "", prop))
+        role_info = roles.get(label, {})
+        role = str(role_info.get("role") or "").lower()
+        if role:
+            hints.add(role)
+            hints.add(re.sub(r"[^a-z0-9]", "", role))
+        # Varianti comuni
+        hints.add(lbl.replace("gruppo", "gruppo"))
+        hints.add(lbl.replace("fornitore", "fornitore"))
+        label_hints[label] = {h for h in hints if h}
+
+    candidates: List[Dict[str, str]] = []
+    seen_pairs: Set[Tuple[str, str]] = set()
+
+    for record in records or []:
+        if not isinstance(record, dict):
+            continue
+        for key, value in record.items():
+            if value is None or isinstance(value, (int, float)):
+                continue
+            if isinstance(value, Node):
+                continue  # già gestito altrove
+            value_str = str(value).strip()
+            if not value_str:
+                continue
+            key_norm = re.sub(r"[^a-z0-9]", "", str(key).lower())
+            if not key_norm:
+                continue
+            for label, hints in label_hints.items():
+                if any(h in key_norm for h in hints):
+                    prop = definitions[label].get("property") or "name"
+                    pair = (label, value_str.lower())
+                    if pair in seen_pairs:
+                        break
+                    seen_pairs.add(pair)
+                    candidates.append(
+                        {
+                            "label": label,
+                            "property": prop,
+                            "value": value_str,
+                        }
+                    )
+                    break
+
+    return candidates
+
+
+def _make_stub_node_id(label: str, value: str) -> str:
+    """Genera un ID stabile per un nodo segnaposto."""
+    base = f"{label}:{value}".lower()
+    safe = re.sub(r"[^a-z0-9]+", "-", base).strip("-") or "result"
+    digest = hashlib.sha1(base.encode("utf-8")).hexdigest()[:10]
+    return f"stub::{safe}:{digest}"
+
+
+def _build_graph_from_entity_candidates(
+    candidates: List[Dict[str, str]], limit: Optional[int]
+) -> Tuple[Dict[str, Any], Set[str]]:
+    if not candidates:
+        return {}, set()
+
+    combined_records: List[Dict[str, Any]] = []
+    highlight_ids: Set[str] = set()
+    unresolved: List[Dict[str, str]] = []
+    remaining = max(1, min(int(limit or GRAPH_DEFAULT_LIMIT), GRAPH_MAX_LIMIT))
+
+    seen: Set[Tuple[str, str]] = set()
+    for cand in candidates:
+        label = cand.get("label")
+        value = (cand.get("value") or "").strip()
+        prop = cand.get("property") or "name"
+        if not label or not value:
+            continue
+        key = (label, value.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+
+        query = (
+            f"MATCH (n:`{label}`) "
+            f"WHERE toLower(trim(n.{prop})) = toLower(trim($value)) "
+            "WITH n LIMIT 1 "
+            "OPTIONAL MATCH (n)-[r]-(m) "
+            "RETURN n AS result_node, r, m "
+            "LIMIT $limit"
+        )
+
+        try:
+            records = execute_cypher_with_records(
+                query, {"value": value, "limit": remaining}
+            )
+        except Neo4jError as exc:
+            logger.warning("Graph lookup fallita per %s='%s': %s", label, value, exc)
+            unresolved.append(cand)
+            continue
+
+        if not records:
+            unresolved.append(cand)
+            continue
+        combined_records.extend(records)
+        for rec in records:
+            node = rec.get("result_node")
+            if isinstance(node, Node):
+                node_id = _extract_node_identity(node)
+                if node_id:
+                    highlight_ids.add(node_id)
+
+    graph_payload: Dict[str, Any] = {}
+    lookup_hit = False
+
+    if combined_records:
+        graph_payload = extract_graph_snapshot(combined_records)
+        if graph_payload and graph_payload.get("nodes"):
+            lookup_hit = True
+
+    stub_highlight: Set[str] = set()
+    if unresolved:
+        if not graph_payload:
+            graph_payload = {"nodes": [], "edges": []}
+        nodes = graph_payload.setdefault("nodes", [])
+        edges = graph_payload.setdefault("edges", [])
+        if edges is None:
+            edges = []
+            graph_payload["edges"] = edges
+        # fmt: off
+        existing_ids = {
+            str(node.get("id")) for node in nodes if node and node.get("id")
+        }
+        # fmt: on
+        for item in unresolved:
+            label = item.get("label") or "Entita"
+            value = (item.get("value") or "").strip()
+            prop = item.get("property") or "name"
+            if not value:
+                continue
+            stub_id = _make_stub_node_id(label, value)
+            if stub_id in existing_ids:
+                continue
+            stub_node = {
+                "id": stub_id,
+                "labels": [label, "Stub"],
+                "properties": {
+                    prop: value,
+                    "_origin": "stub",
+                },
+            }
+            nodes.append(stub_node)
+            existing_ids.add(stub_id)
+            stub_highlight.add(stub_id)
+
+    if graph_payload and graph_payload.get("nodes"):
+        final_highlight = set(highlight_ids or set())
+        if stub_highlight:
+            final_highlight.update(stub_highlight)
+        if GRAPH_HIGHLIGHT_RESULTS and final_highlight:
+            _apply_result_highlight(graph_payload, final_highlight)
+        source_label = "result_nodes_lookup" if lookup_hit else "stubbed_results"
+        _enrich_graph_meta(
+            graph_payload,
+            source=source_label,
+            limit=limit,
+            highlight_ids=final_highlight,
+            layout=GRAPH_LAYOUT_MODE,
+            record_count=(
+                len(combined_records) if combined_records else len(stub_highlight)
+            ),
+        )
+        meta = graph_payload.setdefault("meta", {})
+        if stub_highlight:
+            meta["stub_nodes_added"] = len(stub_highlight)
+        if lookup_hit:
+            meta["lookup_hits"] = True
+        return graph_payload, final_highlight
+
+    return {}, set()
+
+
+def fetch_graph_from_ids(
+    node_ids: Optional[Iterable[Any]], limit: Optional[int]
+) -> Dict[str, Any]:
+    """
+    Recupera un grafo partendo da una lista di elementId() già noti.
+    Esegue query mirate per ognuno dei nodi e aggrega i risultati.
+    """
+    if not node_ids:
+        return {}
+
+    safe_ids: List[str] = []
+    for node_id in node_ids:
+        if node_id is None:
+            continue
+        node_id_str = str(node_id).strip()
+        if node_id_str:
+            safe_ids.append(node_id_str)
+
+    if not safe_ids:
+        return {}
+
+    remaining = max(1, min(int(limit or GRAPH_DEFAULT_LIMIT), GRAPH_MAX_LIMIT))
+    combined_records: List[Dict[str, Any]] = []
+
+    query = """
+        MATCH (n)
+        WHERE elementId(n) = $node_id
+        WITH n
+        OPTIONAL MATCH (n)-[r]-(m)
+        RETURN n AS result_node, r, m
+        LIMIT $limit
+    """
+
+    for node_id in safe_ids:
+        try:
+            records = execute_cypher_with_records(
+                query, {"node_id": node_id, "limit": remaining}
+            )
+        except Neo4jError as exc:
+            logger.warning("Graph fetch fallita per elementId=%s: %s", node_id, exc)
+            continue
+
+        if records:
+            combined_records.extend(records)
+
+    if not combined_records:
+        return {}
+
+    graph_payload = extract_graph_snapshot(combined_records)
+    if graph_payload and graph_payload.get("nodes"):
+        return graph_payload
+
+    return {}
+
+
 def make_context_json_serializable(context):
     """
     Scorre ricorsivamente i risultati e converte TUTTI i tipi non-JSON in stringhe.
@@ -2735,7 +3539,9 @@ def _extract_missing_variable_from_error(message: str) -> Optional[str]:
 
 
 # Ricostruzione grafo da query con aggregazioni
-def _reconstruct_graph_from_query(query: str) -> Dict[str, List[Dict[str, Any]]]:
+def _reconstruct_graph_from_query(
+    query: str, limit: Optional[int] = None
+) -> Dict[str, List[Dict[str, Any]]]:
     """
     Ricostruisce un grafo da query che restituiscono aggregazioni (COUNT, SUM, etc.).
     STRATEGIA: Assegna variabili a tutti i nodi anonimi, poi estrae tutto.
@@ -2784,8 +3590,11 @@ def _reconstruct_graph_from_query(query: str) -> Dict[str, List[Dict[str, Any]]]
         graph_records: List[Dict[str, Any]] = []
         removed_vars: List[str] = []
 
+        capped_limit = limit or GRAPH_DEFAULT_LIMIT
+        capped_limit = max(1, min(int(capped_limit), GRAPH_MAX_LIMIT))
+
         while attempt_vars:
-            graph_query = f"{prefix_with_all_vars}\nRETURN DISTINCT {', '.join(attempt_vars)} LIMIT 10"
+            graph_query = f"{prefix_with_all_vars}\nRETURN DISTINCT {', '.join(attempt_vars)} LIMIT {capped_limit}"
 
             logger.info(f"Query ricostruita:\n{graph_query}")
             try:
@@ -2819,9 +3628,7 @@ def _reconstruct_graph_from_query(query: str) -> Dict[str, List[Dict[str, Any]]]
         try:
             if graph_records:
                 sample_vals = list(graph_records[0].values())
-                logger.warning(
-                    "Sample record types: %s", [type(v) for v in sample_vals]
-                )
+                logger.debug("Sample record types: %s", [type(v) for v in sample_vals])
             else:
                 logger.warning("Nessun record restituito dalla query ricostruita")
         except Exception as e:
@@ -2856,8 +3663,9 @@ def _assign_variables_to_anonymous_nodes(query: str) -> Tuple[str, int]:
 
     # Pattern per nodi anonimi: () o (:Label) ma NON (var) o (var:Label)
     # Cerchiamo ( seguito da : o ) ma NON da una variabile
+    # Evita di catturare funzioni come date() o foo()
     anonymous_pattern = re.compile(
-        r"\("  # Aperta parentesi
+        r"(?<![A-Za-z0-9_])\("  # '(' non preceduta da lettera/cifra/underscore (evita function calls)
         r"(?!"  # Negative lookahead
         r"[a-zA-Z_][a-zA-Z0-9_]*"  # NON una variabile
         r"[\s:]"  # seguita da spazio o :
@@ -2927,8 +3735,13 @@ def _assign_variables_to_anonymous_rels(
 
 # Estrazione del grafo dai risultati
 def build_graph_payload_from_results(
-    query: str, records: List[Dict[str, Any]]
-) -> Tuple[Dict[str, List[Dict[str, Any]]], str]:
+    query: str,
+    records: List[Dict[str, Any]],
+    *,
+    limit: Optional[int] = None,
+    highlight_node_ids: Optional[Set[str]] = None,
+    layout: Optional[str] = None,
+) -> Tuple[Dict[str, Any], str]:
     """
     Costruisce il payload del grafo dai risultati Neo4j.
     Ritorna: (graph_payload, source_type)
@@ -2937,17 +3750,63 @@ def build_graph_payload_from_results(
     graph_payload = extract_graph_snapshot(records)
     if graph_payload and graph_payload.get("nodes"):
         logger.info(f"Grafo estratto dai records: {len(graph_payload['nodes'])} nodi")
+        if highlight_node_ids and GRAPH_HIGHLIGHT_RESULTS:
+            _apply_result_highlight(graph_payload, highlight_node_ids)
+        _enrich_graph_meta(
+            graph_payload,
+            source="context_results",
+            limit=limit,
+            highlight_ids=highlight_node_ids,
+            layout=layout,
+            record_count=len(records or []),
+        )
         return graph_payload, "context_results"
+
+    # SECONDA: se abbiamo già gli elementId dei risultati, prova a recuperarli direttamente
+    if highlight_node_ids:
+        logger.info("Provo a costruire il grafo partendo dagli elementId noti")
+        graph_from_ids = fetch_graph_from_ids(highlight_node_ids, limit=limit)
+        if graph_from_ids and graph_from_ids.get("nodes"):
+            if highlight_node_ids and GRAPH_HIGHLIGHT_RESULTS:
+                _apply_result_highlight(graph_from_ids, highlight_node_ids)
+            _enrich_graph_meta(
+                graph_from_ids,
+                source="result_nodes_lookup",
+                limit=limit,
+                highlight_ids=highlight_node_ids,
+                layout=layout,
+                record_count=len(records or []),
+            )
+            return graph_from_ids, "result_nodes_lookup"
 
     # SECONDA: prova a ricostruire dalla query
     logger.info("Nessun grafo nei records, tento ricostruzione dalla query")
-    rebuilt_graph = _reconstruct_graph_from_query(query)
+    rebuilt_graph = _reconstruct_graph_from_query(query, limit=limit)
     if rebuilt_graph and rebuilt_graph.get("nodes"):
         logger.info(f"Grafo ricostruito: {len(rebuilt_graph['nodes'])} nodi")
+        if highlight_node_ids and GRAPH_HIGHLIGHT_RESULTS:
+            _apply_result_highlight(rebuilt_graph, highlight_node_ids)
+        _enrich_graph_meta(
+            rebuilt_graph,
+            source="reconstructed_from_query",
+            limit=limit,
+            highlight_ids=highlight_node_ids,
+            layout=layout,
+            record_count=len(records or []),
+        )
         return rebuilt_graph, "reconstructed_from_query"
 
     logger.warning("Nessun grafo trovato né nei records né nella ricostruzione")
-    return {}, "no_nodes_detected"
+    empty = {}
+    _enrich_graph_meta(
+        empty,
+        source="no_nodes_detected",
+        limit=limit,
+        highlight_ids=highlight_node_ids,
+        layout=layout,
+        record_count=len(records or []),
+    )
+    return empty, "no_nodes_detected"
 
 
 def _extract_variables_from_query(query_prefix: str) -> Tuple[List[str], List[str]]:
@@ -3106,6 +3965,7 @@ async def ask_question(user_question: UserQuestionWithSession):
     semantic_candidates: List[Dict[str, Any]] = []
     examples_similarity: Optional[float] = None
     specialist_route: Optional[str] = None
+    entity_hint_map: Dict[str, Dict[str, Any]] = {}
 
     user_id = user_question.user_id or "default_user"
     user_input_text = user_question.question.strip()
@@ -3147,6 +4007,21 @@ async def ask_question(user_question: UserQuestionWithSession):
                 ambiguous_term = pending_state["ambiguous_term"]
                 resolved_name = chosen_option["name"]
 
+                try:
+                    nome_lower = ambiguous_term.lower()
+                    session.resolved_entities[nome_lower] = {
+                        "name": chosen_option["name"],
+                        "label": chosen_option["label"],
+                    }
+                    logger.info(
+                        f"[Resolver Memory] Salvataggio (da AMBIGUITY): "
+                        f"'{nome_lower}' = {session.resolved_entities[nome_lower]}"
+                    )
+                except Exception as mem_err:
+                    logger.warning(
+                        f"Errore nel salvataggio della resolved_entity: {mem_err}"
+                    )
+
                 # Ricrea la domanda contestualizzata "pulita"
                 question_text = re.sub(
                     re.escape(ambiguous_term),
@@ -3163,8 +4038,43 @@ async def ask_question(user_question: UserQuestionWithSession):
                     flags=re.IGNORECASE,
                 )
 
+                # NUOVO: mini entity_hint_map basata sulla scelta
+                entity_hint_map = {
+                    ambiguous_term: {
+                        "name": resolved_name,
+                        "label": chosen_option.get("label"),
+                    }
+                }
+                english_task = _augment_english_task_with_entity_hints(
+                    english_task, entity_hint_map, specialist_route
+                )
+                logger.info(
+                    f"Task EN ricostruito e arricchito dopo ambiguità: '{english_task}'"
+                )
+
                 # Ricrea la domanda originale per la cronologia
                 effective_question_text = pending_state["original_question"]
+
+                # Memorizza la scelta anche nella memoria del Resolver (multi-ruolo)
+                term_key = _normalize_entity_key(ambiguous_term)
+                memory_resolution = {
+                    "name": resolved_name,
+                    "label": chosen_option["label"],
+                }
+                _save_memory_resolution(session, term_key, memory_resolution)
+                logger.info(
+                    f"[Resolver Memory] Salvataggio (da AMBIGUITY): "
+                    f"'{term_key}' = {memory_resolution}"
+                )
+
+                # Aggiorna entity_hint_map per il Coder
+                entity_hint_map.clear()
+                entity_hint_map[ambiguous_term] = memory_resolution
+
+                # Recupera anche la rotta specialistica se l'avevamo salvata
+                specialist_route = (
+                    pending_state.get("specialist_route") or specialist_route
+                )
 
                 # 1c. PULISCI LO STATO (CRITICO!)
                 session.pending_confirmation = None
@@ -3336,12 +4246,65 @@ async def ask_question(user_question: UserQuestionWithSession):
             english_task = run_translator_agent(question_text)  #
             logger.info(f"Task tradotto in Inglese: '{english_task}'")
 
-            entity_hint_map = {}
+            # 2b-bis. Routing ANTICIPATO: serve al Resolver per capire il dominio
+            if specialist_route is None:
+                start_route_time = time.perf_counter()
+                specialist_route = run_specialist_router_agent(english_task)
+                timing_details["routing"] = time.perf_counter() - start_route_time
+                logger.info(f" Rotta decisa (in anticipo): {specialist_route}")
+
             try:
-                # 2c. Entity Resolution
+                # 2c. Entity Resolution (ora conosce specialist_route e user_id)
                 question_text_pulita, entity_hint_map = _resolve_entities_in_question(
-                    question_text
-                )  #
+                    question_text,
+                    specialist_route=specialist_route or "GENERAL_QUERY",
+                    user_id=user_id,
+                )
+
+                # --- CONTROLLO ROLE_MISMATCH: salto il Coder se tutte le entità non sono valide per l'intent ---
+                if entity_hint_map and all(
+                    hint.get("role_mismatch_for_intent")
+                    for hint in entity_hint_map.values()
+                ):
+                    logger.info(
+                        "[Orchestrator] Tutte le entità hanno role_mismatch_for_intent=True per intent '%s'. "
+                        "Salto il Coder e passo direttamente al Synthesizer.",
+                        specialist_route,
+                    )
+
+                    # Costruisci il testo esplicativo da passare come 'context'
+                    chunks = []
+                    for original, info in entity_hint_map.items():
+                        name = info.get("name") or original
+                        available_labels = info.get("available_labels") or []
+                        if available_labels:
+                            roles_str = ", ".join(available_labels)
+                            chunks.append(
+                                f"- {name} esiste solo con ruolo/i: {roles_str}."
+                            )
+                        else:
+                            chunks.append(
+                                f"- {name} non è stato trovato in nessun ruolo noto."
+                            )
+
+                    mismatch_context = (
+                        "Le seguenti entità esistono nel database ma non con il ruolo richiesto per "
+                        f"questa analisi ({specialist_route}):\n"
+                        + "\n".join(chunks)
+                        + "\n\nIl sistema deve informare l'utente che non esistono dati coerenti con la richiesta, "
+                        "senza inventare valori o query."
+                    )
+
+                    # Passiamo la richiesta al Synthesizer
+                    final_answer = run_synthesizer_agent(
+                        question=question_text,
+                        context_str=mismatch_context,
+                        total_results=[],  # nessun risultato Neo4j
+                        contextualized_question=question_text,
+                        filters_summary=None,
+                    )
+
+                    return final_answer
 
                 # Se il resolver ha "pulito" i nomi (es. typo), ri-traduce
                 if entity_hint_map and question_text_pulita != question_text:  #
@@ -3353,6 +4316,10 @@ async def ask_question(user_question: UserQuestionWithSession):
                     )  # Sovrascrive english_task
                     question_text = question_text_pulita  # Usa la domanda pulita da ora
 
+                english_task = _augment_english_task_with_entity_hints(
+                    english_task, entity_hint_map, specialist_route
+                )
+                logger.info(f"Task EN arricchito con entità: '{english_task}'")
             except (NoEntityFoundError, AmbiguousEntityError) as e:
                 # 2d. GESTIONE FALLIMENTO RISOLUZIONE
 
@@ -3388,11 +4355,14 @@ async def ask_question(user_question: UserQuestionWithSession):
                     session.pending_confirmation = {
                         "type": "entity_ambiguity",
                         "ambiguous_term": e.text,
-                        "options": e.options,  # La List[Dict] strutturata
+                        "options": e.options,
                         "original_question": effective_question_text,
                         "contextualized_question": question_text,
-                        "english_task_template": english_task,  # Il task EN che abbiamo tradotto prima
+                        "english_task_template": english_task,
+                        # NUOVO: teniamo anche la rotta specialistica usata
+                        "specialist_route": specialist_route or "GENERAL_QUERY",
                     }
+
                     logger.info(
                         f"Salvataggio stato 'pending_confirmation' per {user_id}"
                     )
@@ -3518,11 +4488,13 @@ async def ask_question(user_question: UserQuestionWithSession):
                 }
         ## == FASE 2: ROUTING E GENERAZIONE QUERY SPECIALIZZATA
 
-        # 2a. Il Router decide quale specialista usare
-        start_route_time = time.perf_counter()
-        specialist_route = run_specialist_router_agent(english_task)
-        timing_details["routing"] = time.perf_counter() - start_route_time
-        logger.info(f" Rotta decisa dallo Specialist Router: {specialist_route}")
+        if specialist_route is None:
+            start_route_time = time.perf_counter()
+            specialist_route = run_specialist_router_agent(english_task)
+            timing_details["routing"] = time.perf_counter() - start_route_time
+            logger.info(f" Rotta decisa dallo Specialist Router: {specialist_route}")
+        else:
+            logger.info(f" Rotta già decisa in preprocessing: {specialist_route}")
 
         # 2b. Seleziona il prompt corretto dal dizionario degli specialisti
         coder_prompt_template = SPECIALIST_CODERS.get(
@@ -3540,13 +4512,16 @@ async def ask_question(user_question: UserQuestionWithSession):
             prompt_template=coder_prompt_template,
         )
         """
+        english_task_for_coder = _augment_english_task_with_entity_hints(
+            english_task, entity_hint_map, specialist_route
+        )
         (
             generated_query,
             prompt_examples,
             semantic_candidates,
             examples_similarity,
         ) = run_coder_agent(
-            question=english_task,
+            question=english_task_for_coder,
             relevant_schema=relevant_schema,
             prompt_template=coder_prompt_template,
             specialist_type=specialist_route,
@@ -3871,9 +4846,46 @@ async def ask_question(user_question: UserQuestionWithSession):
         )
         context_da_inviare = context_completo[:max_results_final]
 
+        if context_da_inviare:
+            graph_limit = min(len(context_da_inviare), GRAPH_MAX_LIMIT)
+        else:
+            graph_limit = GRAPH_DEFAULT_LIMIT
+        graph_limit = max(1, min(graph_limit, GRAPH_MAX_LIMIT))
+
+        records_for_graph = context_da_inviare[:graph_limit]
+        highlight_ids: Optional[Set[str]] = None
+        if GRAPH_HIGHLIGHT_RESULTS:
+            highlight_ids = _collect_node_element_ids_from_records(records_for_graph)
+
+        candidate_source = context_da_inviare[:GRAPH_MAX_LIMIT]
+        value_candidates = _collect_entity_candidates_from_records(candidate_source)
+
         graph_payload, graph_origin = build_graph_payload_from_results(
-            generated_query, context_da_inviare
+            generated_query,
+            records_for_graph,
+            limit=graph_limit,
+            highlight_node_ids=highlight_ids,
+            layout=GRAPH_LAYOUT_MODE,
         )
+
+        if (not graph_payload or not graph_payload.get("nodes")) and value_candidates:
+            fallback_graph, fallback_highlight = _build_graph_from_entity_candidates(
+                value_candidates, graph_limit
+            )
+            if fallback_graph and fallback_graph.get("nodes"):
+                graph_payload = fallback_graph
+                graph_origin = "result_nodes_lookup"
+                if fallback_highlight:
+                    highlight_ids = fallback_highlight
+
+        elif GRAPH_HIGHLIGHT_RESULTS and (not highlight_ids) and value_candidates:
+            fallback_graph, fallback_highlight = _build_graph_from_entity_candidates(
+                value_candidates, graph_limit
+            )
+            if fallback_graph and fallback_graph.get("nodes"):
+                graph_payload = fallback_graph
+                graph_origin = "result_nodes_lookup"
+                highlight_ids = fallback_highlight
         timing_details["graph_origin"] = graph_origin
         sanitized_context = make_context_json_serializable(context_da_inviare)
         context_str_for_llm = json.dumps(

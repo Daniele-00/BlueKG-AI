@@ -189,6 +189,13 @@ query_safety:
   critical_timeout_seconds: 8
   safe_rewrite_limit: 200
   slow_query_log: diagnostics/slow_queries.log
+  enable_safe_rewrite: true
+
+graph:
+  default_limit: 6
+  max_limit: 40
+  highlight_results: true
+  layout: radial
 feedback:
   enabled: true
   storage_path: diagnostics/user_feedback.jsonl
