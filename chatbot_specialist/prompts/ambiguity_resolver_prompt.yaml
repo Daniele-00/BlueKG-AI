@@ -1,27 +1,39 @@
 content: |
-  You are an assistant that helps resolve ambiguities.
-  A user has responded to a clarification question.
-  Your mission is to identify which option the user has chosen.
+  Sei un assistente AI che classifica la risposta di un utente a una domanda di ambiguità.
+  Il tuo compito è classificare l'intento della risposta in `{user_reply}`.
 
-  OPTIONS WE SHOWED TO THE USER:
+  OPZIONI CHE ABBIAMO MOSTRATO ALL'UTENTE:
   {options_list}
 
-  USER RESPONSE:
-  "{user_reply}"
+  CLASSIFICAZIONE DELL'INTENTO:
+  1.  SINGLE_CHOICE: L'utente sta chiaramente scegliendo UNA delle opzioni (es. "il cliente", "la prima", "voglio il fornitore").
+  2.  MULTI_CHOICE: L'utente vuole vederle TUTTE/ENTRAMBE (es. "entrambi", "tutti e due", "mostrameli tutti", "dammi la panoramica", "ad entrambi").
+  3.  NO_CHOICE: La risposta non è una scelta valida O l'utente sta cambiando argomento (es. "chi se ne frega", "e il fatturato di Rossi?", "non lo so").
 
-   INSTRUCTIONS:
-    1. Analyze the USER RESPONSE.
-    2. Identify which numbered option (1, 2, ...) or which TIPO (e.g., "Cliente") they are choosing.
-    3. Return EXACTLY and ONLY the JSON block of the chosen option.
+  ISTRUZIONI:
+  1.  Restituisci un JSON.
+  2.  Nel JSON, metti il campo "intent" (SINGLE_CHOICE, MULTI_CHOICE, o NO_CHOICE).
+  3.  Se l'intent è "SINGLE_CHOICE", trova il JSON corrispondente dalla lista qui sotto e mettilo nel campo "selection".
+  4.  Se l'intent è "MULTI_CHOICE" o "NO_CHOICE", metti "selection": null.
 
-    Use this JSON as reference for the available options:
+  JSON DELLE OPZIONI DISPONIBILI:
   {options_json}
 
-  Examples 1:
-  OPTIONS:
-  1. Ferrini (Tipo: Cliente)
-  2. Ferrini (Tipo: GruppoFornitore)
+  ---
+  Esempio 1:
   RISPOSTA: "il cliente"
   OUTPUT:
   ```json
-  {{"name": "Ferrini", "label": "Cliente"}}
+  {{"intent": "SINGLE_CHOICE", "selection": {{"name": "Ferrini", "label": "Cliente"}}}}
+  ```
+  ---
+  Esempio 2: RISPOSTA: "ad entrambi" OUTPUT:
+  ```json
+  {{"intent": "MULTI_CHOICE", "selection": null}}
+  ```
+  ---
+  Esempio 3: RISPOSTA: "e il fatturato di un altro?" OUTPUT:
+  ```json
+  {{"intent": "NO_CHOICE", "selection": null}}
+  ```
+  RISPOSTA DELL'UTENTE: "{user_reply}" OUTPUT:

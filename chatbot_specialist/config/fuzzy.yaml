@@ -1,7 +1,8 @@
 # In config/system.yaml
 fuzzy_matching:
   enabled: false
-  
+
+memory_key_min_similarity: 0.95  
 entity_resolver:
   fuzzy_min_score: 0.65
   fuzzy_max_results: 3
@@ -53,7 +54,29 @@ entity_resolver:
 
       # Nessuna entità
       GENERAL_CONVERSATION: []
+  label_bias:
+    SALES_CYCLE:
+      prefer:
+        - Cliente
+        - GruppoFornitore
+        - Fornitore
+        - Ditta
+      downgrade_if_preferred_present:
+        - Articolo
+        - Famiglia
+        - Sottofamiglia
 
+    PURCHASE_CYCLE:
+      prefer:
+        - GruppoFornitore
+        - Fornitore
+        - Cliente
+        - Ditta
+      downgrade_if_preferred_present:
+        - Articolo
+        - Famiglia
+        - Sottofamiglia
+        
   entity_label_roles_en:
     Cliente:
       role: customer

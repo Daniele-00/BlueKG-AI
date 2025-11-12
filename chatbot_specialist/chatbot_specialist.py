@@ -1,4 +1,5 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi.security.utils import get_authorization_scheme_param
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from langchain_neo4j import Neo4jGraph
@@ -50,6 +51,10 @@ from langchain_core.messages import BaseMessage, AIMessage, HumanMessage, System
 from langchain_core.outputs import ChatGeneration, ChatResult
 from google.cloud import aiplatform
 from pydantic import PrivateAttr
+import requests as httpx
+from jose import jwt
+from jose.exceptions import JWTError
+import time as _time
 
 
 class VertexAIDedicatedEndpoint(BaseChatModel):
@@ -276,6 +281,105 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class KeycloakAuth:
+    def __init__(self, cfg: dict):
+        self.enabled = bool(cfg)
+        self.url = (cfg or {}).get("url")
+        self.realm = (cfg or {}).get("realm")
+        self.client_id = (cfg or {}).get("client_id")
+        self.roles_allowed = set((cfg or {}).get("roles_allowed", []) or [])
+        self.verify_aud = bool((cfg or {}).get("verify_aud", False))
+        self.tls_verify = bool((cfg or {}).get("tls_verify", False))
+        self.ca_bundle = (cfg or {}).get("ca_bundle")
+        self.leeway_s = int((cfg or {}).get("leeway_s", 60))
+        self.cache_ttl = int((cfg or {}).get("cache_ttl_s", 3600))
+        self._jwks = None
+        self._jwks_exp = 0
+
+    def _jwks_url(self) -> str:
+        return f"{self.url}/realms/{self.realm}/protocol/openid-connect/certs"
+
+    def _issuer(self) -> str:
+        return f"{self.url}/realms/{self.realm}"
+
+    def _get_session(self):
+        return None
+
+    def _load_jwks(self):
+        now = int(_time.time())
+        if self._jwks and now < self._jwks_exp:
+            return self._jwks
+        verify = self.tls_verify if self.ca_bundle is None else self.ca_bundle
+        resp = httpx.get(self._jwks_url(), timeout=10, verify=verify)
+        resp.raise_for_status()
+        self._jwks = resp.json()
+        self._jwks_exp = now + self.cache_ttl
+        return self._jwks
+
+    def _find_key(self, kid: str):
+        jwks = self._load_jwks()
+        for k in jwks.get("keys", []) or []:
+            if k.get("kid") == kid:
+                return k
+        return None
+
+    def verify(self, token: str) -> dict:
+        if not self.enabled:
+            return {}
+        try:
+            unverified = jwt.get_unverified_header(token)
+            kid = unverified.get("kid")
+            key = self._find_key(kid) if kid else None
+            options = {
+                "verify_aud": self.verify_aud,
+                "leeway": self.leeway_s,
+            }
+            claims = jwt.decode(
+                token,
+                key,
+                algorithms=[unverified.get("alg", "RS256")],
+                audience=self.client_id if self.verify_aud else None,
+                issuer=self._issuer(),
+                options=options,
+            )
+            # Autorizzazione per ruoli
+            if self.roles_allowed:
+                ok = False
+                # realm roles
+                for r in (claims.get("realm_access", {}) or {}).get("roles", []) or []:
+                    if r in self.roles_allowed:
+                        ok = True
+                        break
+                # client roles
+                if not ok:
+                    res = (claims.get("resource_access", {}) or {}).get(
+                        self.client_id, {}
+                    )
+                    for r in res.get("roles", []) or []:
+                        if r in self.roles_allowed:
+                            ok = True
+                            break
+                if not ok:
+                    raise HTTPException(status_code=403, detail="Insufficient role")
+            return claims
+        except JWTError as exc:
+            raise HTTPException(status_code=401, detail=f"Invalid token: {exc}")
+
+
+keycloak_auth = KeycloakAuth(config.system.get("keycloak", {}) or {})
+
+
+async def require_auth(request: Request) -> dict:
+    if not keycloak_auth.enabled:
+        return {}
+    auth = request.headers.get("authorization")
+    scheme, param = get_authorization_scheme_param(auth)
+    if not auth or scheme.lower() != "bearer":
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+    return keycloak_auth.verify(param)
+
 
 # Cache per query Cypher (parametri da config/system.yaml)
 query_cache = TTLCache(
@@ -1259,6 +1363,7 @@ class ConversationSession(BaseModel):
     resolved_entities: Dict[str, Dict[str, Dict[str, Any]]] = Field(
         default_factory=dict
     )
+    last_pagination_query: Optional[Dict[str, Any]] = None
 
 
 class FeedbackPayload(BaseModel):
@@ -1391,23 +1496,18 @@ def _collect_entities_from_context(context: List[Dict]) -> Dict[str, set]:
 
 def _should_use_memory(question: str, session: ConversationSession) -> bool:
     """
-    Stabilisce se includere la cronologia. Versione "intelligente" (pulita).
-    Si fida del Contextualizer per capire i follow-up.
+    Decide se passare la cronologia al Contextualizer.
+    Ora ci fidiamo che il Contextualizer gestisca i reset da solo.
     """
     if not question:
         return False
 
-    # 1. CONTROLLO "SMALL TALK" (Fix per "Grazie mille")
-    if _is_small_talk(question):
-        logger.info("Memory routing: Rilevato small talk. Nessuna memoria usata.")
-        return False
-
-    # 2. CONTROLLO "PRIMA DOMANDA"
+    # 1. CONTROLLO "PRIMA DOMANDA"
     if not session.messages:
         logger.info("Memory routing: Prima domanda, nessuna memoria usata.")
         return False
 
-    # 3. CONTROLLO "RESET ESPLICITO" (l'utente lo chiede)
+    # 2. CONTROLLO "RESET ESPLICITO" (l'utente lo chiede)
     lowered = question.strip().lower()
     tokens = re.findall(r"\w+", lowered)
     if _contains_keyword(lowered, tokens, EXPLICIT_RESET_KEYWORDS):
@@ -1415,13 +1515,11 @@ def _should_use_memory(question: str, session: ConversationSession) -> bool:
         session.messages = []  # Svuota la memoria
         return False
 
-    # 4. CONTROLLO "RESET STRUTTURALE" (Fix per "Lombardia")
-    if _should_reset_scope(question):  # Chiama la funzione "intelligente"
-        logger.info("Memory reset: Rilevata domanda autosufficiente.")
-        return False
+    # 3. CONTROLLO "SMALL TALK" (Fix per "Grazie mille")
+    #    Lo small talk deve avere contesto, ma non lo gestiamo qui.
+    #    Lo passiamo al Contextualizer che lo restituirà così com'è.
 
-    # Se non è niente di tutto ciò, È UN FOLLOW-UP.
-    # Passiamo la palla al Contextualizer per decidere COME usarla.
+    # Per tutto il resto, passiamo la palla al Contextualizer.
     logger.info(
         "Memory routing: Domanda non-reset, passo al Contextualizer con cronologia."
     )
@@ -1603,21 +1701,29 @@ DELTA_MIN = RESOLVER_CFG.get("ambiguity_delta", 0.08)
 ENTITY_LABEL_ROLES_EN = RESOLVER_CFG.get("entity_label_roles_en", {})
 
 
-def _normalize_entity_key(name: str) -> str:
+def _normalize_entity_key(raw: str) -> str:
     """
-    Normalizzazione leggera per le chiavi di memoria:
-    - NFKC
-    - apostrofi strani → '
+    Normalizzazione MINIMALE (no strip SRL/SPA, no rimozione prefissi).
     - lowercase
-    - spazi collassati
+    - normalizza apostrofo tipografico in ASCII
+    - collassa spazi e punteggiatura in spazio
+    - rimuove doppi spazi
     """
-    if not name:
+    if not raw:
         return ""
-    s = unicodedata.normalize("NFKC", name)
-    for ch in ("’", "‘", "´", "`"):
-        s = s.replace(ch, "'")
-    s = s.lower().strip()
-    s = re.sub(r"\s+", " ", s)
+    s = raw.strip().lower()
+    s = s.replace("’", "'")  # apostrofo tipografico -> ASCII
+
+    cleaned = []
+    for ch in s:
+        # tieni solo alfanumerico, apostrofo e spazio
+        if ch.isalnum() or ch in ("'", " "):
+            cleaned.append(ch)
+        else:
+            cleaned.append(" ")
+    s = "".join(cleaned)
+    # collassa multipli spazi
+    s = " ".join(s.split())
     return s
 
 
@@ -1634,33 +1740,30 @@ def _get_preferred_labels_for_route(specialist_route: str) -> List[str]:
 MEMORY_KEY_MIN_SIMILARITY = RESOLVER_CFG.get("memory_key_min_similarity", 0.95)
 
 
-def _find_best_memory_key(
-    mem_store: Dict[str, Any],
-    term_key: str,
-) -> Optional[str]:
+def _find_best_memory_key(mem_store: Dict[str, Any], term_key: str) -> Optional[str]:
     """
-    Cerca in mem_store una chiave 'simile' a term_key.
-    Se la similarità max >= MEMORY_KEY_MIN_SIMILARITY, ritorna quella chiave.
-    Altrimenti None.
+    Alias ad ALTA similarità per variazioni banali (spazi/apostrofi).
+    Soglia alta per evitare falsi positivi.
     """
-    best_key = None
-    best_score = 0.0
+    if not mem_store:
+        return None
 
-    for existing_key in mem_store.keys():
-        score = difflib.SequenceMatcher(None, term_key, existing_key).ratio()
-        if score > best_score:
-            best_score = score
-            best_key = existing_key
+    min_sim = 0.97  # alta: evita UMBRIAFRIGO ~ UMBRIACQUE
+    best_key, best_sim = None, 0.0
 
-    if best_key is not None and best_score >= MEMORY_KEY_MIN_SIMILARITY:
+    for k in mem_store.keys():
+        sim = difflib.SequenceMatcher(None, term_key, k).ratio()
+        if sim > best_sim:
+            best_key, best_sim = k, sim
+
+    if best_key is not None and best_sim >= min_sim:
         logger.info(
-            "[Resolver Memory] Alias '%s' → '%s' (sim=%.3f).",
+            "[Resolver P1 Memory] Alias '%s' -> '%s' (sim=%.3f)",
             term_key,
             best_key,
-            best_score,
+            best_sim,
         )
         return best_key
-
     return None
 
 
@@ -1670,44 +1773,48 @@ def _get_memory_resolution(
     preferred_labels: List[str],
 ) -> Optional[Dict[str, Any]]:
     """
-    Recupera l'entità dalla memoria, MA solo se compatibile con le preferred_labels.
-    Compatibile = nessuna preferenza OPPURE label salvata ∈ preferred_labels.
-    Usa chiavi normalizzate + alias ad alta similarità.
+    Prende dalla memoria solo se label compatibile con le preferred_labels (o se non ci sono preferenze).
     """
     mem_store = getattr(session, "resolved_entities", None)
     if not mem_store:
         return None
 
-    # 1) prova chiave esatta
-    effective_key = term_key
-
-    # 2) se non c'è, prova alias molto simile
-    if effective_key not in mem_store:
-        alias_key = _find_best_memory_key(mem_store, term_key)
-        if alias_key is not None:
-            effective_key = alias_key
-
+    effective_key = (
+        term_key
+        if term_key in mem_store
+        else (_find_best_memory_key(mem_store, term_key) or term_key)
+    )
     entry = mem_store.get(effective_key)
     if not entry:
         return None
 
-    # entry può essere:
-    # - formato vecchio: {"name": "...", "label": "..."}
-    # - formato nuovo:  {"Cliente": {...}, "GruppoFornitore": {...}}
+    # vecchio formato: {"name":..., "label":...}
     if "name" in entry and "label" in entry:
-        # compat vecchio formato
         saved_label = entry.get("label")
-
         if not preferred_labels or saved_label in preferred_labels:
             return entry
-
         logger.info(
-            "[Resolver P1 Memory] '%s' in memoria solo come %s, non compatibile con preferenze %s. Non la uso.",
+            "[Resolver P1 Memory] '%s' in memoria come %s, non compatibile con %s.",
             term_key,
             saved_label,
             preferred_labels,
         )
         return None
+
+    # nuovo formato: multi-ruolo
+    if not preferred_labels:
+        return next(iter(entry.values()))
+    for label in preferred_labels:
+        if label in entry:
+            return entry[label]
+
+    logger.info(
+        "[Resolver P1 Memory] '%s' in memoria con ruoli %s non compatibili con %s.",
+        term_key,
+        list(entry.keys()),
+        preferred_labels,
+    )
+    return None
 
     # formato nuovo: multi-ruolo
     if not preferred_labels:
@@ -1736,34 +1843,26 @@ def _save_memory_resolution(
     resolution: Dict[str, Any],
 ) -> None:
     """
-    Salva (o aggiorna) la memoria per un termine, usando:
-      - chiave normalizzata dell'ORIGINALE (es. "l'abbondanza")
-      - chiave normalizzata del nome CANONICO (es. "L'ABBONDANZA SRL")
-
-    Così tutte le varianti ("abbondanza", "l'abbondanza srl", ecc.)
-    collassano sullo stesso slot di memoria.
+    Salva la risoluzione sotto:
+      - chiave normalizzata del testo originale
+      - chiave normalizzata del nome canonico (DB)
     """
     if not hasattr(session, "resolved_entities"):
         session.resolved_entities = {}
 
     store: Dict[str, Dict[str, Dict[str, Any]]] = session.resolved_entities
 
-    # chiave normalizzata dell'input utente
     original_key = _normalize_entity_key(original_name)
-
-    # chiave normalizzata del nome canonico (DB)
     canonical_name = resolution.get("name") or original_name
     canonical_key = _normalize_entity_key(canonical_name)
-
     label = resolution.get("label") or "UNKNOWN"
 
     for term_key in {original_key, canonical_key}:
         if not term_key:
             continue
-
         existing = store.get(term_key)
 
-        # compat col vecchio formato: {"name": "...", "label": "..."}
+        # compat vecchio formato
         if isinstance(existing, dict) and "name" in existing and "label" in existing:
             existing = {existing["label"]: existing}
 
@@ -1774,10 +1873,7 @@ def _save_memory_resolution(
         store[term_key] = existing
 
         logger.info(
-            "[Resolver Memory] Salvataggio: '%s'[%s] = %s",
-            term_key,
-            label,
-            resolution,
+            "[Resolver Memory] Salvataggio: '%s'[%s] = %s", term_key, label, resolution
         )
 
 
@@ -1962,238 +2058,226 @@ def _normalize_for_exact_match(name: str) -> str:
     return s
 
 
+def _apply_label_bias(
+    raw_candidates: List[Dict[str, Any]],
+    specialist_route: str,
+    nome: str,
+) -> List[Dict[str, Any]]:
+    bias_cfg = RESOLVER_CFG.get("label_bias", {}).get(specialist_route)
+    if not bias_cfg:
+        return raw_candidates
+
+    preferred = set(bias_cfg.get("prefer", []))
+    downgrade = set(bias_cfg.get("downgrade_if_preferred_present", []))
+    if not preferred:
+        return raw_candidates
+
+    has_preferred = any(c.get("label") in preferred for c in raw_candidates)
+    if not has_preferred:
+        return raw_candidates
+
+    filtered = [c for c in raw_candidates if c.get("label") not in downgrade]
+    if len(filtered) < len(raw_candidates):
+        logger.info(
+            "[Resolver Heuristic] Intent '%s': scartati %d candidati declassati per '%s' (presenti label preferite).",
+            specialist_route,
+            len(raw_candidates) - len(filtered),
+            nome,
+        )
+    return filtered or raw_candidates
+
+
 def _resolve_single_entity(
     nome: str,
     specialist_route: str,
     session,
 ) -> Dict[str, Any]:
-    """
-    Risolve UNA entità:
-      - prova prima dalla memoria (solo se ruolo compatibile col dominio)
-      - altrimenti cerca sul grafo (esatto + fuzzy + Levenshtein)
-      - applica le preferenze di ruolo per il dominio
-      - gestisce la role_mismatch_for_intent
-    """
     term_key = _normalize_entity_key(nome)
     preferred_labels = _get_preferred_labels_for_route(specialist_route)
 
-    # 1) PROVA DALLA MEMORIA (P1) ------------------------------------------
+    # 1) PROVA MEMORIA
     mem_res = _get_memory_resolution(session, term_key, preferred_labels)
     if mem_res:
-        logger.info(
-            "Entity Resolver: '%s' -> '%s' (%s) per intent '%s' (da memoria).",
-            nome,
-            mem_res.get("name"),
-            mem_res.get("label"),
-            specialist_route,
-        )
-        return mem_res
+        label = mem_res.get("label")
+        entity_def = ENTITY_DEFINITIONS.get(label, {})
+        return {
+            "name": mem_res.get("name"),
+            "label": label,
+            "property": entity_def.get("property"),
+            "role_mismatch_for_intent": False,
+            "available_labels": [label] if label else [],
+        }
 
-    # 2) NESSUNA MEMORIA VALIDA → CERCA SUL GRAFO -------------------------
+    # 2) CERCA SU GRAFO (esatto + fuzzy + levenshtein su Cliente)
     risultati: List[Dict[str, Any]] = []
-    logger.debug(f"[Resolver] Inizio risoluzione per nome: {nome!r}")
 
-    # 2a. MATCH ESATTO su tutte le entity_definitions
+    # 2a. esatto
     union_parts: List[str] = []
-    for label, definition in ENTITY_DEFINITIONS.items():
+    for lab, definition in ENTITY_DEFINITIONS.items():
         prop = definition.get("property")
         if not prop:
             continue
-
-        match_value = _normalize_for_exact_match(nome)
-
         union_parts.append(
             f"""
-        MATCH (n:{label}) 
-        WHERE toLower(trim(n.{prop})) = '{match_value}'
-        RETURN n.{prop} AS name, '{label}' AS label, 10.0 AS score
-        """
+            MATCH (n:{lab})
+            WHERE toLower(trim(n.{prop})) = '{nome.lower()}'
+            RETURN n.{prop} AS name, '{lab}' AS label, 10.0 AS score
+            """
         )
-
     if union_parts:
-        query_esatta = "\nUNION\n".join(union_parts)
-        logger.debug(f"[Resolver] Query esatta per {nome!r}:\n{query_esatta}")
+        q = "\nUNION\n".join(union_parts)
         try:
-            res_esatto = execute_cypher_with_timeout(query_esatta)
-            logger.debug(
-                f"[Resolver] Risultati match esatto per {nome!r}: {res_esatto}"
-            )
-            risultati.extend(res_esatto)
+            risultati.extend(execute_cypher_with_timeout(q))
         except Exception as e:
-            logger.debug(f"[Resolver] Probe esatto fallito per '{nome}': {e}")
+            logger.debug("Match esatto fallito per %r: %s", nome, e)
 
-    # 2b. FUZZY FULLTEXT, se il match esatto non ha trovato nulla
+    # 2b. fuzzy
     if not risultati:
-        for label, definition in ENTITY_DEFINITIONS.items():
+        for lab, definition in ENTITY_DEFINITIONS.items():
             index_name = definition.get("index")
             prop_name = definition.get("property")
-
             if not index_name or not prop_name:
                 continue
-
-            query_fuzzy = f"""
-                CALL db.index.fulltext.queryNodes('{index_name}', '{_escape_lucene_query(nome)}') 
+            q = f"""
+                CALL db.index.fulltext.queryNodes('{index_name}', '{_escape_lucene_query(nome)}')
                 YIELD node, score
-                WHERE node:{label} AND score > {MIN_SCORE} 
-                RETURN node.{prop_name} AS name, '{label}' AS label, score 
+                WHERE node:{lab} AND score > {MIN_SCORE}
+                RETURN node.{prop_name} AS name, '{lab}' AS label, score
                 ORDER BY score DESC LIMIT {MAX_RESULTS}
             """
-
-            logger.debug(
-                f"[Resolver] Query fuzzy per {nome!r} su label {label}, "
-                f"index {index_name}:\n{query_fuzzy}"
-            )
-
             try:
-                res_fuzzy = execute_cypher_with_timeout(query_fuzzy)
-                logger.debug(
-                    f"[Resolver] Risultati fuzzy per {nome!r} (label {label}): {res_fuzzy}"
-                )
-                risultati.extend(res_fuzzy)
+                risultati.extend(execute_cypher_with_timeout(q))
             except Exception as e:
-                logger.warning(f"Errore su indice fuzzy {index_name} per '{nome}': {e}")
+                logger.warning("Fuzzy %s fallito per %r: %s", index_name, nome, e)
 
-    # 2c. FALLBACK LEVENSHTEIN su Cliente se ancora nulla
+    # 2c. levenshtein su Cliente
     if not risultati:
         try:
             lev_min = RESOLVER_CFG.get("levenshtein_min_similarity", 0.4)
-
-            query_lev = f"""
+            q = f"""
                 MATCH (n:Cliente)
-                WITH n,
-                     apoc.text.levenshteinSimilarity(
-                         toLower(n.name),
-                         '{nome.lower()}'
-                     ) AS sim
+                WITH n, apoc.text.levenshteinSimilarity(toLower(n.name), '{nome.lower()}') AS sim
                 WHERE sim >= {lev_min}
                 RETURN n.name AS name, 'Cliente' AS label, sim AS score
                 ORDER BY sim DESC LIMIT {MAX_RESULTS}
             """
-
-            logger.debug(
-                f"[Resolver] Query Levenshtein fallback per {nome!r}:\n{query_lev}"
-            )
-
-            res_lev = execute_cypher_with_timeout(query_lev)
-            logger.debug(f"[Resolver] Risultati Levenshtein per {nome!r}: {res_lev}")
-            risultati.extend(res_lev)
-
+            risultati.extend(execute_cypher_with_timeout(q))
         except Exception as e:
-            logger.warning(
-                f"[Resolver] Errore nel fallback Levenshtein per '{nome}': {e}"
-            )
+            logger.warning("Levenshtein fallito per %r: %s", nome, e)
 
-    # 3) NESSUN RISULTATO ASSOLUTO ---------------------------------------
     if not risultati:
-        logger.warning(
-            f"[Resolver] Nessun risultato per {nome!r} dopo esatto + fuzzy + fallback."
-        )
         raise NoEntityFoundError(nome)
 
-    # 4) DEDUPE: stessi (name, label) NON devono creare ambiguità cosmetica
+    # dedupe (name,label) al punteggio max
     dedup: Dict[Tuple[str, str], Dict[str, Any]] = {}
     for r in risultati:
-        key = (r.get("name"), r.get("label"))
-        if key in dedup:
-            if r.get("score", 0) > dedup[key].get("score", 0):
-                dedup[key] = r
+        k = (r.get("name"), r.get("label"))
+        if k in dedup:
+            if r.get("score", 0) > dedup[k].get("score", 0):
+                dedup[k] = r
         else:
-            dedup[key] = r
-    risultati = list(dedup.values())
+            dedup[k] = r
+    raw_candidates = list(dedup.values())
 
-    raw_candidates = risultati  # li teniamo per available_labels
+    # 4bis) label bias
+    raw_candidates = _apply_label_bias(raw_candidates, specialist_route, nome)
 
-    # 5) FILTRO PER INTENT (dominio) -------------------------------------
+    # 5) filtro per intent
     if preferred_labels:
         filtered = [r for r in raw_candidates if r["label"] in preferred_labels]
     else:
         filtered = list(raw_candidates)
 
-    if filtered:
-        # Ok: abbiamo candidati compatibili col dominio
-        risultati_da_controllare = filtered
-    else:
-        risultati_da_controllare = []
+    risultati_da_controllare = filtered if filtered else []
 
-    # 6) CASO ROLE MISMATCH: esistono candidati ma nessuno compatibile ----
+    # 6) role mismatch
     if not risultati_da_controllare and raw_candidates and preferred_labels:
-        available_labels = sorted({c["label"] for c in raw_candidates})
-        logger.info(
-            "[Resolver RoleMismatch] '%s' trovato solo come %s, "
-            "ma intent '%s' richiede uno di %s.",
-            nome,
-            available_labels,
-            specialist_route,
-            preferred_labels,
-        )
-
-        # Non salviamo in memoria, segnaliamo mismatch
+        available = sorted({c["label"] for c in raw_candidates})
         return {
-            "name": raw_candidates[0]["name"],  # nome rappresentativo
+            "name": raw_candidates[0]["name"],
             "label": None,
             "property": None,
             "role_mismatch_for_intent": True,
-            "available_labels": available_labels,
+            "available_labels": available,
         }
 
-    # 7) DA QUI IN POI: abbiamo candidati compatibili con l'intent --------
     if not risultati_da_controllare:
-        # Nessuna preferenza oppure nessun candidato serio
         risultati_da_controllare = raw_candidates
 
-    # Controllo se è una sola entità logica (stesso name+label)
-    unique_pairs = {(r["name"], r["label"]) for r in risultati_da_controllare}
-    if len(unique_pairs) == 1:
-        risultati_da_controllare.sort(key=lambda x: x["score"], reverse=True)
-        best_match = risultati_da_controllare[0]
-    else:
-        risultati_da_controllare.sort(key=lambda x: x["score"], reverse=True)
-        best_match = risultati_da_controllare[0]
-        top_score = best_match["score"]
+    # 7) ambiguità
+    risultati_da_controllare.sort(key=lambda x: x["score"], reverse=True)
+    best = risultati_da_controllare[0]
+    if len(risultati_da_controllare) > 1:
+        second = risultati_da_controllare[1]["score"]
+        delta = best["score"] - second
+        if delta < DELTA_MIN:
+            ambiguous_options = [
+                {"name": r["name"], "label": r["label"], "score": r["score"]}
+                for r in risultati_da_controllare
+                if r["score"] >= second
+            ]
+            raise AmbiguousEntityError(nome, ambiguous_options)
 
-        if len(risultati_da_controllare) > 1:
-            second_score = risultati_da_controllare[1]["score"]
-            delta = top_score - second_score
-            if delta < DELTA_MIN:
-                ambiguous_options = [
-                    {
-                        "name": r["name"],
-                        "label": r["label"],
-                        "score": r["score"],
-                    }
-                    for r in risultati_da_controllare
-                    if r["score"] >= second_score
-                ]
-                logger.warning(
-                    f"[Resolver] Ambiguità per {nome!r}: "
-                    f"top_score={top_score}, second_score={second_score}, delta={delta}"
-                )
-                raise AmbiguousEntityError(nome, ambiguous_options)
+    # 8) salva memoria + ritorna
+    label_corretta = best["label"]
+    prop = ENTITY_DEFINITIONS.get(label_corretta, {}).get("property")
 
-    # 8) MATCH CERTO → SALVA MEMORIA + RITORNA ---------------------------
-    nome_corretto = best_match["name"]
-    label_corretta = best_match["label"]
-    entity_def = ENTITY_DEFINITIONS.get(label_corretta, {})
-    property_name = entity_def.get("property")
-
-    risultato_certo = {
-        "name": nome_corretto,
+    risultato = {
+        "name": best["name"],
         "label": label_corretta,
-        "property": property_name,
+        "property": prop,
         "role_mismatch_for_intent": False,
         "available_labels": sorted({c["label"] for c in raw_candidates}),
     }
 
-    logger.info(
-        "Entity Resolver: '%s' -> '%s' (%s) per intent '%s'.",
-        nome,
-        nome_corretto,
-        label_corretta,
-        specialist_route,
-    )
+    _save_memory_resolution(session, original_name=nome, resolution=risultato)
+    return risultato
 
-    _save_memory_resolution(session, term_key, risultato_certo)
-    return risultato_certo
+
+def _materialize_both_roles_from_pending_state(
+    pending_state: Dict[str, Any],
+) -> Optional[Dict[str, Dict[str, Any]]]:
+    """
+    Legge le opzioni dallo stato di conferma e crea una mappa
+    di hint multipli per il Coder.
+    """
+    if not pending_state:
+        return None
+
+    options = pending_state.get("options") or []
+    if len(options) < 2:
+        return None
+
+    # prendi max 2 ruoli "business" (Cliente/Fornitore/GruppoFornitore/Ditta)
+    business = ("Cliente", "Fornitore", "GruppoFornitore", "Ditta")
+    chosen = []
+    seen_labels = set()
+    for opt in options:
+        lab = opt.get("label")
+        if lab in business and lab not in seen_labels:
+            chosen.append(opt)
+            seen_labels.add(lab)
+        if len(chosen) == 2:
+            break
+
+    if len(chosen) < 2:
+        return None
+
+    original = pending_state.get("ambiguous_term") or ""
+    hint_map = {}
+    for opt in chosen:
+        # Crea una chiave fittizia unica per la mappa
+        hint_map_key = f"{original}::{opt['label']}"
+        hint_map[hint_map_key] = {
+            "name": opt["name"],
+            "label": opt["label"],
+            "property": ENTITY_DEFINITIONS.get(opt["label"], {}).get(
+                "property", "name"
+            ),
+            "role_mismatch_for_intent": False,
+            "available_labels": [opt["label"]],
+        }
+    return hint_map
 
 
 def _resolve_entities_in_question(
@@ -2770,10 +2854,11 @@ def run_ambiguity_resolver_agent(
     user_reply: str, options: List[Dict[str, Any]]
 ) -> Optional[Dict[str, Any]]:
     """
-    Usa LLM per mappare la risposta dell'utente ("il primo", "il cliente")
-    all'opzione strutturata corretta.
+    Usa LLM per CLASSIFICARE l'intento della risposta dell'utente
+    (SINGLE_CHOICE, MULTI_CHOICE, NO_CHOICE).
+    Restituisce un dizionario: {"intent": "...", "selection": ...}
     """
-    logger.info("🤖 Chiamata all'Agente Risolutore Ambiguità...")
+    logger.info("🤖 Chiamata all'Agente Risolutore Ambiguità (Classificatore)...")
 
     options_str_list = []
     for i, opt in enumerate(options, start=1):
@@ -2797,82 +2882,30 @@ def run_ambiguity_resolver_agent(
         # Estrai il JSON dalla risposta
         json_match = re.search(r"\{.*\}", raw, re.DOTALL)
         if json_match:
-            chosen_data = json.loads(json_match.group(0))
-            # Verifica che sia una delle opzioni valide
-            for opt in options:
-                if opt["name"] == chosen_data.get("name") and opt[
-                    "label"
-                ] == chosen_data.get("label"):
-                    logger.info(f"✅ [AmbiguityResolver] Scelta risolta (JSON): {opt}")
-                    return opt
+            try:
+                chosen_data = json.loads(json_match.group(0))
+                # Validazione della nuova struttura
+                if "intent" in chosen_data:
+                    logger.info(
+                        f"✅ [AmbiguityResolver] Intento classificato: {chosen_data}"
+                    )
+                    return (
+                        chosen_data  # Restituisce {"intent": "...", "selection": ...}
+                    )
+            except Exception as e:
+                logger.error(f"❌ Ambiguity Resolver fallito parsing: {e}")
+                pass
 
-        # Fallback (se l'LLM non ha restituito JSON valido, prova con euristiche)
-        reply_lower = user_reply.lower()
-        if "1" in reply_lower or "prim" in reply_lower:
-            logger.info(
-                f"✅ [AmbiguityResolver] Scelta risolta (Indice 1): {options[0]}"
-            )
-            return options[0]
-        for opt in options:
-            if opt["label"].lower() in reply_lower:
-                logger.info(
-                    f"✅ [AmbiguityResolver] Scelta risolta (Label match): {opt}"
-                )
-                return opt
-
+        # Fallback se tutto fallisce
         logger.warning("⚠️ [AmbiguityResolver] Impossibile mappare la risposta.")
-        return None
+        return {
+            "intent": "NO_CHOICE",
+            "selection": None,
+        }  # Restituisci un segnale di fallimento sicuro
+
     except Exception as e:
         logger.error(f"❌ Ambiguity Resolver fallito: {e}", exc_info=True)
-        return None
-
-
-def run_coder_agent(question: str, relevant_schema: str, prompt_template: str) -> str:
-    """Esegue un Coder specializzato assemblando il prompt completo prima di passarlo a LangChain."""
-    logger.info(f"🤖 Chiamata a un Coder Specializzato...")
-    # 1. Header/Suffix da config
-    coder_tpl = (config.prompt_profiles or {}).get("templates", {}).get("coder", {})
-    prompt_header = coder_tpl.get("header", "{schema}\n---\n")
-    prompt_suffix = coder_tpl.get("suffix", "Final Cypher Query:")
-
-    # 2. Assemblaggio: Header + Regole comuni + Regole speciali + Suffix
-    final_prompt_text = (
-        prompt_header
-        + BASE_CYPHER_RULES
-        + "\n---\n"
-        + prompt_template
-        + "\n"
-        + prompt_suffix
-    )
-
-    # 3. CREO IL TEMPLATE FINALE
-    #   E LO PASSO A LANGCHAIN
-    query = _invoke_with_profile(
-        agent_name="coder",
-        prompt_text=final_prompt_text,
-        variables={"question": question, "schema": relevant_schema},
-    )
-    candidate = extract_cypher(query)
-    # Pre-repair guardrails: if SQL artifacts or non-Cypher preface slipped in, trigger a repair pass
-    needs_repair = bool(re.search(r"\bGROUP\s+BY\b", candidate, flags=re.IGNORECASE))
-    if needs_repair and QUERY_REPAIR_PROMPT:
-        try:
-            fixed = _invoke_with_profile(
-                agent_name="coder",
-                prompt_text=QUERY_REPAIR_PROMPT,
-                variables={
-                    "question": question,
-                    "schema": relevant_schema,
-                    "bad_query": candidate,
-                    "error": "Invalid SQL dialect: found GROUP BY; rewrite using Cypher WITH.",
-                    "hints": _suggest_unnecessary_with_hints(candidate),
-                    "recent_repairs": "",
-                },
-            )
-            candidate = extract_cypher(fixed)
-        except Exception:
-            pass
-    return candidate
+        return {"intent": "NO_CHOICE", "selection": None}
 
 
 def run_coder_agent(
@@ -2882,6 +2915,7 @@ def run_coder_agent(
     specialist_type: str,
     original_question_it: str,
     examples_top_k: Optional[int] = None,
+    user_id: str = "default_user",
 ) -> Tuple[str, List[Dict], List[Dict], Optional[float]]:
     """Coder con esempi dinamici RAG"""
     logger.info(f"🤖 Coder: {specialist_type}")
@@ -2938,6 +2972,37 @@ def run_coder_agent(
     else:
         examples_text = ""
 
+    # Recuperiamo la memoria e la passiamo all'LLM.
+    session = get_or_create_session(user_id)
+    pagination_hint = ""
+    if session.last_pagination_query:
+        last_query_data = session.last_pagination_query
+        last_specialist = last_query_data.get("specialist")
+
+        # Passiamo la memoria solo se l'intento è lo stesso (per sicurezza)
+        if specialist_type == last_specialist:
+            last_offset = last_query_data.get("offset", 0)
+            last_limit = last_query_data.get("limit", 10)
+
+            pagination_hint = (
+                f"\n--- MEMORIA CONTESTUALE (PAGINAZIONE) ---\n"
+                f"L'utente potrebbe chiedere la 'prossima pagina' di risultati.\n"
+                f"La query eseguita *immediatamente prima* di questa è stata:\n"
+                f"```cypher\n{last_query_data.get('query_base')}\n```\n"
+                f"(Questa query aveva LIMIT {last_limit} e OFFSET {last_offset}).\n"
+                f"ISTRUZIONE: Se la nuova domanda (es. 'altri 10', 'successivi') chiede la pagina seguente, "
+                f"DEVI riutilizzare la query base e incrementare l'OFFSET (es. 'OFFSET {last_offset + last_limit}'). "
+                f"Se la nuova domanda è diversa, IGNORA questo hint."
+            )
+            logger.info(
+                f"Paginazione: Fornito hint al Coder con OFFSET precedente {last_offset}."
+            )
+        else:
+            session.last_pagination_query = None  # Reset perché l'intento è cambiato
+    else:
+        pass
+        # Nessuna query precedente
+
     # 3. ASSEMBLA PROMPT
     prompt_header = """
     **Original Question (IT):** {original_question_it}
@@ -2954,6 +3019,7 @@ def run_coder_agent(
         + prompt_template
         + "\n---\n"
         + examples_text
+        + pagination_hint
         + "\nFinal Cypher Query:"
     )
 
@@ -2967,8 +3033,38 @@ def run_coder_agent(
             "original_question_it": original_question_it,
         },
     )
+    generated_query = extract_cypher(query)
 
-    return extract_cypher(query), use_examples, raw_examples, best_similarity
+    # === INIZIO BLOCCO SALVATAGGIO PAGINAZIONE (Come prima) ===
+
+    limit_match = re.search(r"\bLIMIT\s+(\d+)", generated_query, re.IGNORECASE)
+
+    if limit_match:
+        offset_match = re.search(r"\bOFFSET\s+(\d+)", generated_query, re.IGNORECASE)
+        current_limit = int(limit_match.group(1))
+        current_offset = int(offset_match.group(1)) if offset_match else 0
+
+        query_base = generated_query
+        if offset_match:
+            query_base = re.sub(
+                r"\bOFFSET\s+(\d+)", "", query_base, flags=re.IGNORECASE
+            ).strip()
+
+        session.last_pagination_query = {
+            "query_base": query_base,
+            "specialist": specialist_type,
+            "limit": current_limit,
+            "offset": current_offset,
+        }
+        logger.info(
+            f"Salvataggio stato paginazione: LIMIT {current_limit} OFFSET {current_offset}"
+        )
+    else:
+        # Se la query non ha LIMIT, non è paginabile
+        session.last_pagination_query = None
+    # === FINE BLOCCO SALVATAGGIO ===
+
+    return generated_query, use_examples, raw_examples, best_similarity
 
 
 def run_contextualizer_agent(question: str, chat_history: str) -> str:
@@ -3795,6 +3891,8 @@ def build_graph_payload_from_results(
     """
     # PRIMA: prova a estrarre direttamente dai records
     graph_payload = extract_graph_snapshot(records)
+    graph_origin = "context_results"
+
     if graph_payload and graph_payload.get("nodes"):
         logger.info(f"Grafo estratto dai records: {len(graph_payload['nodes'])} nodi")
         if highlight_node_ids and GRAPH_HIGHLIGHT_RESULTS:
@@ -3855,6 +3953,16 @@ def build_graph_payload_from_results(
         )
         return rebuilt_graph, "reconstructed_from_query"
 
+    pivot = _infer_query_context_pivot(query, records)
+    if pivot and graph_payload and graph_payload.get("nodes"):
+        logger.info(f"🎯 Pivot rilevato: {pivot}")
+        _attach_pivot_hub(graph_payload, pivot, highlight_node_ids, limit=limit)
+        # Salva pivot per frontend
+        meta = graph_payload.setdefault("meta", {})
+        meta["query_pivot"] = pivot  # 🔥 Frontend lo userà per espansioni
+
+    return graph_payload, graph_origin
+
     logger.warning("Nessun grafo trovato né nei records né nella ricostruzione")
     empty = {}
     _enrich_graph_meta(
@@ -3878,56 +3986,195 @@ def _infer_pivot_from_query(query: str) -> Optional[Dict[str, str]]:
             return None
         q = " ".join(query.split())
         # Cerca pattern (c:Cliente)-[:REL]->(d:Ditta)
-        m = re.search(r"\(([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*Cliente\)\s*-\s*\[:\s*([A-Z0-9_]+)\s*\]\s*->\s*\(([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*Ditta\)", q)
+        m = re.search(
+            r"\(([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*Cliente\)\s*-\s*\[:\s*([A-Z0-9_]+)\s*\]\s*->\s*\(([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*Ditta\)",
+            q,
+        )
         if not m:
             return None
         cvar, rel_type, dvar = m.group(1), m.group(2), m.group(3)
         # WHERE d.xxx = 'val' oppure = 123
-        w = re.search(rf"WHERE\s+{dvar}\.([a-zA-Z0-9_`]+)\s*=\s*([\"']?)([^\"'\s]+)\2", q, re.IGNORECASE)
+        w = re.search(
+            rf"WHERE\s+{dvar}\.([a-zA-Z0-9_`]+)\s*=\s*([\"']?)([^\"'\s]+)\2",
+            q,
+            re.IGNORECASE,
+        )
         if not w:
             return None
         prop = w.group(1).strip("`")
         value = w.group(3)
-        return {"label": "Ditta", "var": dvar, "prop": prop, "value": value, "rel_type": rel_type}
+        return {
+            "label": "Ditta",
+            "var": dvar,
+            "prop": prop,
+            "value": value,
+            "rel_type": rel_type,
+        }
     except Exception:
         return None
 
 
-def _attach_pivot_hub(graph_payload: Dict[str, Any], pivot: Dict[str, str], result_ids: Optional[Set[str]], *, limit: Optional[int]) -> None:
-    """Aggiunge al grafo il nodo pivot (es. Ditta) e collega i nodi risultato che hanno la relazione indicata verso tale pivot.
+def _infer_query_context_pivot(
+    query: str, context_records: List[Dict]
+) -> Optional[Dict[str, Any]]:
+    """
+    Inferisce il pivot dalla query E dai risultati.
+    Esempio: Se query ha WHERE d.dittaId='2' e i record hanno clienti,
+             ritorna {"label": "Ditta", "property": "dittaId", "value": "2"}
+    """
+    if not query:
+        return None
 
-    Questo rende il grafo più leggibile (hub centrale) senza alterare i nodi risultato.
+    # Pattern 1: WHERE esplicito su Ditta
+    match = re.search(
+        r'WHERE\s+([a-z]+)\.([a-zA-Z_]+)\s*=\s*["\']?([^"\'\s]+)["\']?',
+        query,
+        re.IGNORECASE,
+    )
+    if match:
+        var, prop, value = match.groups()
+        # Verifica che la variabile sia una Ditta
+        if re.search(rf"\({var}\s*:\s*Ditta\)", query, re.IGNORECASE):
+            return {
+                "label": "Ditta",
+                "var": var,
+                "property": prop,
+                "value": value,
+                "inferred_from": "query_where_clause",
+            }
+
+    # Pattern 2: Inferisci dai record stessi (se tutti hanno la stessa ditta)
+    if context_records:
+        ditta_ids = set()
+        for rec in context_records:
+            for key, val in rec.items():
+                if "ditta" in key.lower() and val:
+                    ditta_ids.add(str(val))
+
+        if len(ditta_ids) == 1:  # Tutti appartengono alla stessa ditta
+            ditta_id = ditta_ids.pop()
+            return {
+                "label": "Ditta",
+                "property": "dittaId",
+                "value": ditta_id,
+                "inferred_from": "result_context",
+            }
+
+    return None
+
+
+def expand_node_with_context(
+    node_id: str, limit: int, pivot_context: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    Espande un nodo CON FILTRO PIVOT.
+    Se pivot_context presente, mostra SOLO relazioni verso quel pivot.
+    """
+    try:
+        if pivot_context:
+            # 🔥 Espansione FILTRATA
+            pivot_label = pivot_context.get("label", "Ditta")
+            pivot_prop = pivot_context.get("property", "dittaId")
+            pivot_value = pivot_context.get("value")
+
+            query = f"""
+            MATCH (n) WHERE elementId(n) = $node_id
+            WITH n
+            
+            // Relazioni verso il pivot
+            OPTIONAL MATCH (n)-[r1:APPARTIENE_A]->(d:`{pivot_label}`)
+            WHERE d.{pivot_prop} = $pivot_value
+            
+            // Altri vicini generici (max 10)
+            OPTIONAL MATCH (n)-[r2]-(m)
+            WHERE NOT m:`{pivot_label}`
+            WITH n, r1, d, collect({{rel: r2, node: m}})[..10] AS others
+            
+            RETURN n AS result_node, 
+                   r1, d,
+                   [x IN others | x.rel] AS other_rels,
+                   [x IN others | x.node] AS other_nodes
+            LIMIT $limit
+            """
+
+            params = {"node_id": node_id, "pivot_value": pivot_value, "limit": limit}
+        else:
+            # Espansione standard
+            query = """
+            MATCH (n) WHERE elementId(n) = $node_id
+            WITH n
+            OPTIONAL MATCH (n)-[r]-(m)
+            RETURN n AS result_node, r, m
+            LIMIT $limit
+            """
+            params = {"node_id": node_id, "limit": limit}
+
+        records = execute_cypher_with_records(query, params)
+
+        if not records:
+            return {"nodes": [], "edges": []}
+
+        graph_payload = extract_graph_snapshot(records)
+
+        meta = graph_payload.setdefault("meta", {})
+        meta["source"] = "expand_neighbors"
+        meta["expanded_node"] = node_id
+        if pivot_context:
+            meta["pivot_filter"] = pivot_context
+
+        return graph_payload
+
+    except Exception as exc:
+        logger.error(f"Errore espansione nodo {node_id}: {exc}")
+        return {"nodes": [], "edges": []}
+
+
+def _attach_pivot_hub(
+    graph_payload: Dict[str, Any],
+    pivot: Dict[str, str],
+    result_ids: Optional[Set[str]],
+    *,
+    limit: Optional[int],
+) -> None:
+    """
+    VERSIONE MIGLIORATA:
+    - Aggiunge il nodo pivot al grafo
+    - Collega TUTTI i nodi risultato al pivot (anche se mancano edge nel grafo originale)
+    - Usa il valore pivot per filtrare le relazioni corrette
     """
     if not graph_payload or not graph_payload.get("nodes"):
         return
+
     try:
-        # 1) Recupera il nodo pivot da DB
         label = pivot.get("label") or "Ditta"
-        prop = pivot.get("prop") or "name"
+        prop = pivot.get("property") or "dittaId"
         value = pivot.get("value") or ""
-        rel_type = pivot.get("rel_type") or "APPARTIENE_A"
+        rel_type = "APPARTIENE_A"  # Relazione standard Cliente->Ditta
+
         if not value:
             return
 
-        # Usa confronto case-insensitive per stringhe, equality per numerici
+        # 1) Recupera il nodo pivot da DB
         is_numeric = re.fullmatch(r"-?\d+(?:\.\d+)?", value or "") is not None
         if is_numeric:
             node_query = f"MATCH (d:`{label}`) WHERE d.{prop} = $v RETURN d LIMIT 1"
             params = {"v": float(value) if "." in value else int(value)}
         else:
-            node_query = (
-                f"MATCH (d:`{label}`) WHERE toLower(trim(d.{prop})) = toLower(trim($v)) RETURN d LIMIT 1"
-            )
+            node_query = f"MATCH (d:`{label}`) WHERE toLower(trim(d.{prop})) = toLower(trim($v)) RETURN d LIMIT 1"
             params = {"v": value}
+
         recs = execute_cypher_with_records(node_query, params)
         if not recs:
+            logger.warning(f"Pivot hub non trovato: {label} {prop}={value}")
             return
+
         pivot_node = None
         for r in recs:
             cand = r.get("d")
             if isinstance(cand, Node):
                 pivot_node = cand
                 break
+
         if not pivot_node:
             return
 
@@ -3938,45 +4185,126 @@ def _attach_pivot_hub(graph_payload: Dict[str, Any], pivot: Dict[str, str], resu
 
         nodes = graph_payload.setdefault("nodes", [])
         edges = graph_payload.setdefault("edges", [])
+
         existing_ids = {str(n.get("id")) for n in nodes if n and n.get("id")}
+
+        # Aggiungi pivot se mancante
         if pivot_id not in existing_ids:
+            pivot_payload["isPivot"] = True  # Marker per styling frontend
             nodes.append(pivot_payload)
             existing_ids.add(pivot_id)
+            logger.info(
+                f"✅ Pivot hub aggiunto: {label} {prop}={value} (id={pivot_id})"
+            )
 
-        # 2) Collega i nodi risultato al pivot se la relazione esiste in DB
-        result_ids = result_ids or set()
+        # 2) Identifica nodi risultato (possono essere clienti, fornitori, etc)
         if not result_ids:
-            # se non abbiamo highlight, collega tutti i nodi correnti etichettati Cliente
-            result_ids = {str(n.get("id")) for n in nodes if n and "Cliente" in (n.get("labels") or [])}
+            # Fallback: tutti i nodi Cliente nel grafo
+            result_ids = {
+                str(n.get("id"))
+                for n in nodes
+                if n and "Cliente" in (n.get("labels") or [])
+            }
 
         if not result_ids:
+            logger.warning("Nessun nodo risultato identificato per collegare al pivot")
             return
 
-        edge_query = (
-            f"UNWIND $ids AS eid "
-            f"MATCH (c) WHERE elementId(c)=eid "
-            f"MATCH (c)-[r:`{rel_type}`]->(d) WHERE elementId(d)=$pid "
-            f"RETURN r LIMIT $lim"
-        )
+        # 3) Query MASSIVA per recuperare TUTTE le relazioni mancanti
+        # Cruciale: Filtra per il valore del pivot per evitare collegamenti errati
+        edge_query = f"""
+        UNWIND $ids AS eid
+        MATCH (c) WHERE elementId(c) = eid
+        MATCH (c)-[r:`{rel_type}`]->(d:`{label}`)
+        WHERE d.{prop} = $pivot_value
+        RETURN r, c, d
+        LIMIT $lim
+        """
+
         lim = max(1, min(int(limit or GRAPH_DEFAULT_LIMIT), GRAPH_MAX_LIMIT))
-        erecs = execute_cypher_with_records(edge_query, {"ids": list(result_ids), "pid": pivot_id, "lim": lim})
+
+        # Converti pivot value al tipo corretto
+        if is_numeric:
+            pivot_value = float(value) if "." in value else int(value)
+        else:
+            pivot_value = value
+
+        erecs = execute_cypher_with_records(
+            edge_query,
+            {"ids": list(result_ids), "pivot_value": pivot_value, "lim": lim},
+        )
+
         if not erecs:
+            logger.warning(
+                f"Nessuna relazione {rel_type} trovata verso pivot {label}={value}"
+            )
+            # OPZIONE: Crea edge "stub" visibili ma disabilitati (tratteggiati)
+            # Commentare questa sezione se non si vuole creare collegamenti fittizi
+            edge_map = {str(e.get("id")) for e in edges if e and e.get("id")}
+            for rid in result_ids:
+                stub_edge_id = f"stub::{rid}-->{pivot_id}"
+                if stub_edge_id not in edge_map:
+                    edges.append(
+                        {
+                            "id": stub_edge_id,
+                            "type": rel_type,
+                            "source": rid,
+                            "target": pivot_id,
+                            "properties": {},
+                            "_stub": True,  # Marker per frontend (stile tratteggiato)
+                        }
+                    )
+                    edge_map.add(stub_edge_id)
             return
-        # Aggiungi relazioni
+
+        # Aggiungi relazioni reali
         edge_map = {str(e.get("id")) for e in edges if e and e.get("id")}
+        added_count = 0
+
         for er in erecs:
             rel = er.get("r")
-            if isinstance(rel, Relationship):
-                ep = _relationship_to_payload(rel)
-                eid = str(ep.get("id"))
-                if eid and eid not in edge_map:
-                    edges.append(ep)
-                    edge_map.add(eid)
-        # meta pivot
+            source_node = er.get("c")
+            target_node = er.get("d")
+
+            if not isinstance(rel, Relationship):
+                continue
+
+            # Assicurati che i nodi sorgente/destinazione siano nel grafo
+            if source_node and isinstance(source_node, Node):
+                src_id = _extract_node_identity(source_node)
+                if src_id and src_id not in existing_ids:
+                    nodes.append(_node_to_payload(source_node))
+                    existing_ids.add(src_id)
+
+            if target_node and isinstance(target_node, Node):
+                tgt_id = _extract_node_identity(target_node)
+                if tgt_id and tgt_id not in existing_ids:
+                    nodes.append(_node_to_payload(target_node))
+                    existing_ids.add(tgt_id)
+
+            ep = _relationship_to_payload(rel)
+            eid = str(ep.get("id"))
+
+            if eid and eid not in edge_map:
+                edges.append(ep)
+                edge_map.add(eid)
+                added_count += 1
+
+        logger.info(f"✅ Collegate {added_count} relazioni al pivot {label}={value}")
+
+        # Metadata per frontend
         meta = graph_payload.setdefault("meta", {})
-        meta["pivot"] = {"id": pivot_id, "label": label, "prop": prop, "value": value, "rel_type": rel_type}
+        meta["pivot"] = {
+            "id": pivot_id,
+            "label": label,
+            "property": prop,
+            "value": value,
+            "rel_type": rel_type,
+            "edges_added": added_count,
+        }
+
     except Exception as exc:
-        logger.warning("Impossibile collegare il pivot al grafo: %s", exc)
+        logger.error(f"Errore collegamento pivot hub: {exc}", exc_info=True)
 
 
 def _extract_variables_from_query(query_prefix: str) -> Tuple[List[str], List[str]]:
@@ -4131,22 +4459,40 @@ async def health_check():
 
 # ENDPOINT PER LE DOMANDE
 @app.post("/graph/expand")
-async def expand_graph(request: GraphExpandRequest):
-    """Recupera il vicinato diretto di un nodo a partire dal suo elementId."""
-    node_id = (request.node_id or "").strip()
+@app.post("/graph/expand")
+async def expand_graph(request: dict):
+    """
+    Endpoint migliorato con supporto pivot context.
+
+    Body:
+    {
+        "node_id": "4:xxx",
+        "limit": 25,
+        "pivot_context": {  // OPZIONALE
+            "label": "Ditta",
+            "property": "dittaId",
+            "value": "2"
+        }
+    }
+    """
+    node_id = (request.get("node_id") or "").strip()
     if not node_id:
         raise HTTPException(status_code=400, detail="node_id richiesto")
 
-    limit = request.limit or GRAPH_DEFAULT_LIMIT
+    limit = request.get("limit") or GRAPH_DEFAULT_LIMIT
+    pivot_context = request.get("pivot_context")  # NUOVO
+
     try:
         limit_int = max(1, min(int(limit), GRAPH_MAX_LIMIT))
     except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail="limit non valido")
 
     try:
-        graph_payload = fetch_graph_from_ids([node_id], limit_int)
+        graph_payload = expand_node_with_context(
+            node_id, limit_int, pivot_context=pivot_context  # NUOVO
+        )
     except Neo4jError as exc:
-        logger.error("Errore durante l'espansione del grafo: %s", exc)
+        logger.error("Errore espansione grafo: %s", exc)
         raise HTTPException(
             status_code=500, detail="Errore durante l'espansione del grafo"
         ) from exc
@@ -4154,17 +4500,14 @@ async def expand_graph(request: GraphExpandRequest):
     if not graph_payload or not graph_payload.get("nodes"):
         return {"graph_data": {}}
 
-    meta = graph_payload.setdefault("meta", {})
-    meta["source"] = "expand_neighbors"
-    meta["limit"] = limit_int
-    meta["expanded_node"] = node_id
-
     return {"graph_data": graph_payload}
 
 
 # ENDPOINT PER LE DOMANDE
 @app.post("/ask")
-async def ask_question(user_question: UserQuestionWithSession):
+async def ask_question(
+    user_question: UserQuestionWithSession, claims: dict = Depends(require_auth)
+):
     start_total_time = time.perf_counter()
     timing_details = {}
     # Definisci le variabili qui, perché verranno popolate
@@ -4177,7 +4520,10 @@ async def ask_question(user_question: UserQuestionWithSession):
     specialist_route: Optional[str] = None
     entity_hint_map: Dict[str, Dict[str, Any]] = {}
 
-    user_id = user_question.user_id or "default_user"
+    # Sostituisci user_id con l'identità dal token se presente
+    token_uid = (claims or {}).get("sub") if claims else None
+    token_username = (claims or {}).get("preferred_username") if claims else None
+    user_id = token_username or token_uid or user_question.user_id or "default_user"
     user_input_text = user_question.question.strip()
     session = get_or_create_session(user_id)
 
@@ -4198,106 +4544,107 @@ async def ask_question(user_question: UserQuestionWithSession):
 
     try:
         if pending_state and pending_state.get("type") == "entity_ambiguity":
-            # === PERCORSO 1: L'UTENTE STA RISPONDENDO A UNA DOMANDA DI AMBIGUITÀ ===
-            logger.info(
-                f"[{user_id}] Rilevato stato 'pending_confirmation'. Tento di risolvere..."
+            logger.info(f"[{user_id}] Rilevato stato 'pending_confirmation'.")
+
+            # === 1. CHIAMIAMO L'AGENTE GIUSTO ===
+            # L'AmbiguityResolver ora gestisce tutto.
+            chosen_signal = run_ambiguity_resolver_agent(
+                user_reply=user_input_text,
+                options=pending_state["options"],
             )
 
-            # 1a. Chiama il NUOVO agente per capire la scelta
-            chosen_option = (
-                run_ambiguity_resolver_agent(  # Devi aggiungere questa funzione
-                    user_reply=user_input_text,  # "il cliente"
-                    options=pending_state["options"],
+            intent = chosen_signal.get("intent")
+            selection = chosen_signal.get("selection")
+            # === 2. GESTIAMO I 3 CASI ===
+
+            # 2a. CASO "ENTRAMBI" (l'LLM ha capito "resolve_all")
+            if intent == "MULTI_CHOICE":
+                logger.info("[Orchestrator] Utente ha chiesto entrambi i ruoli.")
+
+                multi_hint_map = _materialize_both_roles_from_pending_state(
+                    pending_state
                 )
-            )
 
-            if chosen_option:
-                # 1b. Ambiguità risolta. Ricostruisci il task originale
+                if multi_hint_map:
+                    # Ricostruisci il task per il Coder
+                    question_text = pending_state["contextualized_question"]
+                    english_task = pending_state["english_task_template"]
+                    effective_question_text = pending_state["original_question"]
+                    specialist_route = pending_state.get(
+                        "specialist_route", "GENERAL_QUERY"
+                    )
+
+                    # Arricchisci l'english_task con i DUE hint
+                    english_task = _augment_english_task_with_entity_hints(
+                        english_task, multi_hint_map, specialist_route
+                    )
+                    entity_hint_map = multi_hint_map  # Passa gli hint al Coder
+                    session.pending_confirmation = None  # Stato risolto
+                    # Ora "cadrà" alla CORE PIPELINE
+                else:
+                    # Fallback
+                    session.pending_confirmation = None
+                    risposta = "Errore nel processare la richiesta 'entrambi'. Riprova."
+                    # Copia qui il tuo payload di errore completo
+                    return {
+                        "domanda": user_input_text,  # La risposta confusa
+                        "risposta": risposta,
+                        "requires_user_confirmation": False,
+                        "specialist": "AMBIGUITY_RESOLVER",
+                        "success": False,
+                        "query_generata": None,
+                        "context": [],
+                        "graph_data": {},
+                        "timing_details": timing_details,
+                        "examples_used": [],
+                        "repair_audit": [],
+                    }
+
+            # 2b. CASO "SCELTA SINGOLA" (l'LLM ha restituito un'opzione)
+            elif intent == "SINGLE_CHOICE" and selection:
+                chosen_option = selection
                 logger.info(f"Ambiguità risolta. Scelta: {chosen_option}")
+
+                # (Questo è il tuo codice originale da linea 611 a 694, è corretto)
                 ambiguous_term = pending_state["ambiguous_term"]
                 resolved_name = chosen_option["name"]
 
-                try:
-                    nome_lower = ambiguous_term.lower()
-                    session.resolved_entities[nome_lower] = {
-                        "name": chosen_option["name"],
-                        "label": chosen_option["label"],
-                    }
-                    logger.info(
-                        f"[Resolver Memory] Salvataggio (da AMBIGUITY): "
-                        f"'{nome_lower}' = {session.resolved_entities[nome_lower]}"
-                    )
-                except Exception as mem_err:
-                    logger.warning(
-                        f"Errore nel salvataggio della resolved_entity: {mem_err}"
-                    )
-
-                # Ricrea la domanda contestualizzata "pulita"
+                # Ricrea le variabili
                 question_text = re.sub(
                     re.escape(ambiguous_term),
                     resolved_name,
                     pending_state["contextualized_question"],
                     flags=re.IGNORECASE,
                 )
-
-                # Ricrea il task EN
                 english_task = re.sub(
                     re.escape(ambiguous_term),
                     resolved_name,
                     pending_state["english_task_template"],
                     flags=re.IGNORECASE,
                 )
-
-                # NUOVO: mini entity_hint_map basata sulla scelta
-                entity_hint_map = {
-                    ambiguous_term: {
-                        "name": resolved_name,
-                        "label": chosen_option.get("label"),
-                    }
-                }
-                english_task = _augment_english_task_with_entity_hints(
-                    english_task, entity_hint_map, specialist_route
-                )
-                logger.info(
-                    f"Task EN ricostruito e arricchito dopo ambiguità: '{english_task}'"
-                )
-
-                # Ricrea la domanda originale per la cronologia
                 effective_question_text = pending_state["original_question"]
-
-                # Memorizza la scelta anche nella memoria del Resolver (multi-ruolo)
-                term_key = _normalize_entity_key(ambiguous_term)
-                memory_resolution = {
-                    "name": resolved_name,
-                    "label": chosen_option["label"],
-                }
-                _save_memory_resolution(session, term_key, memory_resolution)
-                logger.info(
-                    f"[Resolver Memory] Salvataggio (da AMBIGUITY): "
-                    f"'{term_key}' = {memory_resolution}"
+                specialist_route = pending_state.get(
+                    "specialist_route", specialist_route
                 )
+
+                # Salva la scelta nella memoria
+                _save_memory_resolution(session, ambiguous_term, chosen_option)
 
                 # Aggiorna entity_hint_map per il Coder
-                entity_hint_map.clear()
-                entity_hint_map[ambiguous_term] = memory_resolution
+                entity_hint_map[ambiguous_term] = chosen_option
 
-                # Recupera anche la rotta specialistica se l'avevamo salvata
-                specialist_route = (
-                    pending_state.get("specialist_route") or specialist_route
-                )
+                session.pending_confirmation = None  # Stato risolto
+                # Ora "cadrà" alla CORE PIPELINE
 
-                # 1c. PULISCI LO STATO (CRITICO!)
-                session.pending_confirmation = None
-                logger.info(
-                    f"Stato 'pending_confirmation' risolto. Procedo con la pipeline."
-                )
-
-                # NOTA: Ora il codice salterà l' 'else' e andrà dritto
-                # alla "FASE 3: CORE PIPELINE"
-
+            # 2c. CASO "NON HO CAPITO" (O RESET)
             else:
-                # 1d. L'utente ha risposto ma non abbiamo capito
-                logger.warning("Impossibile risolvere l'ambiguità. Resetto lo stato.")
+                # Se l'utente ha cambiato argomento (es. "fatturato di..."),
+                # l'AmbiguityResolver (con il prompt giusto) restituirà {} (None).
+                # Questo è il reset!
+                logger.warning(
+                    f"[{user_id}] Impossibile mappare la risposta '{user_input_text}' a un'opzione. "
+                    f"Resetto lo stato e tratto come nuova domanda."
+                )
                 session.pending_confirmation = None
                 risposta = "Non ho capito la tua scelta. Riprova la domanda originale (es. 'fatturato di ferrini')."
                 timing_details["totale"] = time.perf_counter() - start_total_time
@@ -4316,7 +4663,7 @@ async def ask_question(user_question: UserQuestionWithSession):
                     "repair_audit": [],
                 }
 
-        else:
+        elif not session.pending_confirmation:
             # === PERCORSO 2: È UNA NUOVA DOMANDA (IL TUO FLUSSO NORMALE) ===
 
             # Pulisci qualsiasi stato vecchio per sicurezza
@@ -4737,6 +5084,7 @@ async def ask_question(user_question: UserQuestionWithSession):
             specialist_type=specialist_route,
             original_question_it=effective_question_text,
             examples_top_k=effective_examples_top_k,
+            user_id=user_id,
         )
 
         timing_details["generazione_query"] = time.perf_counter() - start_gen_time
@@ -5091,7 +5439,9 @@ async def ask_question(user_question: UserQuestionWithSession):
         try:
             pivot = _infer_pivot_from_query(generated_query or "")
             if pivot and graph_payload and graph_payload.get("nodes"):
-                _attach_pivot_hub(graph_payload, pivot, highlight_ids, limit=graph_limit)
+                _attach_pivot_hub(
+                    graph_payload, pivot, highlight_ids, limit=graph_limit
+                )
         except Exception as _:
             pass
 

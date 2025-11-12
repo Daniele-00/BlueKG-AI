@@ -777,6 +777,10 @@ if "user_id" not in st.session_state:
 if "submitted_feedback" not in st.session_state:
     st.session_state.submitted_feedback = []
 
+# Token Keycloak opzionale per chiamate API protette
+if "auth_token" not in st.session_state:
+    st.session_state.auth_token = ""
+
 # Flag di visualizzazione (valori di default, sovrascritti dalla sidebar)
 debug_mode = False
 show_context = False
@@ -892,8 +896,20 @@ def suggest_related_queries(last_response):
     return suggestions[:3]
 
 
+# ============================================================================
+# SOSTITUIRE la funzione render_graph() in chatbot_ui.py
+# ============================================================================
+
+
 def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
-    """Mostra un grafo interattivo con pan/zoom, controlli e legenda automatica."""
+    """
+    Grafo interattivo MIGLIORATO con:
+    - Auto-collegamento al pivot hub
+    - Espansione context-aware (filtra per pivot)
+    - Toggle collapse (doppio click per collassare)
+    - Filtri label interattivi (checkbox per tipo nodo)
+    - Stile pivot hub distintivo
+    """
     if not graph_data:
         st.info("Nessun grafo da visualizzare")
         return
@@ -913,10 +929,10 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
     html = f"""
     <div id="{element_id}" style="width:100%;height:640px;position:relative;">
 
-      <!-- CONTROLLI ZOOM -->
+      <!-- CONTROLLI -->
       <div style="position:absolute; right:12px; top:12px; z-index:1001; display:flex; gap:8px;">
-        <button id="{element_id}-zoom-in"  class="btn">＋</button>
-        <button id="{element_id}-zoom-out" class="btn">－</button>
+        <button id="{element_id}-zoom-in"  class="btn">+</button>
+        <button id="{element_id}-zoom-out" class="btn">−</button>
         <button id="{element_id}-fit"      class="btn">Adatta</button>
         <button id="{element_id}-reset"    class="btn">Reset</button>
         <button id="{element_id}-back"     class="btn">Indietro</button>
@@ -934,13 +950,13 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
       <!-- SVG -->
       <svg id="{element_id}-svg"></svg>
 
-      <!-- LEGENDA -->
+      <!-- LEGENDA CON FILTRI -->
       <div id="{element_id}-legend" style="
           position:absolute; top:12px; left:12px;
           background:rgba(15,23,42,0.85); border:1px solid #334155;
           border-radius:8px; padding:8px 12px; color:#e2e8f0;
           font-size:12px; font-family:'Inter',sans-serif;
-          z-index:1001; max-width:300px;"></div>
+          z-index:1001; max-width:300px; max-height:400px; overflow-y:auto;"></div>
 
       <!-- INFO PANEL -->
       <div id="{element_id}-info" class="graph-info-panel" style="
@@ -959,9 +975,13 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
     (function() {{
       const rawNodes = {nodes_json};
       const rawEdges = {edges_json};
+      const meta = {meta_json};
       const expandEndpoint = "{GRAPH_EXPAND_URL}";
       const width = 780, height = 580;
 
+      // PIVOT CONTEXT (usato per espansioni filtrate)
+      const pivotContext = meta && meta.query_pivot ? meta.query_pivot : null;
+      
       const svg = d3.select("#{element_id}-svg")
         .attr("viewBox", [0, 0, width, height])
         .style("width","100%")
@@ -973,10 +993,7 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
       viewport.append("rect")
         .attr("x",-5000).attr("y",-5000).attr("width",10000).attr("height",10000)
         .attr("fill","transparent").style("cursor","grab")
-        .on("click", () => {{
-          clearSelection();
-          tooltip.style('display','none');
-        }});
+        .on("click", () => {{ clearSelection(); tooltip.style('display','none'); }});
 
       const linkGroup = viewport.append("g").attr("class","links");
       const nodeGroup = viewport.append("g").attr("class","nodes");
@@ -987,9 +1004,23 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
       const infoPanel = d3.select("#{element_id}-info");
       infoPanel.on("click", ev => ev.stopPropagation());
       const color = d3.scaleOrdinal(d3.schemeCategory10);
-      const meta = {meta_json};
       const legend = d3.select("#{element_id}-legend");
-      const container = document.getElementById("{element_id}");
+      
+      const zoomInBtn = document.getElementById("{element_id}-zoom-in");
+      const zoomOutBtn = document.getElementById("{element_id}-zoom-out");
+      const fitBtn = document.getElementById("{element_id}-fit");
+      const resetBtn = document.getElementById("{element_id}-reset");
+      const backBtn = document.getElementById("{element_id}-back");
+      const freezeBtn = document.getElementById("{element_id}-freeze");
+      const restoreBtn = document.getElementById("{element_id}-restore");
+      
+      let layoutFrozen = false;
+      let selectedNode = null;
+      let selectedEdge = null;
+
+      // 🆕 FILTRI LABEL
+      let visibleLabels = new Set();
+
       const edgeKey = edge => {{
         if(!edge) return "";
         const src = edge.source && edge.source.id ? edge.source.id : edge.source;
@@ -998,34 +1029,17 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
         return `${{src}}->${{tgt}}:${{rel}}`;
       }};
 
-      const zoomInBtn = document.getElementById("{element_id}-zoom-in");
-      const zoomOutBtn = document.getElementById("{element_id}-zoom-out");
-      const fitBtn = document.getElementById("{element_id}-fit");
-      const resetBtn = document.getElementById("{element_id}-reset");
-      const backBtn = document.getElementById("{element_id}-back");
-      const freezeBtn = document.getElementById("{element_id}-freeze");
-      const restoreBtn = document.getElementById("{element_id}-restore");
-      let layoutFrozen = false;
-
-      let selectedNode = null;
-      let selectedEdge = null;
-
       function escapeHtml(value) {{
         return String(value)
-          .replace(/&/g,"&amp;")
-          .replace(/</g,"&lt;")
-          .replace(/>/g,"&gt;")
-          .replace(/\"/g,"&quot;")
-          .replace(/'/g,"&#39;");
+          .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+          .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
       }}
 
       function formatValue(value) {{
         if (value === null || value === undefined || value === "") return "-";
         if (Array.isArray(value)) {{
           if (!value.length) return "-";
-          return value
-            .map(v => (typeof v === "object" ? JSON.stringify(v) : String(v)))
-            .join(", ");
+          return value.map(v => (typeof v === "object" ? JSON.stringify(v) : String(v))).join(", ");
         }}
         if (typeof value === "object") {{
           try {{ return JSON.stringify(value); }}
@@ -1036,12 +1050,10 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
 
       function buildRowsFromObject(obj) {{
         if(!obj) return [];
-        return Object.keys(obj)
-          .sort()
-          .map(key => ({{
-            label: key,
-            value: formatValue(obj[key])
-          }}));
+        return Object.keys(obj).sort().map(key => ({{
+          label: key,
+          value: formatValue(obj[key])
+        }}));
       }}
 
       function showTooltip(event, nodeData) {{
@@ -1049,9 +1061,9 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
         const rows = buildRowsFromObject(nodeData.properties || {{}}).slice(0,6);
         let html = `<div style='font-weight:600;margin-bottom:4px;'>${{escapeHtml(getNodeLabel(nodeData))}}</div>`;
         if(rows.length) {{
-          html += rows
-            .map(row => `<div><span style='color:#94a3b8'>${{escapeHtml(row.label)}}:</span> ${{escapeHtml(row.value)}}</div>`)
-            .join("");
+          html += rows.map(row => 
+            `<div><span style='color:#94a3b8'>${{escapeHtml(row.label)}}:</span> ${{escapeHtml(row.value)}}</div>`
+          ).join("");
         }} else {{
           html += "<div>Nessuna proprietà disponibile</div>";
         }}
@@ -1060,16 +1072,14 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
       }}
 
       function moveTooltip(event) {{
-        if(!event || !container) return;
-        const bounds = container.getBoundingClientRect();
+        if(!event) return;
+        const bounds = document.getElementById("{element_id}").getBoundingClientRect();
         const x = event.pageX - bounds.left + 12;
         const y = event.pageY - bounds.top + 12;
         tooltip.style("left", `${{x}}px`).style("top", `${{y}}px`);
       }}
 
-      function hideTooltip() {{
-        tooltip.style("display","none");
-      }}
+      function hideTooltip() {{ tooltip.style("display","none"); }}
 
       function showInfoPanel(payload) {{
         if(!payload) {{
@@ -1078,26 +1088,19 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
         }}
         const rows = payload.rows || [];
         const rowsHtml = rows.length
-          ? rows
-              .map(
-                row => `<div class="info-row"><span>${{escapeHtml(row.label)}}</span><span>${{escapeHtml(row.value)}}</span></div>`
-              )
-              .join("")
+          ? rows.map(row => 
+              `<div class="info-row"><span>${{escapeHtml(row.label)}}</span><span>${{escapeHtml(row.value)}}</span></div>`
+            ).join("")
           : '<div class="info-empty">Nessuna informazione disponibile</div>';
-        const subtitleHtml = payload.subtitle
-          ? `<div class="info-subtitle">${{escapeHtml(payload.subtitle)}}</div>`
-          : "";
-        const noteHtml = payload.note
-          ? `<div class="info-note">${{escapeHtml(payload.note)}}</div>`
-          : "";
-        infoPanel
-          .style("display","block")
-          .html(
-            `<div class="info-title">${{escapeHtml(payload.title || "Dettagli nodo")}}</div>` +
-            subtitleHtml +
-            `<div class="info-block">${{rowsHtml}}</div>` +
-            noteHtml
-          );
+        const subtitleHtml = payload.subtitle ? `<div class="info-subtitle">${{escapeHtml(payload.subtitle)}}</div>` : "";
+        const noteHtml = payload.note ? `<div class="info-note">${{escapeHtml(payload.note)}}</div>` : "";
+        
+        infoPanel.style("display","block").html(
+          `<div class="info-title">${{escapeHtml(payload.title || "Dettagli nodo")}}</div>` +
+          subtitleHtml +
+          `<div class="info-block">${{rowsHtml}}</div>` +
+          noteHtml
+        );
       }}
 
       function updateFreezeButton() {{
@@ -1119,13 +1122,8 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
       function restoreLayout() {{
         layoutFrozen = false;
         updateFreezeButton();
-        nodes.forEach(n => {{
-          n.fx = null;
-          n.fy = null;
-        }});
-        if (node) {{
-          node.classed("pinned", false);
-        }}
+        nodes.forEach(n => {{ n.fx = null; n.fy = null; }});
+        if (node) node.classed("pinned", false);
         camStack.length = 0;
         pushCamState();
         clearSelection();
@@ -1147,19 +1145,11 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
         }} else {{
           nodeData.fx = nodeData.x;
           nodeData.fy = nodeData.y;
-          if (!layoutFrozen) {{
-            simulation.alphaTarget(0.3).restart();
-          }}
+          if (!layoutFrozen) simulation.alphaTarget(0.3).restart();
         }}
-        if (element) {{
-          d3.select(element).classed("pinned", !pinned);
-        }}
-        if (node) {{
-          node.classed("pinned", d => isPinned(d));
-        }}
-        if (!pinned && !layoutFrozen) {{
-          simulation.alphaTarget(0);
-        }}
+        if (element) d3.select(element).classed("pinned", !pinned);
+        if (node) node.classed("pinned", d => isPinned(d));
+        if (!pinned && !layoutFrozen) simulation.alphaTarget(0);
       }}
 
       function focusNode(nodeData) {{
@@ -1186,14 +1176,9 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
 
       function handleNodeClick(event, nodeData) {{
         event.stopPropagation();
-        if (event.altKey || event.metaKey) {{
-          focusNode(nodeData);
-          return;
-        }}
-        if (event.shiftKey || event.ctrlKey) {{
-          togglePin(nodeData, event.currentTarget);
-          return;
-        }}
+        if (event.altKey || event.metaKey) {{ focusNode(nodeData); return; }}
+        if (event.shiftKey || event.ctrlKey) {{ togglePin(nodeData, event.currentTarget); return; }}
+        
         selectedNode = nodeData;
         selectedEdge = null;
         refreshSelections();
@@ -1221,6 +1206,7 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
       function mergeExpandedGraph(graphPayload, expandedNode) {{
         if(!graphPayload) return false;
         let changed = false;
+        
         const incomingNodes = (graphPayload.nodes || []).map(n => ({{...n, id:String(n.id)}}));
         incomingNodes.forEach(n => {{
           if(!nodeMap.has(n.id)) {{
@@ -1235,72 +1221,79 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
         }});
 
         const existingEdgeIds = new Set(links.map(edgeKey));
-        const pivot = (meta && meta.pivot) ? meta.pivot : null;
         (graphPayload.edges || []).forEach(e => {{
           const sourceNode = nodeMap.get(String(e.source));
           const targetNode = nodeMap.get(String(e.target));
           if(!sourceNode || !targetNode) return;
+          
           const enriched = {{
             ...e,
             id: e.id ? String(e.id) : `${{sourceNode.id}}->${{targetNode.id}}:${{e.type || "REL"}}`,
             source: sourceNode,
             target: targetNode,
           }};
-          if (pivot && enriched.type === 'APPARTIENE_A') {{
-            const pid = String(pivot.id || '');
-            if (enriched.source.id !== pid && enriched.target.id !== pid) {{
-              return; // evita collegamenti verso altre ditte per coerenza visiva
-            }}
-          }}
+          
           const key = edgeKey(enriched);
           if(existingEdgeIds.has(key)) return;
           existingEdgeIds.add(key);
+          
           const withMark = expandedNode ? {{...enriched, _addedBy: expandedNode.id}} : enriched;
           links.push(withMark);
           changed = true;
         }});
 
-        if(expandedNode) {{
-          expandedNode._expanded = true;
-        }}
+        if(expandedNode) expandedNode._expanded = true;
         return changed;
       }}
 
+      // 🆕 ESPANSIONE CON DOPPIO CLICK (toggle collapse)
       async function expandNode(event, nodeData) {{
         event.stopPropagation();
         if(!nodeData || !nodeData.id) return;
-        // Toggle collapse se già espanso: rimuovi ciò che è stato aggiunto da questo nodo
+        
+        // COLLAPSE se già espanso
         if (nodeData._expanded) {{
           for (let i = links.length - 1; i >= 0; i--) {{
             if (links[i]._addedBy === nodeData.id) links.splice(i,1);
           }}
-          // eventuale rimozione nodi aggiunti (solo se non hanno altre connessioni)
-          const removedNodeIds = new Set();
-          // per semplicità non rimuoviamo nodi, evitiamo inconsistenze grafiche
           nodeData._expanded = false;
           updateGraph(true);
           handleNodeClick({{ stopPropagation: () => {{}} }}, nodeData);
           return;
         }}
+        
         if(nodeData._expanding) return;
         nodeData._expanding = true;
+        
         showInfoPanel({{
           title: getNodeLabel(nodeData),
           subtitle: "Espansione vicini",
           note: "Recupero del vicinato in corso..."
         }});
+        
         try {{
+          // 🆕 Passa pivot context se disponibile
+          const requestBody = {{
+            node_id: nodeData.id,
+            limit: 25
+          }};
+          
+          if (pivotContext) {{
+            requestBody.pivot_context = pivotContext;
+          }}
+          
           const response = await fetch(expandEndpoint, {{
             method: "POST",
             headers: {{"Content-Type":"application/json"}},
-            body: JSON.stringify({{node_id: nodeData.id, limit: 25}})
+            body: JSON.stringify(requestBody)
           }});
-          if(!response.ok) {{
-            throw new Error("Espansione non disponibile");
-          }}
+          
+          if(!response.ok) throw new Error("Espansione non disponibile");
+          
           const payload = await response.json();
           const graphPayload = (payload && payload.graph_data) || {{}};
           const changed = mergeExpandedGraph(graphPayload, nodeData);
+          
           if(changed) {{
             updateGraph(true);
             handleNodeClick({{ stopPropagation: () => {{}} }}, nodeData);
@@ -1322,7 +1315,7 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
         }}
       }}
 
-      // --- NODI E ARCHI ---
+      // NODI E ARCHI
       const nodes = rawNodes.map(n => ({{...n, id:String(n.id)}}));
       const nodeMap = new Map(nodes.map(n => [n.id, n]));
       const links = rawEdges.map(e => {{
@@ -1335,8 +1328,7 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
         return {{...e, id: edgeId, source: sourceNode, target: targetNode}};
       }}).filter(Boolean);
 
-      const zoom = d3
-        .zoom()
+      const zoom = d3.zoom()
         .scaleExtent([0.1, 4])
         .on("zoom", event => viewport.attr("transform", event.transform));
       svg.call(zoom).on("dblclick.zoom", null);
@@ -1345,13 +1337,9 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
       function pushCamState() {{
         const current = d3.zoomTransform(svg.node());
         camStack.push(current);
-        if (camStack.length > 50) {{
-          camStack.shift();
-        }}
+        if (camStack.length > 50) camStack.shift();
       }}
-      function popCamState() {{
-        return camStack.pop();
-      }}
+      function popCamState() {{ return camStack.pop(); }}
       function smooth(transform) {{
         svg.transition().duration(300).call(zoom.transform, transform);
       }}
@@ -1364,10 +1352,7 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
         smooth(d3.zoomIdentity);
       }}
       function fit(pushState = true) {{
-        if (!nodes.length) {{
-          resetView();
-          return;
-        }}
+        if (!nodes.length) {{ resetView(); return; }}
         const xs = nodes.map(n => n.x || 0);
         const ys = nodes.map(n => n.y || 0);
         const minX = Math.min(...xs);
@@ -1377,33 +1362,21 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
         const padding = 40;
         const boundsWidth = (maxX - minX) || 1;
         const boundsHeight = (maxY - minY) || 1;
-        const scale = Math.min(
-          (width - padding) / boundsWidth,
-          (height - padding) / boundsHeight,
-          4
-        );
+        const scale = Math.min((width - padding) / boundsWidth, (height - padding) / boundsHeight, 4);
         const tx = width / 2 - scale * (minX + maxX) / 2;
         const ty = height / 2 - scale * (minY + maxY) / 2;
         const transform = d3.zoomIdentity.translate(tx, ty).scale(scale);
-        if (pushState) {{
-          pushCamState();
-        }}
+        if (pushState) pushCamState();
         smooth(transform);
       }}
       function goBack() {{
         const previous = popCamState();
-        if (previous) {{
-          smooth(previous);
-        }}
+        if (previous) smooth(previous);
       }}
       pushCamState();
 
-      // --- SIMULAZIONE ---
-      const linkForce = d3.forceLink(links)
-        .id(d=>d.id)
-        .distance(140)
-        .strength(0.25);
-
+      // SIMULAZIONE
+      const linkForce = d3.forceLink(links).id(d=>d.id).distance(140).strength(0.25);
       const simulation = d3.forceSimulation(nodes)
         .force("link", linkForce)
         .force("charge", d3.forceManyBody().strength(-120))
@@ -1413,7 +1386,7 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
         .alphaDecay(0.12);
       simulation.on("tick", ticked);
 
-      // --- FRECCE ---
+      // FRECCE
       svg.append("defs").append("marker")
         .attr("id","arrowhead").attr("viewBox","0 -5 10 10")
         .attr("refX",28).attr("refY",0)
@@ -1432,20 +1405,12 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
       let label = labelGroup.selectAll("text");
 
       function ticked() {{
-        link
-          .attr("x1", d => d.source.x)
-          .attr("y1", d => d.source.y)
-          .attr("x2", d => d.target.x)
-          .attr("y2", d => d.target.y);
-        node
-          .attr("cx", d => d.x)
-          .attr("cy", d => d.y);
-        label
-          .attr("x", d => d.x)
-          .attr("y", d => d.y - 28);
-        edgeLabel
-          .attr("x", d => (d.source.x + d.target.x) / 2)
-          .attr("y", d => (d.source.y + d.target.y) / 2 - 8);
+        link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+            .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+        node.attr("cx", d => d.x).attr("cy", d => d.y);
+        label.attr("x", d => d.x).attr("y", d => d.y - 28);
+        edgeLabel.attr("x", d => (d.source.x + d.target.x) / 2)
+                 .attr("y", d => (d.source.y + d.target.y) / 2 - 8);
       }}
 
       function getNodeLabel(d){{
@@ -1455,8 +1420,7 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
                (d.labels&&d.labels[0])||String(d.id).substring(0,8);
       }}
 
-      // Filtri per etichette (visibilità) applicati lato client
-      let visibleLabels = new Set();
+      // 🆕 FILTRI VISIBILITÀ
       function applyVisibilityFilters() {{
         node.style("display", d => {{
           const lbl = (d.labels && d.labels[0]) || 'Node';
@@ -1480,12 +1444,19 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
 
       function updateLegend() {{
         const uniqueLabels = Array.from(new Set(nodes.flatMap(n => n.labels || ["Node"])));
+        
+        // Inizializza visibleLabels se vuoto
+        if (visibleLabels.size === 0) {{
+          uniqueLabels.forEach(l => visibleLabels.add(l));
+        }}
+        
         const resultCount = (meta && meta.result_node_ids && meta.result_node_ids.length)
           ? meta.result_node_ids.length
           : nodes.filter(n => n.isResult).length;
         const nodeCount = nodes.length;
         const linkCount = links.length;
         const resultsPart = resultCount ? (' · Risultati: ' + String(resultCount)) : '';
+        
         let head = '';
         head += "<div style='margin-bottom:6px;'>";
         head += "<strong style='color:#38bdf8; font-size: 1.05rem;'>Legenda</strong>";
@@ -1495,6 +1466,7 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
                 resultsPart +
                 "</div>";
         head += "</div>";
+        
         const labelsHtml = uniqueLabels.map(lbl => {{
           const col = color(lbl);
           return (
@@ -1505,32 +1477,48 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
             "</span>"
           );
         }}).join("<br/>");
-        if (visibleLabels.size === 0) {{ uniqueLabels.forEach(l => visibleLabels.add(l)); }}
+        
+        // 🆕 FILTRI CHECKBOX
         const filtersHtml = uniqueLabels.map(lbl => {{
           const checked = visibleLabels.has(lbl) ? 'checked' : '';
           return (
-            "<label style='display:flex;align-items:center;gap:6px;margin-top:4px;'>" +
+            "<label style='display:flex;align-items:center;gap:6px;margin-top:4px; cursor:pointer;'>" +
             "<input class='legend-filter' type='checkbox' data-label='" + String(lbl) + "' " + checked + " />" +
             "<span>" + String(lbl) + "</span>" +
             "</label>"
           );
         }}).join("");
+        
         let legendHtml = head + labelsHtml +
           "<hr style='border-color:rgba(59,130,246,0.15);margin:6px 0;' />" +
-          "<div style='font-size:0.85rem;color:#cbd5e1;margin-bottom:4px;'>Filtri etichette</div>" +
+          "<div style='font-size:0.85rem;color:#cbd5e1;margin-bottom:4px;'>🔍 Filtri label</div>" +
           filtersHtml;
+        
         if(meta && meta.stub_nodes_added) {{
           legendHtml += "<hr style='border-color:rgba(59,130,246,0.35);margin:6px 0;' />";
           legendHtml += "<span style='display:flex;align-items:center;gap:8px;font-size:0.9rem;'><span style='width:12px;height:12px;border-radius:50%;border:2px dashed rgba(148,163,184,0.9);'></span>Segnaposto (nessun nodo Neo4j trovato)</span>";
         }}
+        
+        if (pivotContext) {{
+          legendHtml += "<hr style='border-color:rgba(59,130,246,0.35);margin:6px 0;' />";
+          legendHtml += "<div style='font-size:0.85rem;color:#facc15;'><strong>🎯 Pivot attivo:</strong> " + 
+                        String(pivotContext.label) + " = " + String(pivotContext.value) + "</div>";
+          legendHtml += "<div style='font-size:0.75rem;color:#94a3b8;margin-top:2px;'>Le espansioni filtreranno solo relazioni verso questo pivot</div>";
+        }}
+        
         legendHtml += "<hr style='border-color:rgba(59,130,246,0.15);margin:6px 0;' />";
-        legendHtml += "<span style='font-size:0.85rem;color:#94a3b8;'>Clic: dettagli · Alt/⌘: focus · Shift/Ctrl: blocca · Doppio click: espandi</span>";
+        legendHtml += "<span style='font-size:0.85rem;color:#94a3b8;'>Clic: dettagli · Alt/⌘: focus · Shift/Ctrl: blocca · Doppio click: espandi/collassa</span>";
+        
         legend.html(legendHtml);
-        d3.selectAll(`#${element_id}-legend input.legend-filter`).on('change', function(){{
+        
+        // Listener per filtri
+        d3.selectAll(`#{element_id}-legend input.legend-filter`).on('change', function(){{
           const lbl = this.getAttribute('data-label');
-          if (this.checked) visibleLabels.add(lbl); else visibleLabels.delete(lbl);
+          if (this.checked) visibleLabels.add(lbl); 
+          else visibleLabels.delete(lbl);
           applyVisibilityFilters();
         }});
+        
         applyVisibilityFilters();
       }}
 
@@ -1548,26 +1536,27 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
           }}
         }});
 
-        link = linkGroup.selectAll("line")
-          .data(links, edgeKey);
+        link = linkGroup.selectAll("line").data(links, edgeKey);
         link.exit().remove();
         const linkEnter = link.enter().append("line")
           .attr("stroke","#475569").attr("stroke-opacity",0.65)
           .attr("stroke-width",2).attr("marker-end","url(#arrowhead)")
           .style("cursor","pointer")
           .on("click", handleEdgeClick);
+        
+        // 🆕 Stile per edge stub (tratteggiati)
         link = linkEnter.merge(link)
-          .classed("selected", l => selectedEdge && edgeKey(l) === edgeKey(selectedEdge));
+          .classed("selected", l => selectedEdge && edgeKey(l) === edgeKey(selectedEdge))
+          .attr("stroke-dasharray", l => l._stub ? "5,5" : null)
+          .attr("stroke-opacity", l => l._stub ? 0.4 : 0.65);
 
-        edgeLabel = edgeLabelGroup.selectAll("text")
-          .data(links, edgeKey);
+        edgeLabel = edgeLabelGroup.selectAll("text").data(links, edgeKey);
         edgeLabel.exit().remove();
         const edgeLabelEnter = edgeLabel.enter().append("text")
           .attr("fill","#94a3b8").attr("font-size",10)
           .attr("text-anchor","middle").attr("font-family","Inter, monospace")
           .attr("font-weight","500");
-        edgeLabel = edgeLabelEnter.merge(edgeLabel)
-          .text(d => d.type || "REL");
+        edgeLabel = edgeLabelEnter.merge(edgeLabel).text(d => d.type || "REL");
 
         node = nodeGroup.selectAll("circle").data(nodes, d => d.id);
         node.exit().remove();
@@ -1581,9 +1570,11 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
           .on("mouseout", hideTooltip)
           .on("click", handleNodeClick)
           .on("dblclick", expandNode);
+        
         node = nodeEnter.merge(node)
           .attr("fill", d => color((d.labels && d.labels[0]) || "Node"))
           .classed("result-node", d => !!d.isResult)
+          .classed("pivot-node", d => !!d.isPivot)  // 🆕 Stile pivot
           .classed("expanded-node", d => !!d._expanded)
           .classed("selected", n => selectedNode && n.id === selectedNode.id)
           .classed("pinned", d => isPinned(d));
@@ -1594,14 +1585,11 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
           .attr("fill","#f1f5f9").attr("font-size",12).attr("text-anchor","middle")
           .attr("font-family","Inter, sans-serif").attr("font-weight","600")
           .attr("pointer-events","none");
-        label = labelEnter.merge(label)
-          .text(getNodeLabel);
+        label = labelEnter.merge(label).text(getNodeLabel);
 
         simulation.nodes(nodes);
         linkForce.links(links);
-        if(restart){{
-          simulation.alpha(0.9).restart();
-        }}
+        if(restart){{ simulation.alpha(0.9).restart(); }}
 
         updateLegend();
         refreshSelections();
@@ -1622,7 +1610,8 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
 
     }})();
     </script>
-        <style>
+    
+    <style>
       #{element_id} .btn {{
         background: rgba(15,23,42,0.85);
         color: #cbd5f5;
@@ -1654,6 +1643,13 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
         stroke-width: 3;
         filter: drop-shadow(0 0 8px rgba(56,189,248,0.4));
       }}
+      /* 🆕 STILE PIVOT HUB */
+      #{element_id} .nodes circle.pivot-node {{
+        stroke: #facc15;
+        stroke-width: 4;
+        filter: drop-shadow(0 0 15px rgba(250,204,21,0.7));
+        r: 25;
+      }}
       #{element_id} .nodes circle.pinned {{
         stroke: #facc15;
         stroke-width: 3;
@@ -1663,6 +1659,10 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
         stroke: #f97316;
         stroke-width: 3;
         filter: drop-shadow(0 0 10px rgba(249,115,22,0.45));
+      }}
+      #{element_id} .nodes circle.expanded-node {{
+        stroke: #10b981;
+        stroke-width: 2.5;
       }}
       #{element_id} .links line.selected {{
         stroke: #f97316;
@@ -1710,6 +1710,17 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
       #{element_id} .graph-info-panel .info-empty {{
         font-style: italic;
         color: #94a3b8;
+      }}
+      /* 🆕 Stile checkbox filtri */
+      #{element_id}-legend input[type="checkbox"] {{
+        cursor: pointer;
+        accent-color: #3b82f6;
+      }}
+      #{element_id}-legend label {{
+        user-select: none;
+      }}
+      #{element_id}-legend label:hover {{
+        color: #60a5fa;
       }}
     </style>
     """
@@ -1949,7 +1960,12 @@ def process_query(prompt):
 
             # Chiamata API
             payload = {"question": prompt, "user_id": st.session_state.user_id}
-            response = requests.post(API_URL, json=payload, timeout=300)
+            headers = {}
+            if st.session_state.get("auth_token"):
+                headers["Authorization"] = f"Bearer {st.session_state['auth_token']}"
+            response = requests.post(
+                API_URL, json=payload, headers=headers, timeout=300
+            )
 
             status_placeholder.empty()
 
@@ -2386,6 +2402,19 @@ else:
     show_context = False
     show_query = False
     show_graph = True  # Puoi decidere se tenerlo True per i clienti
+
+    with st.expander("🔐 Autenticazione", expanded=False):
+        st.caption(
+            "Incolla il tuo Bearer token Keycloak per accedere ai servizi protetti."
+        )
+        token_in = st.text_input(
+            "Bearer token",
+            value=st.session_state.get("auth_token", ""),
+            type="password",
+        )
+        if st.button("Usa questo token"):
+            st.session_state.auth_token = token_in or ""
+            st.success("Token aggiornato. Le prossime chiamate useranno questo token.")
     show_table = True  # Puoi decidere se tenerlo True per i clienti
     show_suggestions = True  # Puoi decidere se tenerlo True per i clienti
 

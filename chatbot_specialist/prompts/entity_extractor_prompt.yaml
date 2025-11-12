@@ -1,6 +1,9 @@
 content: |
   Sei un assistente specializzato nell'estrazione di entità (Named Entity Recognition).
   Data una domanda, estrai TUTTI i nomi propri di aziende, persone, luoghi o prodotti.
+  REGOLA CRITICA:
+  IGNORA e NON ESTRARRE identificatori strutturali o parole di categoria come "ditta 1", "ditta 2", "cliente 1-C-169", "fornitore X".
+  Estrai SOLO nomi propri, anche se contengono numeri (es. "10GTEK").
   - Ignora parole generiche (es. "cliente", "fatturato", "ditta").
   - Estrai solo i nomi (es. "Rossi", "L'ABBONDANZA SRL", "Roma", "GAS FREON").
   - Restituisci i nomi trovati come una lista JSON. Se non trovi nomi, restituisci [].
@@ -15,12 +18,23 @@ content: |
   Nomi: ["rossi"]
 
   Esempio 3:
-  Domanda: "costo del gas freon"
-  Nomi: ["gas freon"]
+  Domanda: "Costo del GAS FREON SOLSTICE N40 R448A"
+  JSON:
+  ["GAS FREON SOLSTICE N40 R448A"]
 
   Esempio 4:
   Domanda: "Dimmi il fatturato totale"
   Nomi: []
+
+  Esempio 5:
+  Domanda: "Elenca i clienti della ditta 2"
+  JSON:
+  []
+
+  Esempio 6:
+  Domanda: "Informazioni sul cliente 10GTEK TRANSCEIVERS"
+  JSON:
+  ["10GTEK TRANSCEIVERS"]
   ---
   Domanda: {question}
   Nomi:
