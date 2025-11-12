@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from langchain_neo4j import Neo4jGraph
 from langchain_core.output_parsers import StrOutputParser
@@ -269,6 +270,12 @@ logger = logging.getLogger(__name__)
 
 # CONFIGURAZIONE FASTAPI E CACHE (DA CONFIG)
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Cache per query Cypher (parametri da config/system.yaml)
 query_cache = TTLCache(
@@ -1624,7 +1631,7 @@ def _get_preferred_labels_for_route(specialist_route: str) -> List[str]:
     return intent_map.get(specialist_route, []) or []
 
 
-MEMORY_KEY_MIN_SIMILARITY = RESOLVER_CFG.get("memory_key_min_similarity", 0.90)
+MEMORY_KEY_MIN_SIMILARITY = RESOLVER_CFG.get("memory_key_min_similarity", 0.95)
 
 
 def _find_best_memory_key(
@@ -1665,16 +1672,20 @@ def _get_memory_resolution(
     """
     Recupera l'entità dalla memoria, MA solo se compatibile con le preferred_labels.
     Compatibile = nessuna preferenza OPPURE label salvata ∈ preferred_labels.
+    Usa chiavi normalizzate + alias ad alta similarità.
     """
-    # Usa lo stesso store usato in _save_memory_resolution
     mem_store = getattr(session, "resolved_entities", None)
     if not mem_store:
         return None
 
+    # 1) prova chiave esatta
     effective_key = term_key
-    alias_key = _find_best_memory_key(mem_store, term_key)
-    if alias_key is not None:
-        effective_key = alias_key
+
+    # 2) se non c'è, prova alias molto simile
+    if effective_key not in mem_store:
+        alias_key = _find_best_memory_key(mem_store, term_key)
+        if alias_key is not None:
+            effective_key = alias_key
 
     entry = mem_store.get(effective_key)
     if not entry:
@@ -1686,30 +1697,30 @@ def _get_memory_resolution(
     if "name" in entry and "label" in entry:
         # compat vecchio formato
         saved_label = entry.get("label")
+
         if not preferred_labels or saved_label in preferred_labels:
             return entry
-        else:
-            logger.info(
-                "[Resolver P1 Memory] '%s' in memoria solo come %s, non compatibile con preferenze %s. Non la uso.",
-                term_key,
-                saved_label,
-                preferred_labels,
-            )
-            return None
+
+        logger.info(
+            "[Resolver P1 Memory] '%s' in memoria solo come %s, non compatibile con preferenze %s. Non la uso.",
+            term_key,
+            saved_label,
+            preferred_labels,
+        )
+        return None
 
     # formato nuovo: multi-ruolo
-    # Nessuna preferenza → puoi prendere qualcosa a caso (es. prima entry)
     if not preferred_labels:
-        # prendi il primo ruolo salvato
+        # nessuna preferenza → prendo il primo ruolo salvato
         first = next(iter(entry.values()))
         return first
 
-    # Con preferenze: prova a trovare un ruolo compatibile
+    # con preferenze: prova ruoli compatibili
     for label in preferred_labels:
         if label in entry:
             return entry[label]
 
-    # Qui: memoria esiste ma solo con ruoli non compatibili
+    # qui: memoria esiste ma solo con ruoli NON compatibili
     logger.info(
         "[Resolver P1 Memory] '%s' in memoria solo con ruoli %s, non compatibili con preferenze %s. Non la uso.",
         term_key,
@@ -1720,27 +1731,54 @@ def _get_memory_resolution(
 
 
 def _save_memory_resolution(
-    session: ConversationSession,
-    term_key: str,
+    session: "ConversationSession",
+    original_name: str,
     resolution: Dict[str, Any],
 ) -> None:
     """
-    Salva (o aggiorna) la memoria multi-ruolo per un termine.
+    Salva (o aggiorna) la memoria per un termine, usando:
+      - chiave normalizzata dell'ORIGINALE (es. "l'abbondanza")
+      - chiave normalizzata del nome CANONICO (es. "L'ABBONDANZA SRL")
+
+    Così tutte le varianti ("abbondanza", "l'abbondanza srl", ecc.)
+    collassano sullo stesso slot di memoria.
     """
-    existing = session.resolved_entities.get(term_key)
+    if not hasattr(session, "resolved_entities"):
+        session.resolved_entities = {}
 
-    # Compat vecchio formato
-    if isinstance(existing, dict) and "name" in existing and "label" in existing:
-        existing = {existing["label"]: existing}
+    store: Dict[str, Dict[str, Dict[str, Any]]] = session.resolved_entities
 
-    if not existing:
-        existing = {}
+    # chiave normalizzata dell'input utente
+    original_key = _normalize_entity_key(original_name)
+
+    # chiave normalizzata del nome canonico (DB)
+    canonical_name = resolution.get("name") or original_name
+    canonical_key = _normalize_entity_key(canonical_name)
 
     label = resolution.get("label") or "UNKNOWN"
-    existing[label] = resolution
-    session.resolved_entities[term_key] = existing
 
-    logger.info(f"[Resolver Memory] Salvataggio: '{term_key}'[{label}] = {resolution}")
+    for term_key in {original_key, canonical_key}:
+        if not term_key:
+            continue
+
+        existing = store.get(term_key)
+
+        # compat col vecchio formato: {"name": "...", "label": "..."}
+        if isinstance(existing, dict) and "name" in existing and "label" in existing:
+            existing = {existing["label"]: existing}
+
+        if not existing:
+            existing = {}
+
+        existing[label] = resolution
+        store[term_key] = existing
+
+        logger.info(
+            "[Resolver Memory] Salvataggio: '%s'[%s] = %s",
+            term_key,
+            label,
+            resolution,
+        )
 
 
 def _augment_english_task_with_entity_hints(
@@ -3282,6 +3320,7 @@ def _build_graph_from_entity_candidates(
     combined_records: List[Dict[str, Any]] = []
     highlight_ids: Set[str] = set()
     unresolved: List[Dict[str, str]] = []
+    # Applica un tetto complessivo al numero di nodi che vogliamo riportare
     remaining = max(1, min(int(limit or GRAPH_DEFAULT_LIMIT), GRAPH_MAX_LIMIT))
 
     seen: Set[Tuple[str, str]] = set()
@@ -3296,19 +3335,18 @@ def _build_graph_from_entity_candidates(
             continue
         seen.add(key)
 
+        # Query mirata: recupera SOLO il nodo del risultato, 1 per candidato
         query = (
             f"MATCH (n:`{label}`) "
             f"WHERE toLower(trim(n.{prop})) = toLower(trim($value)) "
-            "WITH n LIMIT 1 "
-            "OPTIONAL MATCH (n)-[r]-(m) "
-            "RETURN n AS result_node, r, m "
-            "LIMIT $limit"
+            "RETURN n AS result_node "
+            "LIMIT 1"
         )
 
+        if remaining <= 0:
+            break
         try:
-            records = execute_cypher_with_records(
-                query, {"value": value, "limit": remaining}
-            )
+            records = execute_cypher_with_records(query, {"value": value})
         except Neo4jError as exc:
             logger.warning("Graph lookup fallita per %s='%s': %s", label, value, exc)
             unresolved.append(cand)
@@ -3317,13 +3355,21 @@ def _build_graph_from_entity_candidates(
         if not records:
             unresolved.append(cand)
             continue
-        combined_records.extend(records)
-        for rec in records:
+        # Accumula al massimo 'remaining' record totali
+        take = min(len(records), max(0, remaining))
+        if take <= 0:
+            break
+        selected = records[:take]
+        combined_records.extend(selected)
+        remaining -= take
+        for rec in selected:
             node = rec.get("result_node")
             if isinstance(node, Node):
                 node_id = _extract_node_identity(node)
                 if node_id:
                     highlight_ids.add(node_id)
+        if remaining <= 0:
+            break
 
     graph_payload: Dict[str, Any] = {}
     lookup_hit = False
@@ -3334,7 +3380,8 @@ def _build_graph_from_entity_candidates(
             lookup_hit = True
 
     stub_highlight: Set[str] = set()
-    if unresolved:
+    # Mostra nodi segnaposto solo se non abbiamo trovato risultati effettivi.
+    if unresolved and not lookup_hit:
         if not graph_payload:
             graph_payload = {"nodes": [], "edges": []}
         nodes = graph_payload.setdefault("nodes", [])
@@ -3779,7 +3826,19 @@ def build_graph_payload_from_results(
             )
             return graph_from_ids, "result_nodes_lookup"
 
-    # SECONDA: prova a ricostruire dalla query
+    # Ricostruzione dalla query può produrre un sottoinsieme NON allineato
+    # con l'ordinamento/limit dei risultati testuali (es. solo campi scalari).
+    # Per mantenere coerenza 1:1 con la risposta, se non abbiamo ids da evidenziare
+    # (tipico dei risultati aggregati/scalari), lasciamo vuoto: l'orchestratore
+    # effettuerà il "second hop" basato sui valori testuali (lookup mirato),
+    # garantendo corrispondenza con le righe mostrate al sintetizzatore.
+    if not (highlight_node_ids and len(highlight_node_ids) > 0):
+        logger.info(
+            "Nessun nodo nei records e nessun id noto: salto ricostruzione per favorire second hop"
+        )
+        return {}, "no_nodes_detected"
+
+    # SECONDA: prova a ricostruire dalla query (solo se abbiamo id noti)
     logger.info("Nessun grafo nei records, tento ricostruzione dalla query")
     rebuilt_graph = _reconstruct_graph_from_query(query, limit=limit)
     if rebuilt_graph and rebuilt_graph.get("nodes"):
@@ -3807,6 +3866,117 @@ def build_graph_payload_from_results(
         record_count=len(records or []),
     )
     return empty, "no_nodes_detected"
+
+
+def _infer_pivot_from_query(query: str) -> Optional[Dict[str, str]]:
+    """Prova a inferire un 'pivot' (es. Ditta con un valore fissato) dalla query.
+
+    Ritorna un dict con: {label, var, prop, value, rel_type} se individuato.
+    """
+    try:
+        if not query:
+            return None
+        q = " ".join(query.split())
+        # Cerca pattern (c:Cliente)-[:REL]->(d:Ditta)
+        m = re.search(r"\(([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*Cliente\)\s*-\s*\[:\s*([A-Z0-9_]+)\s*\]\s*->\s*\(([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*Ditta\)", q)
+        if not m:
+            return None
+        cvar, rel_type, dvar = m.group(1), m.group(2), m.group(3)
+        # WHERE d.xxx = 'val' oppure = 123
+        w = re.search(rf"WHERE\s+{dvar}\.([a-zA-Z0-9_`]+)\s*=\s*([\"']?)([^\"'\s]+)\2", q, re.IGNORECASE)
+        if not w:
+            return None
+        prop = w.group(1).strip("`")
+        value = w.group(3)
+        return {"label": "Ditta", "var": dvar, "prop": prop, "value": value, "rel_type": rel_type}
+    except Exception:
+        return None
+
+
+def _attach_pivot_hub(graph_payload: Dict[str, Any], pivot: Dict[str, str], result_ids: Optional[Set[str]], *, limit: Optional[int]) -> None:
+    """Aggiunge al grafo il nodo pivot (es. Ditta) e collega i nodi risultato che hanno la relazione indicata verso tale pivot.
+
+    Questo rende il grafo più leggibile (hub centrale) senza alterare i nodi risultato.
+    """
+    if not graph_payload or not graph_payload.get("nodes"):
+        return
+    try:
+        # 1) Recupera il nodo pivot da DB
+        label = pivot.get("label") or "Ditta"
+        prop = pivot.get("prop") or "name"
+        value = pivot.get("value") or ""
+        rel_type = pivot.get("rel_type") or "APPARTIENE_A"
+        if not value:
+            return
+
+        # Usa confronto case-insensitive per stringhe, equality per numerici
+        is_numeric = re.fullmatch(r"-?\d+(?:\.\d+)?", value or "") is not None
+        if is_numeric:
+            node_query = f"MATCH (d:`{label}`) WHERE d.{prop} = $v RETURN d LIMIT 1"
+            params = {"v": float(value) if "." in value else int(value)}
+        else:
+            node_query = (
+                f"MATCH (d:`{label}`) WHERE toLower(trim(d.{prop})) = toLower(trim($v)) RETURN d LIMIT 1"
+            )
+            params = {"v": value}
+        recs = execute_cypher_with_records(node_query, params)
+        if not recs:
+            return
+        pivot_node = None
+        for r in recs:
+            cand = r.get("d")
+            if isinstance(cand, Node):
+                pivot_node = cand
+                break
+        if not pivot_node:
+            return
+
+        pivot_payload = _node_to_payload(pivot_node)
+        pivot_id = pivot_payload.get("id")
+        if not pivot_id:
+            return
+
+        nodes = graph_payload.setdefault("nodes", [])
+        edges = graph_payload.setdefault("edges", [])
+        existing_ids = {str(n.get("id")) for n in nodes if n and n.get("id")}
+        if pivot_id not in existing_ids:
+            nodes.append(pivot_payload)
+            existing_ids.add(pivot_id)
+
+        # 2) Collega i nodi risultato al pivot se la relazione esiste in DB
+        result_ids = result_ids or set()
+        if not result_ids:
+            # se non abbiamo highlight, collega tutti i nodi correnti etichettati Cliente
+            result_ids = {str(n.get("id")) for n in nodes if n and "Cliente" in (n.get("labels") or [])}
+
+        if not result_ids:
+            return
+
+        edge_query = (
+            f"UNWIND $ids AS eid "
+            f"MATCH (c) WHERE elementId(c)=eid "
+            f"MATCH (c)-[r:`{rel_type}`]->(d) WHERE elementId(d)=$pid "
+            f"RETURN r LIMIT $lim"
+        )
+        lim = max(1, min(int(limit or GRAPH_DEFAULT_LIMIT), GRAPH_MAX_LIMIT))
+        erecs = execute_cypher_with_records(edge_query, {"ids": list(result_ids), "pid": pivot_id, "lim": lim})
+        if not erecs:
+            return
+        # Aggiungi relazioni
+        edge_map = {str(e.get("id")) for e in edges if e and e.get("id")}
+        for er in erecs:
+            rel = er.get("r")
+            if isinstance(rel, Relationship):
+                ep = _relationship_to_payload(rel)
+                eid = str(ep.get("id"))
+                if eid and eid not in edge_map:
+                    edges.append(ep)
+                    edge_map.add(eid)
+        # meta pivot
+        meta = graph_payload.setdefault("meta", {})
+        meta["pivot"] = {"id": pivot_id, "label": label, "prop": prop, "value": value, "rel_type": rel_type}
+    except Exception as exc:
+        logger.warning("Impossibile collegare il pivot al grafo: %s", exc)
 
 
 def _extract_variables_from_query(query_prefix: str) -> Tuple[List[str], List[str]]:
@@ -3932,6 +4102,16 @@ class UserQuestionWithSession(BaseModel):
     examples_top_k: Optional[int] = None  # override top-k per RAG (opzionale)
 
 
+class GraphExpandRequest(BaseModel):
+    node_id: str = Field(..., description="elementId del nodo da espandere")
+    limit: Optional[int] = Field(
+        default=None,
+        description="Numero massimo di relazioni da recuperare",
+        ge=1,
+        le=GRAPH_MAX_LIMIT,
+    )
+
+
 # =======================================================================
 @app.get("/health")
 async def health_check():
@@ -3950,6 +4130,36 @@ async def health_check():
 
 
 # ENDPOINT PER LE DOMANDE
+@app.post("/graph/expand")
+async def expand_graph(request: GraphExpandRequest):
+    """Recupera il vicinato diretto di un nodo a partire dal suo elementId."""
+    node_id = (request.node_id or "").strip()
+    if not node_id:
+        raise HTTPException(status_code=400, detail="node_id richiesto")
+
+    limit = request.limit or GRAPH_DEFAULT_LIMIT
+    try:
+        limit_int = max(1, min(int(limit), GRAPH_MAX_LIMIT))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="limit non valido")
+
+    try:
+        graph_payload = fetch_graph_from_ids([node_id], limit_int)
+    except Neo4jError as exc:
+        logger.error("Errore durante l'espansione del grafo: %s", exc)
+        raise HTTPException(
+            status_code=500, detail="Errore durante l'espansione del grafo"
+        ) from exc
+
+    if not graph_payload or not graph_payload.get("nodes"):
+        return {"graph_data": {}}
+
+    meta = graph_payload.setdefault("meta", {})
+    meta["source"] = "expand_neighbors"
+    meta["limit"] = limit_int
+    meta["expanded_node"] = node_id
+
+    return {"graph_data": graph_payload}
 
 
 # ENDPOINT PER LE DOMANDE
@@ -4877,15 +5087,14 @@ async def ask_question(user_question: UserQuestionWithSession):
                 graph_origin = "result_nodes_lookup"
                 if fallback_highlight:
                     highlight_ids = fallback_highlight
+        # Prova ad attaccare un nodo pivot (es. Ditta) se la query lo definisce chiaramente
+        try:
+            pivot = _infer_pivot_from_query(generated_query or "")
+            if pivot and graph_payload and graph_payload.get("nodes"):
+                _attach_pivot_hub(graph_payload, pivot, highlight_ids, limit=graph_limit)
+        except Exception as _:
+            pass
 
-        elif GRAPH_HIGHLIGHT_RESULTS and (not highlight_ids) and value_candidates:
-            fallback_graph, fallback_highlight = _build_graph_from_entity_candidates(
-                value_candidates, graph_limit
-            )
-            if fallback_graph and fallback_graph.get("nodes"):
-                graph_payload = fallback_graph
-                graph_origin = "result_nodes_lookup"
-                highlight_ids = fallback_highlight
         timing_details["graph_origin"] = graph_origin
         sanitized_context = make_context_json_serializable(context_da_inviare)
         context_str_for_llm = json.dumps(

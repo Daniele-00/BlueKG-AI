@@ -751,6 +751,7 @@ HEALTH_URL = "http://localhost:8000/health"
 CACHE_URL = "http://localhost:8000/cache"
 CONVERSATION_URL = "http://localhost:8000/conversation"
 FEEDBACK_URL = "http://localhost:8000/feedback"
+GRAPH_EXPAND_URL = "http://localhost:8000/graph/expand"
 SLOW_QUERY_LOG_PATH = Path("diagnostics/slow_queries.log")
 
 # --- INIZIALIZZAZIONE STATO SESSIONE ---
@@ -958,6 +959,7 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
     (function() {{
       const rawNodes = {nodes_json};
       const rawEdges = {edges_json};
+      const expandEndpoint = "{GRAPH_EXPAND_URL}";
       const width = 780, height = 580;
 
       const svg = d3.select("#{element_id}-svg")
@@ -986,32 +988,430 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
       infoPanel.on("click", ev => ev.stopPropagation());
       const color = d3.scaleOrdinal(d3.schemeCategory10);
       const meta = {meta_json};
+      const legend = d3.select("#{element_id}-legend");
+      const container = document.getElementById("{element_id}");
+      const edgeKey = edge => {{
+        if(!edge) return "";
+        const src = edge.source && edge.source.id ? edge.source.id : edge.source;
+        const tgt = edge.target && edge.target.id ? edge.target.id : edge.target;
+        const rel = edge.type || "REL";
+        return `${{src}}->${{tgt}}:${{rel}}`;
+      }};
+
+      const zoomInBtn = document.getElementById("{element_id}-zoom-in");
+      const zoomOutBtn = document.getElementById("{element_id}-zoom-out");
+      const fitBtn = document.getElementById("{element_id}-fit");
+      const resetBtn = document.getElementById("{element_id}-reset");
+      const backBtn = document.getElementById("{element_id}-back");
+      const freezeBtn = document.getElementById("{element_id}-freeze");
+      const restoreBtn = document.getElementById("{element_id}-restore");
+      let layoutFrozen = false;
 
       let selectedNode = null;
       let selectedEdge = null;
+
+      function escapeHtml(value) {{
+        return String(value)
+          .replace(/&/g,"&amp;")
+          .replace(/</g,"&lt;")
+          .replace(/>/g,"&gt;")
+          .replace(/\"/g,"&quot;")
+          .replace(/'/g,"&#39;");
+      }}
+
+      function formatValue(value) {{
+        if (value === null || value === undefined || value === "") return "-";
+        if (Array.isArray(value)) {{
+          if (!value.length) return "-";
+          return value
+            .map(v => (typeof v === "object" ? JSON.stringify(v) : String(v)))
+            .join(", ");
+        }}
+        if (typeof value === "object") {{
+          try {{ return JSON.stringify(value); }}
+          catch (err) {{ return "[oggetto]"; }}
+        }}
+        return String(value);
+      }}
+
+      function buildRowsFromObject(obj) {{
+        if(!obj) return [];
+        return Object.keys(obj)
+          .sort()
+          .map(key => ({{
+            label: key,
+            value: formatValue(obj[key])
+          }}));
+      }}
+
+      function showTooltip(event, nodeData) {{
+        if(!nodeData) return;
+        const rows = buildRowsFromObject(nodeData.properties || {{}}).slice(0,6);
+        let html = `<div style='font-weight:600;margin-bottom:4px;'>${{escapeHtml(getNodeLabel(nodeData))}}</div>`;
+        if(rows.length) {{
+          html += rows
+            .map(row => `<div><span style='color:#94a3b8'>${{escapeHtml(row.label)}}:</span> ${{escapeHtml(row.value)}}</div>`)
+            .join("");
+        }} else {{
+          html += "<div>Nessuna proprietà disponibile</div>";
+        }}
+        tooltip.html(html).style("display","block");
+        moveTooltip(event);
+      }}
+
+      function moveTooltip(event) {{
+        if(!event || !container) return;
+        const bounds = container.getBoundingClientRect();
+        const x = event.pageX - bounds.left + 12;
+        const y = event.pageY - bounds.top + 12;
+        tooltip.style("left", `${{x}}px`).style("top", `${{y}}px`);
+      }}
+
+      function hideTooltip() {{
+        tooltip.style("display","none");
+      }}
+
+      function showInfoPanel(payload) {{
+        if(!payload) {{
+          infoPanel.style("display","none").html("");
+          return;
+        }}
+        const rows = payload.rows || [];
+        const rowsHtml = rows.length
+          ? rows
+              .map(
+                row => `<div class="info-row"><span>${{escapeHtml(row.label)}}</span><span>${{escapeHtml(row.value)}}</span></div>`
+              )
+              .join("")
+          : '<div class="info-empty">Nessuna informazione disponibile</div>';
+        const subtitleHtml = payload.subtitle
+          ? `<div class="info-subtitle">${{escapeHtml(payload.subtitle)}}</div>`
+          : "";
+        const noteHtml = payload.note
+          ? `<div class="info-note">${{escapeHtml(payload.note)}}</div>`
+          : "";
+        infoPanel
+          .style("display","block")
+          .html(
+            `<div class="info-title">${{escapeHtml(payload.title || "Dettagli nodo")}}</div>` +
+            subtitleHtml +
+            `<div class="info-block">${{rowsHtml}}</div>` +
+            noteHtml
+          );
+      }}
+
+      function updateFreezeButton() {{
+        if (!freezeBtn) return;
+        freezeBtn.textContent = layoutFrozen ? "Riprendi" : "Freeze";
+        freezeBtn.classList.toggle("active", layoutFrozen);
+      }}
+
+      function toggleFreeze() {{
+        layoutFrozen = !layoutFrozen;
+        if (layoutFrozen) {{
+          simulation.stop();
+        }} else {{
+          simulation.alpha(0.6).restart();
+        }}
+        updateFreezeButton();
+      }}
+
+      function restoreLayout() {{
+        layoutFrozen = false;
+        updateFreezeButton();
+        nodes.forEach(n => {{
+          n.fx = null;
+          n.fy = null;
+        }});
+        if (node) {{
+          node.classed("pinned", false);
+        }}
+        camStack.length = 0;
+        pushCamState();
+        clearSelection();
+        simulation.alpha(0.9).restart();
+        fit(false);
+      }}
+
+      function isPinned(nodeData) {{
+        if (!nodeData) return false;
+        return nodeData.fx != null || nodeData.fy != null;
+      }}
+
+      function togglePin(nodeData, element) {{
+        if (!nodeData) return;
+        const pinned = isPinned(nodeData);
+        if (pinned) {{
+          nodeData.fx = null;
+          nodeData.fy = null;
+        }} else {{
+          nodeData.fx = nodeData.x;
+          nodeData.fy = nodeData.y;
+          if (!layoutFrozen) {{
+            simulation.alphaTarget(0.3).restart();
+          }}
+        }}
+        if (element) {{
+          d3.select(element).classed("pinned", !pinned);
+        }}
+        if (node) {{
+          node.classed("pinned", d => isPinned(d));
+        }}
+        if (!pinned && !layoutFrozen) {{
+          simulation.alphaTarget(0);
+        }}
+      }}
+
+      function focusNode(nodeData) {{
+        if (!nodeData) return;
+        pushCamState();
+        const k = 1.5;
+        const tx = width / 2 - k * (nodeData.x || 0);
+        const ty = height / 2 - k * (nodeData.y || 0);
+        smooth(d3.zoomIdentity.translate(tx, ty).scale(k));
+      }}
+
+      function refreshSelections() {{
+        node.classed("selected", n => selectedNode && n.id === selectedNode.id);
+        link.classed("selected", l => selectedEdge && edgeKey(l) === edgeKey(selectedEdge));
+      }}
+
+      function clearSelection() {{
+        selectedNode = null;
+        selectedEdge = null;
+        refreshSelections();
+        hideTooltip();
+        showInfoPanel(null);
+      }}
+
+      function handleNodeClick(event, nodeData) {{
+        event.stopPropagation();
+        if (event.altKey || event.metaKey) {{
+          focusNode(nodeData);
+          return;
+        }}
+        if (event.shiftKey || event.ctrlKey) {{
+          togglePin(nodeData, event.currentTarget);
+          return;
+        }}
+        selectedNode = nodeData;
+        selectedEdge = null;
+        refreshSelections();
+        showInfoPanel({{
+          title: getNodeLabel(nodeData),
+          subtitle: (nodeData.labels || []).join(" · "),
+          rows: buildRowsFromObject(nodeData.properties || {{}})
+        }});
+      }}
+
+      function handleEdgeClick(event, edgeData) {{
+        event.stopPropagation();
+        selectedEdge = edgeData;
+        selectedNode = null;
+        refreshSelections();
+        const sourceLabel = (edgeData.source && edgeData.source.labels && edgeData.source.labels[0]) || "Nodo";
+        const targetLabel = (edgeData.target && edgeData.target.labels && edgeData.target.labels[0]) || "Nodo";
+        showInfoPanel({{
+          title: edgeData.type || "REL",
+          subtitle: `${{sourceLabel}} → ${{targetLabel}}`,
+          rows: buildRowsFromObject(edgeData.properties || {{}})
+        }});
+      }}
+
+      function mergeExpandedGraph(graphPayload, expandedNode) {{
+        if(!graphPayload) return false;
+        let changed = false;
+        const incomingNodes = (graphPayload.nodes || []).map(n => ({{...n, id:String(n.id)}}));
+        incomingNodes.forEach(n => {{
+          if(!nodeMap.has(n.id)) {{
+            nodes.push(n);
+            nodeMap.set(n.id, n);
+            changed = true;
+          }} else {{
+            const existing = nodeMap.get(n.id);
+            existing.labels = n.labels || existing.labels;
+            existing.properties = {{...(existing.properties || {{}}), ...(n.properties || {{}})}};
+          }}
+        }});
+
+        const existingEdgeIds = new Set(links.map(edgeKey));
+        const pivot = (meta && meta.pivot) ? meta.pivot : null;
+        (graphPayload.edges || []).forEach(e => {{
+          const sourceNode = nodeMap.get(String(e.source));
+          const targetNode = nodeMap.get(String(e.target));
+          if(!sourceNode || !targetNode) return;
+          const enriched = {{
+            ...e,
+            id: e.id ? String(e.id) : `${{sourceNode.id}}->${{targetNode.id}}:${{e.type || "REL"}}`,
+            source: sourceNode,
+            target: targetNode,
+          }};
+          if (pivot && enriched.type === 'APPARTIENE_A') {{
+            const pid = String(pivot.id || '');
+            if (enriched.source.id !== pid && enriched.target.id !== pid) {{
+              return; // evita collegamenti verso altre ditte per coerenza visiva
+            }}
+          }}
+          const key = edgeKey(enriched);
+          if(existingEdgeIds.has(key)) return;
+          existingEdgeIds.add(key);
+          const withMark = expandedNode ? {{...enriched, _addedBy: expandedNode.id}} : enriched;
+          links.push(withMark);
+          changed = true;
+        }});
+
+        if(expandedNode) {{
+          expandedNode._expanded = true;
+        }}
+        return changed;
+      }}
+
+      async function expandNode(event, nodeData) {{
+        event.stopPropagation();
+        if(!nodeData || !nodeData.id) return;
+        // Toggle collapse se già espanso: rimuovi ciò che è stato aggiunto da questo nodo
+        if (nodeData._expanded) {{
+          for (let i = links.length - 1; i >= 0; i--) {{
+            if (links[i]._addedBy === nodeData.id) links.splice(i,1);
+          }}
+          // eventuale rimozione nodi aggiunti (solo se non hanno altre connessioni)
+          const removedNodeIds = new Set();
+          // per semplicità non rimuoviamo nodi, evitiamo inconsistenze grafiche
+          nodeData._expanded = false;
+          updateGraph(true);
+          handleNodeClick({{ stopPropagation: () => {{}} }}, nodeData);
+          return;
+        }}
+        if(nodeData._expanding) return;
+        nodeData._expanding = true;
+        showInfoPanel({{
+          title: getNodeLabel(nodeData),
+          subtitle: "Espansione vicini",
+          note: "Recupero del vicinato in corso..."
+        }});
+        try {{
+          const response = await fetch(expandEndpoint, {{
+            method: "POST",
+            headers: {{"Content-Type":"application/json"}},
+            body: JSON.stringify({{node_id: nodeData.id, limit: 25}})
+          }});
+          if(!response.ok) {{
+            throw new Error("Espansione non disponibile");
+          }}
+          const payload = await response.json();
+          const graphPayload = (payload && payload.graph_data) || {{}};
+          const changed = mergeExpandedGraph(graphPayload, nodeData);
+          if(changed) {{
+            updateGraph(true);
+            handleNodeClick({{ stopPropagation: () => {{}} }}, nodeData);
+          }} else {{
+            showInfoPanel({{
+              title: getNodeLabel(nodeData),
+              subtitle: "Espansione vicini",
+              note: "Nessun vicino trovato."
+            }});
+          }}
+        }} catch (err) {{
+          console.error("Errore espansione nodo", err);
+          showInfoPanel({{
+            title: "Errore espansione",
+            note: err && err.message ? err.message : "Impossibile espandere il nodo."
+          }});
+        }} finally {{
+          nodeData._expanding = false;
+        }}
+      }}
 
       // --- NODI E ARCHI ---
       const nodes = rawNodes.map(n => ({{...n, id:String(n.id)}}));
       const nodeMap = new Map(nodes.map(n => [n.id, n]));
       const links = rawEdges.map(e => {{
-        const s=nodeMap.get(String(e.source)), t=nodeMap.get(String(e.target));
-        if(!s||!t) return null;
-        return {{...e, id:String(e.id), source:s, target:t}};
+        const sourceId = String(e.source);
+        const targetId = String(e.target);
+        const sourceNode = nodeMap.get(sourceId);
+        const targetNode = nodeMap.get(targetId);
+        if(!sourceNode || !targetNode) return null;
+        const edgeId = e.id ? String(e.id) : `${{sourceId}}->${{targetId}}:${{e.type || "REL"}}`;
+        return {{...e, id: edgeId, source: sourceNode, target: targetNode}};
       }}).filter(Boolean);
+
+      const zoom = d3
+        .zoom()
+        .scaleExtent([0.1, 4])
+        .on("zoom", event => viewport.attr("transform", event.transform));
+      svg.call(zoom).on("dblclick.zoom", null);
+
+      const camStack = [];
+      function pushCamState() {{
+        const current = d3.zoomTransform(svg.node());
+        camStack.push(current);
+        if (camStack.length > 50) {{
+          camStack.shift();
+        }}
+      }}
+      function popCamState() {{
+        return camStack.pop();
+      }}
+      function smooth(transform) {{
+        svg.transition().duration(300).call(zoom.transform, transform);
+      }}
+      function zoomBy(factor) {{
+        pushCamState();
+        svg.transition().duration(250).call(zoom.scaleBy, factor);
+      }}
+      function resetView() {{
+        pushCamState();
+        smooth(d3.zoomIdentity);
+      }}
+      function fit(pushState = true) {{
+        if (!nodes.length) {{
+          resetView();
+          return;
+        }}
+        const xs = nodes.map(n => n.x || 0);
+        const ys = nodes.map(n => n.y || 0);
+        const minX = Math.min(...xs);
+        const maxX = Math.max(...xs);
+        const minY = Math.min(...ys);
+        const maxY = Math.max(...ys);
+        const padding = 40;
+        const boundsWidth = (maxX - minX) || 1;
+        const boundsHeight = (maxY - minY) || 1;
+        const scale = Math.min(
+          (width - padding) / boundsWidth,
+          (height - padding) / boundsHeight,
+          4
+        );
+        const tx = width / 2 - scale * (minX + maxX) / 2;
+        const ty = height / 2 - scale * (minY + maxY) / 2;
+        const transform = d3.zoomIdentity.translate(tx, ty).scale(scale);
+        if (pushState) {{
+          pushCamState();
+        }}
+        smooth(transform);
+      }}
+      function goBack() {{
+        const previous = popCamState();
+        if (previous) {{
+          smooth(previous);
+        }}
+      }}
+      pushCamState();
 
       // --- SIMULAZIONE ---
       const linkForce = d3.forceLink(links)
         .id(d=>d.id)
-        .distance(120)
-        .strength(0.35);
+        .distance(140)
+        .strength(0.25);
 
       const simulation = d3.forceSimulation(nodes)
         .force("link", linkForce)
-        .force("charge", d3.forceManyBody().strength(-220))
+        .force("charge", d3.forceManyBody().strength(-120))
         .force("center", d3.forceCenter(width/2, height/2))
-        .force("collision", d3.forceCollide().radius(44).strength(0.9))
-        .velocityDecay(0.32)
-        .alphaDecay(0.08);
+        .force("collision", d3.forceCollide().radius(34).strength(0.85))
+        .velocityDecay(0.36)
+        .alphaDecay(0.12);
+      simulation.on("tick", ticked);
 
       // --- FRECCE ---
       svg.append("defs").append("marker")
@@ -1021,280 +1421,205 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
         .attr("orient","auto")
         .append("path").attr("d","M0,-5L10,0L0,5").attr("fill","#475569");
 
-      const link = linkGroup.selectAll("line")
-        .data(links).enter().append("line")
-        .attr("stroke","#475569").attr("stroke-opacity",0.65)
-        .attr("stroke-width",2).attr("marker-end","url(#arrowhead)")
-        .style("cursor","pointer")
-        .on("click", handleEdgeClick);
-
-      const edgeLabel = edgeLabelGroup.selectAll("text")
-        .data(links).enter().append("text")
-        .attr("fill","#94a3b8").attr("font-size",10)
-        .attr("text-anchor","middle").attr("font-family","Inter, monospace")
-        .attr("font-weight","500").text(d=>d.type||"REL");
-
       const drag = d3.drag()
         .on("start",(ev,d)=>{{if(!ev.active)simulation.alphaTarget(0.3).restart();d.fx=d.x;d.fy=d.y;}})
         .on("drag",(ev,d)=>{{d.fx=ev.x;d.fy=ev.y;}})
         .on("end",(ev,d)=>{{if(!ev.active)simulation.alphaTarget(0);d.fx=null;d.fy=null;}});
 
-      const node = nodeGroup.selectAll("circle")
-        .data(nodes).enter().append("circle")
-        .attr("r",20)
-        .attr("fill", d => color((d.labels && d.labels[0]) || "Node"))
-        .attr("stroke","#0f172a").attr("stroke-width",2)
-        .style("cursor","pointer")
-        .classed("result-node", d => !!d.isResult)
-        .call(drag)
-        .on("mouseover", showTooltip)
-        .on("mousemove", moveTooltip)
-        .on("mouseout", hideTooltip)
-        .on("click", handleNodeClick)
-        .on("dblclick", expandNode);
+      let link = linkGroup.selectAll("line");
+      let edgeLabel = edgeLabelGroup.selectAll("text");
+      let node = nodeGroup.selectAll("circle");
+      let label = labelGroup.selectAll("text");
 
-      const label = labelGroup.selectAll("text")
-        .data(nodes).enter().append("text")
-        .attr("fill","#f1f5f9").attr("font-size",12).attr("text-anchor","middle")
-        .attr("font-family","Inter, sans-serif").attr("font-weight","600")
-        .attr("pointer-events","none")
-        .text(d => {{
-          const p=d.properties||{{}};
-          return p.nome||p.name||p.title||
-                 (p.descrizione?String(p.descrizione).substring(0,15):null)||
-                 (d.labels&&d.labels[0])||String(d.id).substring(0,8);
+      function ticked() {{
+        link
+          .attr("x1", d => d.source.x)
+          .attr("y1", d => d.source.y)
+          .attr("x2", d => d.target.x)
+          .attr("y2", d => d.target.y);
+        node
+          .attr("cx", d => d.x)
+          .attr("cy", d => d.y);
+        label
+          .attr("x", d => d.x)
+          .attr("y", d => d.y - 28);
+        edgeLabel
+          .attr("x", d => (d.source.x + d.target.x) / 2)
+          .attr("y", d => (d.source.y + d.target.y) / 2 - 8);
+      }}
+
+      function getNodeLabel(d){{
+        const p=d.properties||{{}};
+        return p.nome||p.name||p.title||
+               (p.descrizione?String(p.descrizione).substring(0,15):null)||
+               (d.labels&&d.labels[0])||String(d.id).substring(0,8);
+      }}
+
+      // Filtri per etichette (visibilità) applicati lato client
+      let visibleLabels = new Set();
+      function applyVisibilityFilters() {{
+        node.style("display", d => {{
+          const lbl = (d.labels && d.labels[0]) || 'Node';
+          return visibleLabels.has(lbl) ? null : 'none';
         }});
-
-      simulation.on("tick",()=>{{
-        link.attr("x1",d=>d.source.x).attr("y1",d=>d.source.y)
-            .attr("x2",d=>d.target.x).attr("y2",d=>d.target.y);
-        node.attr("cx",d=>d.x).attr("cy",d=>d.y);
-        label.attr("x",d=>d.x).attr("y",d=>d.y-28);
-        edgeLabel.attr("x",d=>(d.source.x+d.target.x)/2)
-                 .attr("y",d=>(d.source.y+d.target.y)/2-8);
-      }});
-
-      // --- ZOOM & PAN ---
-      const zoom = d3.zoom().scaleExtent([0.1,4])
-        .on("zoom", e => viewport.attr("transform", e.transform));
-      svg.call(zoom).on("dblclick.zoom", null);
-
-      const camStack = [];
-      function pushCam(t){{camStack.push(t);}}
-      function popCam(){{return camStack.pop();}}
-      function smooth(t){{svg.transition().duration(300).call(zoom.transform,t);}}
-      function zoomBy(k){{svg.transition().duration(250).call(zoom.scaleBy,k);}}
-      function reset(){{smooth(d3.zoomIdentity);}}
-      function fit() {{
-        if(!nodes.length)return reset();
-        const xs=nodes.map(n=>n.x), ys=nodes.map(n=>n.y);
-        const minX=Math.min(...xs), maxX=Math.max(...xs);
-        const minY=Math.min(...ys), maxY=Math.max(...ys);
-        const pad=40;
-        const boxW=(maxX-minX)||1, boxH=(maxY-minY)||1;
-        const scale=Math.min((width-pad)/boxW,(height-pad)/boxH,4);
-        const tx=(width - scale*(minX+maxX))/2;
-        const ty=(height - scale*(minY+maxY))/2;
-        smooth(d3.zoomIdentity.translate(tx,ty).scale(scale));
-      }}
-      function togglePin(d, element){{
-        const circle = d3.select(element);
-        if(d.fx!=null && d.fy!=null){{
-          d.fx = null;
-          d.fy = null;
-          circle.classed("pinned", false);
-        }} else {{
-          d.fx = d.x;
-          d.fy = d.y;
-          circle.classed("pinned", true);
-          if(!layoutFrozen){{
-            simulation.alphaTarget(0.3).restart();
-          }}
-        }}
-      }}
-      function handleEdgeClick(ev,d){{
-        ev.stopPropagation();
-        selectedNode = null;
-        selectedEdge = d;
-        node.classed("selected", false);
-        link.classed("selected", l => l === d);
-        renderEdgeInfo(d);
-      }}
-      function handleNodeClick(ev,d){{
-        ev.stopPropagation();
-        if(ev.altKey || ev.metaKey){{
-          focusNode(ev,d);
-          return;
-        }}
-        if(ev.shiftKey || ev.ctrlKey){{
-          togglePin(d, ev.currentTarget);
-          return;
-        }}
-        selectNode(d, ev.currentTarget);
-      }}
-      function selectNode(d, element){{
-        selectedNode = d;
-        selectedEdge = null;
-        node.classed("selected", n => n === d);
-        link.classed("selected", false);
-        renderNodeInfo(d);
-      }}
-
-      function focusNode(ev,d){{
-        pushCam(d3.zoomTransform(svg.node()));
-        const k=1.5;
-        const tx=width/2 - k*d.x;
-        const ty=height/2 - k*d.y;
-        smooth(d3.zoomIdentity.translate(tx,ty).scale(k));
-      }}
-
-      function showTooltip(ev,d){{
-        const labels=(d.labels&&d.labels.join(', '))||'Nodo';
-        const props=d.properties||{{}};
-        let html=`<strong style='color:#38bdf8;font-size:14px;'>${{labels}}</strong><br/>`;
-        html+=`<span style='color:#94a3b8;font-size:11px;'>ID: ${{String(d.id).substring(0,12)}}</span><br/><br/>`;
-        let count = 0;
-        for(const [k,v] of Object.entries(props)){{
-          if(k === '_origin') continue;
-          if(count >= 6) break;
-          const s=typeof v==='object'?JSON.stringify(v):String(v);
-          html+=`<div style='margin:2px 0;'><span style='color:#cbd5e1;'>${{k}}:</span> <span style='color:#e2e8f0;'>${{s.length>50?s.substring(0,50)+'...':s}}</span></div>`;
-          count += 1;
-        }}
-        tooltip.html(html).style('display','block');
-        moveTooltip(ev);
-      }}
-      function moveTooltip(ev){{
-        const [mx,my]=d3.pointer(ev, document.getElementById("{element_id}"));
-        tooltip.style('left',(mx+15)+'px').style('top',(my-15)+'px');
-      }}
-      function hideTooltip(){{tooltip.style('display','none');}}
-      function expandNode(ev,d){{
-        ev.stopPropagation();
-        alert("Espansione nodo (todo) — "+((d.labels&&d.labels[0])||d.id));
-      }}
-
-      function renderNodeInfo(d){{
-        if(!d){{
-          infoPanel.style('display','none').html('');
-          return;
-        }}
-        const props = Object.entries(d.properties || {{}})
-          .filter(([k]) => k !== '_origin')
-          .map(([k,v]) => {{
-            const value = typeof v === 'object' ? JSON.stringify(v) : String(v);
-            return `<div class="info-row"><span>${{k}}</span><span>${{value}}</span></div>`;
-          }}).join('') || "<div class='info-empty'>Nessuna proprietà disponibile.</div>";
-        const mainLabel = (d.labels&&d.labels[0]) || 'Nodo';
-        const title = d.properties?.name || d.properties?.descrizione || d.properties?.ragioneSociale || d.id;
-        const isStub = (d.properties && d.properties._origin === 'stub');
-        const stubNote = isStub ? "<div class='info-note'>Nodo segnaposto: l'entità non è stata trovata direttamente nel grafo. Controlla la grafia o aggiungi un filtro più specifico.</div>" : "";
-        infoPanel.style('display','block').html(`
-          <div class="info-title">${{title}}</div>
-          <div class="info-subtitle">${{mainLabel}}</div>
-          ${{stubNote}}
-          <div class="info-block">
-            ${{props}}
-          </div>
-        `);
-      }}
-
-      function renderEdgeInfo(d){{
-        if(!d){{
-          infoPanel.style('display','none').html('');
-          return;
-        }}
-        const props = Object.entries(d.properties || {{}})
-          .map(([k,v]) => {{
-            const value = typeof v === 'object' ? JSON.stringify(v) : String(v);
-            return `<div class="info-row"><span>${{k}}</span><span>${{value}}</span></div>`;
-          }}).join('') || "<div class='info-empty'>Nessuna proprietà disponibile.</div>";
-        infoPanel.style('display','block').html(`
-          <div class="info-title">${{d.type || 'Relazione'}}</div>
-          <div class="info-subtitle">Collega</div>
-          <div class="info-block">
-            <div class="info-row"><span>Origine</span><span>${{d.source.id}}</span></div>
-            <div class="info-row"><span>Destinazione</span><span>${{d.target.id}}</span></div>
-          </div>
-          <div class="info-block">${{props}}</div>
-        `);
-      }}
-
-      function clearSelection(){{
-        selectedNode = null;
-        selectedEdge = null;
-        node.classed("selected", false);
-        link.classed("selected", false);
-        infoPanel.style('display','none').html('');
-      }}
-
-      const freezeBtn = document.getElementById("{element_id}-freeze");
-      const restoreBtn = document.getElementById("{element_id}-restore");
-      let layoutFrozen = false;
-
-      function updateFreezeButton(){{
-        if(!freezeBtn) return;
-        freezeBtn.textContent = layoutFrozen ? "Riprendi" : "Freeze";
-        if(layoutFrozen){{
-          freezeBtn.classList.add("active");
-        }} else {{
-          freezeBtn.classList.remove("active");
-        }}
-      }}
-
-      function toggleFreeze(){{
-        layoutFrozen = !layoutFrozen;
-        if(layoutFrozen){{
-          simulation.stop();
-        }} else {{
-          simulation.alpha(0.6).restart();
-        }}
-        updateFreezeButton();
-      }}
-
-      function restoreLayout(){{
-        layoutFrozen = false;
-        updateFreezeButton();
-        clearSelection();
-        node.each(d => {{
-          d.fx = null;
-          d.fy = null;
+        label.style("display", d => {{
+          const lbl = (d.labels && d.labels[0]) || 'Node';
+          return visibleLabels.has(lbl) ? null : 'none';
         }});
-        node.classed("pinned", false);
-        camStack.length = 0;
-        simulation.alpha(0.9).restart();
-        fit();
+        link.style("display", l => {{
+          const sLbl = (l.source && l.source.labels && l.source.labels[0]) || 'Node';
+          const tLbl = (l.target && l.target.labels && l.target.labels[0]) || 'Node';
+          return (visibleLabels.has(sLbl) && visibleLabels.has(tLbl)) ? null : 'none';
+        }});
+        edgeLabel.style("display", l => {{
+          const sLbl = (l.source && l.source.labels && l.source.labels[0]) || 'Node';
+          const tLbl = (l.target && l.target.labels && l.target.labels[0]) || 'Node';
+          return (visibleLabels.has(sLbl) && visibleLabels.has(tLbl)) ? null : 'none';
+        }});
       }}
 
-      document.getElementById("{element_id}-zoom-in").onclick=()=>zoomBy(1.2);
-      document.getElementById("{element_id}-zoom-out").onclick=()=>zoomBy(1/1.2);
-      document.getElementById("{element_id}-reset").onclick=()=>reset();
-      document.getElementById("{element_id}-fit").onclick=()=>fit();
-      document.getElementById("{element_id}-back").onclick=()=>{{const p=popCam();if(p)smooth(p);}};
-
-      if(freezeBtn) freezeBtn.onclick=()=>toggleFreeze();
-      if(restoreBtn) restoreBtn.onclick=()=>restoreLayout();
-      updateFreezeButton();
-
-      simulation.on("end", fit) 
-
-      // --- LEGENDA AUTOMATICA ---
-      const uniqueLabels = Array.from(new Set(nodes.flatMap(n => n.labels || ["Node"])));
-      const legend = d3.select("#{element_id}-legend");
-      let legendHtml = "<strong style='color:#38bdf8; font-size: 1.1rem;'>Legenda nodi:</strong><br/>" +
-        uniqueLabels.map(lbl => {{
+      function updateLegend() {{
+        const uniqueLabels = Array.from(new Set(nodes.flatMap(n => n.labels || ["Node"])));
+        const resultCount = (meta && meta.result_node_ids && meta.result_node_ids.length)
+          ? meta.result_node_ids.length
+          : nodes.filter(n => n.isResult).length;
+        const nodeCount = nodes.length;
+        const linkCount = links.length;
+        const resultsPart = resultCount ? (' · Risultati: ' + String(resultCount)) : '';
+        let head = '';
+        head += "<div style='margin-bottom:6px;'>";
+        head += "<strong style='color:#38bdf8; font-size: 1.05rem;'>Legenda</strong>";
+        head += "<div style='color:#cbd5e1; font-size:0.9rem;'>" +
+                "Nodi: " + String(nodeCount) +
+                " · Relazioni: " + String(linkCount) +
+                resultsPart +
+                "</div>";
+        head += "</div>";
+        const labelsHtml = uniqueLabels.map(lbl => {{
           const col = color(lbl);
-          return `<span style='display:inline-flex;align-items:center;margin-right:14px; font-size: 1.1rem;'>
-                    <span style='width:12px;height:12px;background:${{col}};
-                    border-radius:50%;display:inline-block;margin-right:6px;border:1px solid #334155;'></span>
-                    ${{lbl}}
-                  </span>`;
+          return (
+            "<span style='display:inline-flex;align-items:center;margin-right:10px; font-size: 0.95rem;'>" +
+            "<span style='width:10px;height:10px;background:" + col + ";" +
+            "border-radius:50%;display:inline-block;margin-right:6px;border:1px solid #334155;'></span>" +
+            String(lbl) +
+            "</span>"
+          );
         }}).join("<br/>");
-      if(meta && meta.stub_nodes_added){{
-        legendHtml += "<hr style='border-color:rgba(59,130,246,0.35);margin:6px 0;' />";
-        legendHtml += "<span style='display:flex;align-items:center;gap:8px;font-size:0.95rem;'><span style='width:12px;height:12px;border-radius:50%;border:2px dashed rgba(148,163,184,0.9);'></span>Segnaposto (nessun nodo Neo4j trovato)</span>";
+        if (visibleLabels.size === 0) {{ uniqueLabels.forEach(l => visibleLabels.add(l)); }}
+        const filtersHtml = uniqueLabels.map(lbl => {{
+          const checked = visibleLabels.has(lbl) ? 'checked' : '';
+          return (
+            "<label style='display:flex;align-items:center;gap:6px;margin-top:4px;'>" +
+            "<input class='legend-filter' type='checkbox' data-label='" + String(lbl) + "' " + checked + " />" +
+            "<span>" + String(lbl) + "</span>" +
+            "</label>"
+          );
+        }}).join("");
+        let legendHtml = head + labelsHtml +
+          "<hr style='border-color:rgba(59,130,246,0.15);margin:6px 0;' />" +
+          "<div style='font-size:0.85rem;color:#cbd5e1;margin-bottom:4px;'>Filtri etichette</div>" +
+          filtersHtml;
+        if(meta && meta.stub_nodes_added) {{
+          legendHtml += "<hr style='border-color:rgba(59,130,246,0.35);margin:6px 0;' />";
+          legendHtml += "<span style='display:flex;align-items:center;gap:8px;font-size:0.9rem;'><span style='width:12px;height:12px;border-radius:50%;border:2px dashed rgba(148,163,184,0.9);'></span>Segnaposto (nessun nodo Neo4j trovato)</span>";
+        }}
+        legendHtml += "<hr style='border-color:rgba(59,130,246,0.15);margin:6px 0;' />";
+        legendHtml += "<span style='font-size:0.85rem;color:#94a3b8;'>Clic: dettagli · Alt/⌘: focus · Shift/Ctrl: blocca · Doppio click: espandi</span>";
+        legend.html(legendHtml);
+        d3.selectAll(`#${element_id}-legend input.legend-filter`).on('change', function(){{
+          const lbl = this.getAttribute('data-label');
+          if (this.checked) visibleLabels.add(lbl); else visibleLabels.delete(lbl);
+          applyVisibilityFilters();
+        }});
+        applyVisibilityFilters();
       }}
-      legend.html(legendHtml);
+
+      function updateGraph(restart=true){{
+        nodeMap.clear();
+        nodes.forEach(n => nodeMap.set(n.id, n));
+        links.forEach(l => {{
+          if(l && typeof l.source === "string"){{
+            const src=nodeMap.get(String(l.source));
+            if(src) l.source=src;
+          }}
+          if(l && typeof l.target === "string"){{
+            const tgt=nodeMap.get(String(l.target));
+            if(tgt) l.target=tgt;
+          }}
+        }});
+
+        link = linkGroup.selectAll("line")
+          .data(links, edgeKey);
+        link.exit().remove();
+        const linkEnter = link.enter().append("line")
+          .attr("stroke","#475569").attr("stroke-opacity",0.65)
+          .attr("stroke-width",2).attr("marker-end","url(#arrowhead)")
+          .style("cursor","pointer")
+          .on("click", handleEdgeClick);
+        link = linkEnter.merge(link)
+          .classed("selected", l => selectedEdge && edgeKey(l) === edgeKey(selectedEdge));
+
+        edgeLabel = edgeLabelGroup.selectAll("text")
+          .data(links, edgeKey);
+        edgeLabel.exit().remove();
+        const edgeLabelEnter = edgeLabel.enter().append("text")
+          .attr("fill","#94a3b8").attr("font-size",10)
+          .attr("text-anchor","middle").attr("font-family","Inter, monospace")
+          .attr("font-weight","500");
+        edgeLabel = edgeLabelEnter.merge(edgeLabel)
+          .text(d => d.type || "REL");
+
+        node = nodeGroup.selectAll("circle").data(nodes, d => d.id);
+        node.exit().remove();
+        const nodeEnter = node.enter().append("circle")
+          .attr("r",20)
+          .attr("stroke","#0f172a").attr("stroke-width",2)
+          .style("cursor","pointer")
+          .call(drag)
+          .on("mouseover", showTooltip)
+          .on("mousemove", moveTooltip)
+          .on("mouseout", hideTooltip)
+          .on("click", handleNodeClick)
+          .on("dblclick", expandNode);
+        node = nodeEnter.merge(node)
+          .attr("fill", d => color((d.labels && d.labels[0]) || "Node"))
+          .classed("result-node", d => !!d.isResult)
+          .classed("expanded-node", d => !!d._expanded)
+          .classed("selected", n => selectedNode && n.id === selectedNode.id)
+          .classed("pinned", d => isPinned(d));
+
+        label = labelGroup.selectAll("text").data(nodes, d => d.id);
+        label.exit().remove();
+        const labelEnter = label.enter().append("text")
+          .attr("fill","#f1f5f9").attr("font-size",12).attr("text-anchor","middle")
+          .attr("font-family","Inter, sans-serif").attr("font-weight","600")
+          .attr("pointer-events","none");
+        label = labelEnter.merge(label)
+          .text(getNodeLabel);
+
+        simulation.nodes(nodes);
+        linkForce.links(links);
+        if(restart){{
+          simulation.alpha(0.9).restart();
+        }}
+
+        updateLegend();
+        refreshSelections();
+      }}
+
+      updateGraph(true);
+
+      if (zoomInBtn) zoomInBtn.onclick = () => zoomBy(1.2);
+      if (zoomOutBtn) zoomOutBtn.onclick = () => zoomBy(1 / 1.2);
+      if (resetBtn) resetBtn.onclick = () => resetView();
+      if (fitBtn) fitBtn.onclick = () => fit();
+      if (backBtn) backBtn.onclick = () => goBack();
+      if (freezeBtn) freezeBtn.onclick = () => toggleFreeze();
+      if (restoreBtn) restoreBtn.onclick = () => restoreLayout();
+      updateFreezeButton();
+      simulation.on("end", () => fit(false));
+      setTimeout(() => fit(false), 600);
+
     }})();
     </script>
         <style>
@@ -1319,10 +1644,9 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
         box-shadow: 0 0 12px rgba(59,130,246,0.3);
       }}
       #{element_id} .nodes circle {{
-        transition: transform 0.2s ease, stroke-width 0.2s ease;
+        transition: stroke-width 0.2s ease;
       }}
       #{element_id} .nodes circle:hover {{
-        transform: scale(1.04);
         stroke-width: 2.4;
       }}
       #{element_id} .nodes circle.result-node {{
