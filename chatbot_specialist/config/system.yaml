@@ -39,7 +39,7 @@ retry:
   - Invalid input
   - Type mismatch
   retry_on_syntax_error: true
-  retry_on_zero_results: false
+  retry_on_zero_results: true
   semantic_expansion:
     enabled: true
     max_attempts: 1

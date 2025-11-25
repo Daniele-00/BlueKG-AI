@@ -1253,8 +1253,44 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
         
         // COLLAPSE se già espanso
         if (nodeData._expanded) {{
+          const addedLinks = links.filter(l => l._addedBy === nodeData.id);
+          const addedNodeIds = new Set(
+            addedLinks.flatMap(l => [
+              typeof l.source === 'object' ? l.source.id : l.source,
+              typeof l.target === 'object' ? l.target.id : l.target
+            ])
+          );
+          // Rimuovi il nodo cliccato (che non va rimosso)
+          addedNodeIds.delete(nodeData.id);  
+          // 2. Controlla quali nodi rimuovere (non rimuovere se sono "ancorati" ad altri nodi espansi)
+          const nodesToRemove = new Set(addedNodeIds);
+          links.forEach(l => {{
+            // Se un arco NON sta per essere rimosso...
+            if (l._addedBy !== nodeData.id) {{
+              // ...controlla se "ancora" uno dei nodi che volevamo rimuovere
+              const sourceId = typeof l.source === 'object' ? l.source.id : l.source;
+              const targetId = typeof l.target === 'object' ? l.target.id : l.target;
+              if (nodesToRemove.has(sourceId)) {{
+                nodesToRemove.delete(sourceId);
+              }}
+              if (nodesToRemove.has(targetId)) {{
+                nodesToRemove.delete(targetId);
+              }}
+            }}
+          }});
+
+          // 3. Rimuovi gli archi (come facevi tu)
           for (let i = links.length - 1; i >= 0; i--) {{
-            if (links[i]._addedBy === nodeData.id) links.splice(i,1);
+            if (links[i]._addedBy === nodeData.id) {{
+              links.splice(i, 1);
+            }}
+          }}
+          
+          // 4. Rimuovi i nodi "orfani"
+          for (let i = nodes.length - 1; i >= 0; i--) {{
+            if (nodesToRemove.has(nodes[i].id)) {{
+              nodes.splice(i, 1);
+            }}
           }}
           nodeData._expanded = false;
           updateGraph(true);
@@ -1415,9 +1451,18 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
 
       function getNodeLabel(d){{
         const p=d.properties||{{}};
-        return p.nome||p.name||p.title||
-               (p.descrizione?String(p.descrizione).substring(0,15):null)||
-               (d.labels&&d.labels[0])||String(d.id).substring(0,8);
+        
+        // === FIX: Controlla TUTTE le proprietà "nome" conosciute ===
+        return p.name || // Per Cliente
+               p.nome || // Per Famiglia/Sottofamiglia
+               p.ragioneSociale || // Per GruppoFornitore
+               p.localita || // Per Luogo
+               p.dittaId || // Per Ditta
+               (p.descrizione ? String(p.descrizione).substring(0,25) : null) || // Per Articolo (più lungo)
+               p.title || // Fallback generico
+        // === FINE FIX ===
+               (d.labels && d.labels[0]) || // Fallback (quello che non vuoi)
+               String(d.id).substring(0,8); // Fallback finale
       }}
 
       // 🆕 FILTRI VISIBILITÀ
@@ -1446,9 +1491,11 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
         const uniqueLabels = Array.from(new Set(nodes.flatMap(n => n.labels || ["Node"])));
         
         // Inizializza visibleLabels se vuoto
-        if (visibleLabels.size === 0) {{
-          uniqueLabels.forEach(l => visibleLabels.add(l));
-        }}
+        uniqueLabels.forEach(l => {{
+          if (!visibleLabels.has(l)) {{
+            visibleLabels.add(l);
+          }}
+        }});
         
         const resultCount = (meta && meta.result_node_ids && meta.result_node_ids.length)
           ? meta.result_node_ids.length
@@ -2133,7 +2180,9 @@ def process_query(prompt):
             )
 
         except requests.exceptions.ConnectionError:
-            error_msg = " Errore di connessione: Verifica che l'API sia attiva su http://localhost:8000"
+            error_msg = (
+                " Errore di connessione: Servizio temporaneamente non disponibile."
+            )
             message_placeholder.error(error_msg)
             status_placeholder.empty()
             st.session_state.messages.append(
@@ -2256,7 +2305,9 @@ if is_debug_mode:
                         else:
                             st.error(f"Errore API ({response.status_code})")
                     except Exception as e:
-                        st.error(f"Errore di connessione: {e}")
+                        st.error(
+                            "Errore di connessione: Servizio temporaneamente non disponibile."
+                        )
 
             if st.button("Esporta JSON", width="stretch"):
                 if st.session_state.messages:

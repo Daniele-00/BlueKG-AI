@@ -1,13 +1,13 @@
 agent_models:
   coder: gemini-2.5-flash
   contextualizer: gemini-2.5-flash
+  entity_extractor: gemini-2.5-flash
   general_conversation: gemini-2.5-flash
   router: gemini-2.5-flash
-  entity_extractor: gemini-2.5-flash
+  social_conversation: gemini-2.5-flash
+  social_router: gemini-2.5-flash
   synthesizer: gemini-2.5-flash
   translator: gemini-2.5-flash
-  social_router: gemini-2.5-flash
-  social_conversation: gemini-2.5-flash
 available_models:
   gemini-2.5-flash:
     description: Google Gemini 2.5 Flash - 1M token context
@@ -46,7 +46,7 @@ available_models:
     provider: groq
   llama3:
     description: Llama 3 locale
-    max_tokens: 4096
+    max_tokens: 8096
     model_name: llama3
     provider: ollama
   llama3-70b-groq-legacy:

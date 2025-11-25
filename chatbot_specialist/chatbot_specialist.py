@@ -3331,70 +3331,56 @@ def _collect_node_element_ids_from_records(records: List[Dict[str, Any]]) -> Set
     return ids
 
 
+# (SOSTITUISCI LA FUNZIONE _collect_entity_candidates_from_records)
+
+
 def _collect_entity_candidates_from_records(
     records: List[Dict[str, Any]],
 ) -> List[Dict[str, str]]:
-    """Estrae possibili candidati (label, property, value) dai record testuali."""
+    """Estrae candidati usando l'LLM per capire le colonne."""
 
-    resolver_cfg = (config.fuzzy or {}).get("entity_resolver", {}) or {}
-    definitions = resolver_cfg.get("entity_definitions", {}) or {}
-    if not definitions:
+    if not records or not ENTITY_DEFINITIONS:
         return []
 
-    roles = resolver_cfg.get("entity_label_roles_en", {}) or {}
+    # 1. Estrai i nomi delle colonne (dal primo record)
+    # (Assumiamo che i record abbiano le stesse chiavi)
+    columns = list(records[0].keys())
 
-    label_hints: Dict[str, Set[str]] = {}
-    for label, defn in definitions.items():
-        hints: Set[str] = set()
-        lbl = str(label).lower()
-        hints.add(lbl)
-        hints.add(re.sub(r"[^a-z0-9]", "", lbl))
-        prop = str(defn.get("property") or "").lower()
-        if prop:
-            hints.add(prop)
-            hints.add(re.sub(r"[^a-z0-9]", "", prop))
-        role_info = roles.get(label, {})
-        role = str(role_info.get("role") or "").lower()
-        if role:
-            hints.add(role)
-            hints.add(re.sub(r"[^a-z0-9]", "", role))
-        # Varianti comuni
-        hints.add(lbl.replace("gruppo", "gruppo"))
-        hints.add(lbl.replace("fornitore", "fornitore"))
-        label_hints[label] = {h for h in hints if h}
+    # 2. Chiama l'AGENTE per mappare le colonne
+    # (Lo facciamo una volta sola per tutto il set di risultati)
+    column_to_label_map = run_schema_mapper_agent(columns)
 
     candidates: List[Dict[str, str]] = []
     seen_pairs: Set[Tuple[str, str]] = set()
 
-    for record in records or []:
-        if not isinstance(record, dict):
-            continue
+    for record in records:
         for key, value in record.items():
             if value is None or isinstance(value, (int, float)):
                 continue
             if isinstance(value, Node):
-                continue  # già gestito altrove
+                continue
+
             value_str = str(value).strip()
             if not value_str:
                 continue
-            key_norm = re.sub(r"[^a-z0-9]", "", str(key).lower())
-            if not key_norm:
-                continue
-            for label, hints in label_hints.items():
-                if any(h in key_norm for h in hints):
-                    prop = definitions[label].get("property") or "name"
-                    pair = (label, value_str.lower())
-                    if pair in seen_pairs:
-                        break
+
+            # 3. Usa il mapping dell'LLM
+            # Se la colonna 'key' è stata mappata a una Label (es. "prodotto" -> "Articolo")
+            inferred_label = column_to_label_map.get(key)
+
+            if inferred_label:
+                prop = ENTITY_DEFINITIONS[inferred_label].get("property") or "name"
+                pair = (inferred_label, value_str.lower())
+
+                if pair not in seen_pairs:
                     seen_pairs.add(pair)
                     candidates.append(
                         {
-                            "label": label,
+                            "label": inferred_label,
                             "property": prop,
                             "value": value_str,
                         }
                     )
-                    break
 
     return candidates
 
@@ -3630,41 +3616,48 @@ def _extract_variables_from_query(query_prefix: str) -> Tuple[List[str], List[st
     Estrae tutti i nomi di variabili di nodi E RELAZIONI
     da una stringa di query Cypher (prefisso MATCH/WHERE/WITH).
     """
-    # Regex per nodi: (varName:Label) o (varName)
-    # \(([a-zA-Z0-9_]+) -> cattura il nome della variabile (es. 'c')
-    # \s*(?::[a-zA-Z0-9_`| ]+)? -> opzionalmente matcha :Label, :`Label con Spazi`, :Label1|Label2
-    node_pattern = re.compile(r"\(([a-zA-Z0-9_]+)\s*(?::[a-zA-Z0-9_`| ]+)?\s*\)")
+    # Pattern per nodi: (varName:Label) o (varName)
+    node_pattern = re.compile(
+        r"\(([a-zA-Z_][a-zA-Z0-9_]*)\s*(?::[a-zA-Z0-9_`| ]+)?\s*\)"
+    )
 
-    # Regex per relazioni: -[varName:TYPE]- o -[varName]-
-    # -\[([a-zA-Z0-9_]+) -> cattura il nome della variabile (es. 'r')
-    # \s*(?::[a-zA-Z0-9_`|* ]+)? -> opzionalmente matcha :TYPE, :`TYPE`, :TYPE1|TYPE2, :*
-    rel_pattern = re.compile(r"-\[([a-zA-Z0-9_]+)\s*(?::[a-zA-Z0-9_`|* ]+)?\s*\]-")
+    # Pattern per relazioni: -[varName:TYPE]- o -[varName]-
+    rel_pattern = re.compile(
+        r"-\[([a-zA-Z_][a-zA-Z0-9_]*)\s*(?::[a-zA-Z0-9_`|* ]+)?\s*\]-"
+    )
 
-    node_vars: List[str] = []
-    rel_vars: List[str] = []
-    node_seen: Set[str] = set()
-    rel_seen: Set[str] = set()
+    node_vars: Set[str] = set()
+    rel_vars: Set[str] = set()
+
+    cypher_keywords = {
+        "match",
+        "where",
+        "with",
+        "return",
+        "order",
+        "limit",
+        "and",
+        "or",
+        "not",
+    }
 
     # Trova tutti i nodi
     for match in node_pattern.finditer(query_prefix):
         var_name = match.group(1)
-        if var_name:  # Ignora variabili anonime come ()
-            if var_name not in node_seen:
-                node_seen.add(var_name)
-                node_vars.append(var_name)
+        if var_name and var_name.lower() not in cypher_keywords:
+            node_vars.add(var_name)
 
     # Trova tutte le relazioni
     for match in rel_pattern.finditer(query_prefix):
         var_name = match.group(1)
-        if var_name:  # Ignora variabili anonime come -[]-
-            if var_name not in rel_seen:
-                rel_seen.add(var_name)
-                rel_vars.append(var_name)
+        if var_name and var_name.lower() not in cypher_keywords:
+            rel_vars.add(var_name)
 
-    if not node_vars and not rel_vars:
-        logger.debug("Nessuna variabile trovata nel prefisso query.")
+    logger.info(
+        f"Variabili per grafo - Nodi: {list(node_vars)}, Relazioni: {list(rel_vars)}"
+    )
 
-    return node_vars, rel_vars
+    return sorted(list(node_vars)), sorted(list(rel_vars))
 
 
 def _extract_missing_variable_from_error(message: str) -> Optional[str]:
@@ -3681,21 +3674,103 @@ def _extract_missing_variable_from_error(message: str) -> Optional[str]:
     return None
 
 
-# Ricostruzione grafo da query con aggregazioni
+def run_schema_mapper_agent(columns: List[str]) -> Dict[str, str]:
+    """
+    Usa l'LLM per capire a quale Entità del DB corrispondono le colonne del risultato.
+    CORRETTO: Usa escaping per LangChain per evitare conflitti con le graffe del JSON.
+    """
+    # Se non ci sono colonne o definizioni, esci subito
+    if not columns or not ENTITY_DEFINITIONS:
+        return {}
+
+    logger.info(f"🤖 Chiamata allo Schema Mapper per le colonne: {columns}")
+
+    # Recupera le label valide dal tuo sistema
+    valid_labels = list(ENTITY_DEFINITIONS.keys())  # [Cliente, Articolo, ...]
+
+    # === FIX: Non usare f-string (f"""), usa stringa normale (""") ===
+    # Usiamo {variabile} per i dati che passiamo, e {{json}} per gli esempi letterali.
+    prompt_text = """
+    Sei un esperto di mapping dati Neo4j.
+    Il tuo compito è associare i nomi delle colonne di una query ai Tipi di Entità (Labels) del database.
+
+    LABEL DISPONIBILI: {valid_labels}
+
+    COLONNE DA MAPPARE: {columns}
+
+    REGOLE:
+    1. Per ogni colonna, decidi se corrisponde a una delle Label disponibili.
+    2. Se una colonna contiene il nome o l'ID di un'entità (es. "cliente", "codice_articolo", "fornitore"), mappala alla Label corretta.
+    3. Se una colonna è un numero, una data o non è un'entità (es. "totale", "fatturato", "data"), mappala a null.
+    4. Restituisci SOLO un JSON valido: {{"nome_colonna": "Label", ...}}
+
+    Esempio:
+    Labels: ['Cliente', 'Articolo']
+    Colonne: ['customer_name', 'total_spent']
+    Output: {{"customer_name": "Cliente", "total_spent": null}}
+
+    JSON Output:
+    """
+
+    try:
+        # Riusiamo il modello 'entity_extractor' che è veloce
+        response = _invoke_with_profile(
+            agent_name="entity_extractor",
+            prompt_text=prompt_text,
+            # === FIX: Passiamo le variabili qui, così LangChain le gestisce ===
+            variables={"valid_labels": str(valid_labels), "columns": str(columns)},
+        )
+
+        # Pulisci e parsa il JSON
+        json_str = response.strip()
+        if "```" in json_str:
+            # Cerca il primo blocco di codice, json o no
+            match = re.search(r"```(?:json)?(.*?)```", json_str, re.DOTALL)
+            if match:
+                json_str = match.group(1).strip()
+
+        mapping = json.loads(json_str)
+
+        # Filtra solo i mapping validi
+        valid_mapping = {
+            k: v for k, v in mapping.items() if v and v in ENTITY_DEFINITIONS
+        }
+
+        logger.info(f"✅ Schema Mapper result: {valid_mapping}")
+        return valid_mapping
+
+    except Exception as e:
+        logger.warning(f"Schema Mapper fallito: {e}")
+        return {}
+
+
+# (SOSTITUISCI QUESTA FUNZIONE - attorno alla linea 1618)
+
+
 def _reconstruct_graph_from_query(
     query: str, limit: Optional[int] = None
 ) -> Dict[str, List[Dict[str, Any]]]:
     """
-    Ricostruisce un grafo da query che restituiscono aggregazioni (COUNT, SUM, etc.).
-    STRATEGIA: Assegna variabili a tutti i nodi anonimi, poi estrae tutto.
+    v9 (Stabile): Ricostruzione FEDELE e CONNESSA.
+    Gestisce aggregati, ORDER BY e LIMIT.
     """
     try:
         if not query:
             return {}
 
+        # === FIX UNION ===
+        # Se c'è una UNION, non proviamo a ricostruire (troppo complesso per ora).
+        # Lasciamo che il fallback "Second Hop" gestisca i risultati testuali.
+        if re.search(r"\bUNION\b", query, re.IGNORECASE):
+            logger.info(
+                "Ricostruzione: Query UNION rilevata. Salto per evitare errori di scope."
+            )
+            return {}
+        # === FINE FIX ===
+
         query_clean = query.strip()
 
-        # Trova l'ULTIMO RETURN
+        # 1. Splitta query in Prefisso e Suffisso
         return_matches = list(re.finditer(r"\bRETURN\b", query_clean, re.IGNORECASE))
         if not return_matches:
             logger.debug("Ricostruzione: nessun RETURN trovato")
@@ -3703,89 +3778,126 @@ def _reconstruct_graph_from_query(
 
         last_return_pos = return_matches[-1].start()
         prefix = query_clean[:last_return_pos].strip()
+        suffix = query_clean[last_return_pos + len("RETURN") :].strip()
 
-        # STEP 1: Assegna variabili ai nodi anonimi
-        prefix_with_vars, var_counter = _assign_variables_to_anonymous_nodes(prefix)
+        # === 2. FONDAMENTALE: CHIAMA LE TUE DUE FUNZIONI ===
+        # Qui definiamo 'prefix_with_all_vars'. Se mancano queste righe, crasha tutto.
 
-        logger.debug(f"Query dopo assegnazione variabili:\n{prefix_with_vars}")
+        prefix_with_nodes, node_count = _assign_variables_to_anonymous_nodes(prefix)
+        prefix_with_all_vars, rel_count = _assign_variables_to_anonymous_rels(
+            prefix_with_nodes
+        )
 
-        # STEP 2: Assegna variabili alle relazioni anonime
-        prefix_with_all_vars, _ = _assign_variables_to_anonymous_rels(prefix_with_vars)
+        # ===================================================
 
-        logger.debug(f"Query dopo assegnazione variabili:\n{prefix_with_all_vars}")
-
-        # STEP 3: Estrai TUTTE le variabili (incluse quelle appena create)
+        # 3. Estrai TUTTE le variabili (Nodi e Relazioni) dal prefisso finale
         node_vars, rel_vars = _extract_variables_from_query(prefix_with_all_vars)
-        all_vars = node_vars + rel_vars
+        all_graph_vars = node_vars + rel_vars
 
-        if not all_vars:
-            logger.debug("Ricostruzione: nessuna variabile trovata")
+        if not all_graph_vars:
+            logger.debug("Ricostruzione: nessuna variabile N/R trovata nel prefisso.")
             return {}
 
-        logger.info(f"Variabili per grafo - Nodi: {node_vars}, Relazioni: {rel_vars}")
+        # 4. Analizza il Suffisso (separa campi da modificatori)
+        order_by_match = re.search(
+            r"\b(ORDER\s+BY.+|LIMIT.+|SKIP.+)", suffix, re.IGNORECASE | re.DOTALL
+        )
 
-        # STEP 4: Costruisci query che restituisce TUTTO (nodi + relazioni)
-        attempt_vars: List[str] = []
-        for var in all_vars:
-            if var not in attempt_vars:
-                attempt_vars.append(var)
+        if order_by_match:
+            return_fields_str = suffix[: order_by_match.start()].strip()
+            modifiers_str = suffix[order_by_match.start() :].strip()
+        else:
+            return_fields_str = suffix.strip()
+            modifiers_str = ""
 
-        graph_records: List[Dict[str, Any]] = []
-        removed_vars: List[str] = []
-
-        capped_limit = limit or GRAPH_DEFAULT_LIMIT
-        capped_limit = max(1, min(int(capped_limit), GRAPH_MAX_LIMIT))
-
-        while attempt_vars:
-            graph_query = f"{prefix_with_all_vars}\nRETURN DISTINCT {', '.join(attempt_vars)} LIMIT {capped_limit}"
-
-            logger.info(f"Query ricostruita:\n{graph_query}")
-            try:
-                _ensure_read_only_query(graph_query)
-                graph_records = execute_cypher_with_records(graph_query)
-                break
-            except Neo4jError as neo_exc:
-                missing_var = _extract_missing_variable_from_error(str(neo_exc))
-                if missing_var and missing_var in attempt_vars:
-                    logger.warning(
-                        "Ricostruzione grafo: variabile '%s' non definita, la rimuovo dal RETURN.",
-                        missing_var,
-                    )
-                    attempt_vars = [v for v in attempt_vars if v != missing_var]
-                    removed_vars.append(missing_var)
-                    continue
-                logger.error("Errore ricostruzione grafo: %s", neo_exc)
-                raise
-
-        if removed_vars:
-            logger.warning(
-                "Ricostruzione grafo completata senza le variabili %s (fuori scope).",
-                removed_vars,
+        if "limit" not in modifiers_str.lower():
+            capped_limit = max(
+                1, min(int(limit or GRAPH_DEFAULT_LIMIT), GRAPH_MAX_LIMIT)
             )
+            modifiers_str = f"{modifiers_str}\nLIMIT {capped_limit}"
 
-        if not attempt_vars:
-            logger.warning("Ricostruzione grafo: nessuna variabile valida disponibile.")
-            return {}
+        # 5. Costruisci il RETURN "fedele" (Pulizia Aggregati)
+        aggregated_aliases = set()
+        for agg_match in re.finditer(
+            r"\b(sum|count|avg|min|max|collect)\s*\([^)]+\)\s+AS\s+([\w`]+)",
+            return_fields_str,
+            re.IGNORECASE,
+        ):
+            aggregated_aliases.add(agg_match.group(2).strip("`"))
 
-        # subito dopo aver ottenuto graph_records
+        final_modifiers_str = modifiers_str
+        if aggregated_aliases:
+            # Se l'ordinamento dipende da un aggregato (es. "ORDER BY fatturato"),
+            # non possiamo ricostruire il grafo togliendo l'aggregato, perché
+            # perderemmo l'ordinamento e otterremmo "5 nodi a caso" invece dei "Top 5".
+            if any(
+                re.search(rf"\b{re.escape(alias)}\b", modifiers_str, re.IGNORECASE)
+                for alias in aggregated_aliases
+            ):
+                logger.info(
+                    f"Ricostruzione: Impossibile ricostruire fedelmente una query 'TOP N' "
+                    f"dopo aver rimosso gli aggregati ({aggregated_aliases}). "
+                    "Interrompo per attivare il fallback 'Second Hop' sui risultati testuali."
+                )
+                return {}  # <--- QUESTO È IL FIX. Fallisce apposta.
+
+        return_fields_no_aggs = re.sub(
+            r"\b(sum|count|avg|min|max|collect)\s*\([^)]+\)(?:\s+AS\s+[\w`]+)?",
+            "",
+            return_fields_str,
+            flags=re.IGNORECASE,
+        )
+
+        # Pulisci virgole
+        return_fields_no_aggs = re.sub(r",\s*,", ",", return_fields_no_aggs)
+        return_fields_no_aggs = re.sub(r"^\s*,", "", return_fields_no_aggs)
+        return_fields_no_aggs = re.sub(r",\s*$", "", return_fields_no_aggs).strip()
+
+        is_distinct = False
+        if return_fields_no_aggs.lower().startswith("distinct "):
+            is_distinct = True
+            return_fields_no_aggs = return_fields_no_aggs[len("distinct ") :].strip()
+
+        vars_to_add = []
+        for var in all_graph_vars:
+            if not re.search(rf"\b{re.escape(var)}\b(?!\.)", return_fields_no_aggs):
+                vars_to_add.append(var)
+
+        final_return_fields_list = [
+            field for field in [return_fields_no_aggs] + vars_to_add if field
+        ]
+        if not final_return_fields_list:
+            final_return_fields_list = all_graph_vars
+
+        final_return_clause = ", ".join(final_return_fields_list)
+        if is_distinct:
+            final_return_clause = f"DISTINCT {final_return_clause}"
+
+        # 6. Costruisci la Query Finale
+        # Qui usiamo 'prefix_with_all_vars' che abbiamo definito al passo 2
+        graph_query = f"{prefix_with_all_vars}\nRETURN {final_return_clause}\n{final_modifiers_str}"
+
+        logger.info(f"Query di ricostruzione (v9):\n{graph_query}")
+
+        # 7. ESEGUI
         try:
-            if graph_records:
-                sample_vals = list(graph_records[0].values())
-                logger.debug("Sample record types: %s", [type(v) for v in sample_vals])
-            else:
-                logger.warning("Nessun record restituito dalla query ricostruita")
-        except Exception as e:
-            logger.warning("Impossibile introspezionare i graph_records: %s", e)
+            _ensure_read_only_query(graph_query)
+            graph_records = execute_cypher_with_records(graph_query)
+            return extract_graph_snapshot(graph_records)
 
-        # Estrai il grafo
-        snapshot = extract_graph_snapshot(graph_records)
-
-        if not snapshot.get("nodes"):
+        except Neo4jError as neo_exc:
             logger.warning(
-                "Query eseguita ma snapshot vuoto - probabilmente nessun dato"
+                f"Ricostruzione fedele fallita: {neo_exc}. Tento fallback 'legacy'."
             )
 
-        return snapshot
+            legacy_vars = all_graph_vars
+            legacy_query = f"{prefix_with_all_vars}\nRETURN DISTINCT {', '.join(legacy_vars)}\n{final_modifiers_str}"
+            try:
+                _ensure_read_only_query(legacy_query)
+                graph_records = execute_cypher_with_records(legacy_query)
+                return extract_graph_snapshot(graph_records)
+            except Exception:
+                return {}
 
     except Exception as exc:
         logger.error(f"Errore ricostruzione grafo: {exc}", exc_info=True)
@@ -3886,17 +3998,14 @@ def build_graph_payload_from_results(
     layout: Optional[str] = None,
 ) -> Tuple[Dict[str, Any], str]:
     """
-    Costruisce il payload del grafo dai risultati Neo4j.
-    Ritorna: (graph_payload, source_type)
+    Costruisce il payload del grafo.
+    Ora TENTA SEMPRE la ricostruzione se l'estrazione diretta fallisce.
     """
-    # PRIMA: prova a estrarre direttamente dai records
-    graph_payload = extract_graph_snapshot(records)
-    graph_origin = "context_results"
 
+    # 1. TENTA ESTRAZIONE DIRETTA (Caso Ideale: RETURN c, r, d)
+    graph_payload = extract_graph_snapshot(records)
     if graph_payload and graph_payload.get("nodes"):
         logger.info(f"Grafo estratto dai records: {len(graph_payload['nodes'])} nodi")
-        if highlight_node_ids and GRAPH_HIGHLIGHT_RESULTS:
-            _apply_result_highlight(graph_payload, highlight_node_ids)
         _enrich_graph_meta(
             graph_payload,
             source="context_results",
@@ -3907,42 +4016,17 @@ def build_graph_payload_from_results(
         )
         return graph_payload, "context_results"
 
-    # SECONDA: se abbiamo già gli elementId dei risultati, prova a recuperarli direttamente
-    if highlight_node_ids:
-        logger.info("Provo a costruire il grafo partendo dagli elementId noti")
-        graph_from_ids = fetch_graph_from_ids(highlight_node_ids, limit=limit)
-        if graph_from_ids and graph_from_ids.get("nodes"):
-            if highlight_node_ids and GRAPH_HIGHLIGHT_RESULTS:
-                _apply_result_highlight(graph_from_ids, highlight_node_ids)
-            _enrich_graph_meta(
-                graph_from_ids,
-                source="result_nodes_lookup",
-                limit=limit,
-                highlight_ids=highlight_node_ids,
-                layout=layout,
-                record_count=len(records or []),
-            )
-            return graph_from_ids, "result_nodes_lookup"
-
-    # Ricostruzione dalla query può produrre un sottoinsieme NON allineato
-    # con l'ordinamento/limit dei risultati testuali (es. solo campi scalari).
-    # Per mantenere coerenza 1:1 con la risposta, se non abbiamo ids da evidenziare
-    # (tipico dei risultati aggregati/scalari), lasciamo vuoto: l'orchestratore
-    # effettuerà il "second hop" basato sui valori testuali (lookup mirato),
-    # garantendo corrispondenza con le righe mostrate al sintetizzatore.
-    if not (highlight_node_ids and len(highlight_node_ids) > 0):
-        logger.info(
-            "Nessun nodo nei records e nessun id noto: salto ricostruzione per favorire second hop"
-        )
-        return {}, "no_nodes_detected"
-
-    # SECONDA: prova a ricostruire dalla query (solo se abbiamo id noti)
-    logger.info("Nessun grafo nei records, tento ricostruzione dalla query")
+    # 2. TENTA RICOSTRUZIONE DA QUERY (Fix per Problema 2A: RETURN c.name)
+    # Se l'estrazione diretta fallisce (es. query aggregata),
+    # PROVIAMO SEMPRE a ricostruire dalla query.
+    logger.info("Nessun grafo nei records, tento ricostruzione dalla query...")
     rebuilt_graph = _reconstruct_graph_from_query(query, limit=limit)
+
     if rebuilt_graph and rebuilt_graph.get("nodes"):
         logger.info(f"Grafo ricostruito: {len(rebuilt_graph['nodes'])} nodi")
         if highlight_node_ids and GRAPH_HIGHLIGHT_RESULTS:
             _apply_result_highlight(rebuilt_graph, highlight_node_ids)
+
         _enrich_graph_meta(
             rebuilt_graph,
             source="reconstructed_from_query",
@@ -3953,16 +4037,28 @@ def build_graph_payload_from_results(
         )
         return rebuilt_graph, "reconstructed_from_query"
 
-    pivot = _infer_query_context_pivot(query, records)
-    if pivot and graph_payload and graph_payload.get("nodes"):
-        logger.info(f"🎯 Pivot rilevato: {pivot}")
-        _attach_pivot_hub(graph_payload, pivot, highlight_node_ids, limit=limit)
-        # Salva pivot per frontend
-        meta = graph_payload.setdefault("meta", {})
-        meta["query_pivot"] = pivot  # 🔥 Frontend lo userà per espansioni
+    # 3. TENTA "SECOND HOP" (Fallback per soli risultati testuali)
+    candidate_source = make_context_json_serializable(records[:GRAPH_MAX_LIMIT])
+    value_candidates = _collect_entity_candidates_from_records(candidate_source)
+    if value_candidates:
+        logger.info(
+            f"Ricostruzione fallita, tento 'second hop' con {len(value_candidates)} candidati testuali."
+        )
+        fallback_graph, fallback_highlight = _build_graph_from_entity_candidates(
+            value_candidates, limit
+        )
+        if fallback_graph and fallback_graph.get("nodes"):
+            _enrich_graph_meta(
+                fallback_graph,
+                source="result_nodes_lookup",
+                limit=limit,
+                highlight_ids=fallback_highlight,
+                layout=layout,
+                record_count=len(records or []),
+            )
+            return fallback_graph, "result_nodes_lookup"
 
-    return graph_payload, graph_origin
-
+    # 4. FALLIMENTO
     logger.warning("Nessun grafo trovato né nei records né nella ricostruzione")
     empty = {}
     _enrich_graph_meta(
@@ -3976,41 +4072,81 @@ def build_graph_payload_from_results(
     return empty, "no_nodes_detected"
 
 
-def _infer_pivot_from_query(query: str) -> Optional[Dict[str, str]]:
-    """Prova a inferire un 'pivot' (es. Ditta con un valore fissato) dalla query.
-
-    Ritorna un dict con: {label, var, prop, value, rel_type} se individuato.
-    """
+# (SOSTITUISCI QUESTA FUNZIONE - attorno a linea 1558)
+def _infer_pivot_from_query(query: str) -> Optional[Dict[str, Any]]:
+    """Prova a inferire un 'pivot' (es. Ditta con un valore fissato) dalla query."""
     try:
         if not query:
             return None
         q = " ".join(query.split())
-        # Cerca pattern (c:Cliente)-[:REL]->(d:Ditta)
-        m = re.search(
-            r"\(([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*Cliente\)\s*-\s*\[:\s*([A-Z0-9_]+)\s*\]\s*->\s*\(([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*Ditta\)",
-            q,
-        )
-        if not m:
-            return None
-        cvar, rel_type, dvar = m.group(1), m.group(2), m.group(3)
-        # WHERE d.xxx = 'val' oppure = 123
-        w = re.search(
-            rf"WHERE\s+{dvar}\.([a-zA-Z0-9_`]+)\s*=\s*([\"']?)([^\"'\s]+)\2",
+
+        # Pattern 1: (var1:Label1)-[...]->(var2:Label2)
+        m1 = re.search(
+            r"\(([a-z0-9_]+)\s*:\s*([a-zA-Z_`]+)\)"  # (c:Cliente) -> c, Cliente
+            r"\s*-\s*\[(?:[a-z0-9_]*)?\s*:\s*([a-zA-Z_`]+)\s*\]\s*->\s*"  # -[:REL]-> -> REL
+            r"\(([a-z0-9_]+)\s*:\s*([a-zA-Z_`]+)\)",  # (d:Ditta) -> d, Ditta
             q,
             re.IGNORECASE,
         )
-        if not w:
+
+        # Pattern 2: (var1:Label1)<-[...]-(var2:Label2)
+        m2 = re.search(
+            r"\(([a-z0-9_]+)\s*:\s*([a-zA-Z_`]+)\)"  # (d:Ditta) -> d, Ditta
+            r"\s*<-\s*\[(?:[a-z0-9_]*)?\s*:\s*([a-zA-Z_`]+)\s*\]\s*-\s*"  # <-[:REL]- -> REL
+            r"\(([a-z0-9_]+)\s*:\s*([a-zA-Z_`]+)\)",  # (c:Cliente) -> c, Cliente
+            q,
+            re.IGNORECASE,
+        )
+
+        if m1:
+            cvar, clabel, rel_type, dvar, dlabel = m1.groups()
+        elif m2:
+            dvar, dlabel, rel_type, cvar, clabel = m2.groups()
+        else:
+            return None  # Nessun pattern trovato
+
+        # Cerca il WHERE: var.prop = 'valore' (stringa) O var.prop = 123 (numero)
+        w_match = re.search(
+            rf"WHERE\s+({dvar}|{cvar})\.([a-zA-Z0-9_`]+)\s*=\s*(?:(['\"])(.*?)\3|(-?\d+(?:\.\d+)?))",
+            q,
+            re.IGNORECASE,
+        )
+
+        if not w_match:
             return None
-        prop = w.group(1).strip("`")
-        value = w.group(3)
+
+        var_matched = w_match.group(1)
+        prop = w_match.group(2).strip("`")
+        val_string = w_match.group(4)  # Valore stringa (es. '2')
+        val_numeric = w_match.group(5)  # Valore numerico
+
+        if val_string is not None:
+            value = val_string
+            value_type = "string"
+        elif val_numeric is not None:
+            value = float(val_numeric) if "." in val_numeric else int(val_numeric)
+            value_type = "number"
+        else:
+            return None
+
+        # Identifica chi è il pivot (quello nel WHERE)
+        if var_matched.lower() == dvar.lower():
+            pivot_label, result_label = dlabel, clabel
+        else:
+            pivot_label, result_label = clabel, dlabel
+
+        logger.info(f"[Pivot] Pivot Trovato: {pivot_label} {prop}={value}")
+
         return {
-            "label": "Ditta",
-            "var": dvar,
+            "label": pivot_label.strip("`"),
             "prop": prop,
             "value": value,
-            "rel_type": rel_type,
+            "value_type": value_type,
+            "rel_type": rel_type.strip("`"),
+            "result_label": result_label.strip("`"),
         }
-    except Exception:
+    except Exception as e:
+        logger.error(f"Errore _infer_pivot_from_query: {e}")
         return None
 
 
@@ -4137,31 +4273,32 @@ def _attach_pivot_hub(
     limit: Optional[int],
 ) -> None:
     """
-    VERSIONE MIGLIORATA:
-    - Aggiunge il nodo pivot al grafo
-    - Collega TUTTI i nodi risultato al pivot (anche se mancano edge nel grafo originale)
-    - Usa il valore pivot per filtrare le relazioni corrette
+    Aggiunge il nodo pivot (es. Ditta) e collega i nodi risultato
+    (es. Clienti) ad esso.
     """
-    if not graph_payload or not graph_payload.get("nodes"):
-        return
-
     try:
-        label = pivot.get("label") or "Ditta"
-        prop = pivot.get("property") or "dittaId"
-        value = pivot.get("value") or ""
-        rel_type = "APPARTIENE_A"  # Relazione standard Cliente->Ditta
+        # === 1. LEGGI I DATI DAL PIVOT ===
+        label = pivot.get("label")
+        prop = pivot.get("prop")
+        value = pivot.get("value")
+        value_type = pivot.get("value_type", "string")  # Leggiamo il tipo
+        rel_type = pivot.get("rel_type")
+        result_label = pivot.get("result_label")  # La label dei nodi da collegare
 
-        if not value:
+        if not all([label, prop, value is not None, rel_type]):
+            logger.warning("Pivot non valido, mancano dati.")
             return
 
-        # 1) Recupera il nodo pivot da DB
-        is_numeric = re.fullmatch(r"-?\d+(?:\.\d+)?", value or "") is not None
-        if is_numeric:
+        # === 2. QUESTA È LA LOGICA CHE SOSTITUISCE IL TUO:" ===
+        # Ora leggiamo 'value_type' invece di provare a indovinare con il regex
+
+        if value_type == "number":
             node_query = f"MATCH (d:`{label}`) WHERE d.{prop} = $v RETURN d LIMIT 1"
-            params = {"v": float(value) if "." in value else int(value)}
+            params = {"v": value}  # 'value' è GIA un numero (int/float)
         else:
+            # Default a stringa
             node_query = f"MATCH (d:`{label}`) WHERE toLower(trim(d.{prop})) = toLower(trim($v)) RETURN d LIMIT 1"
-            params = {"v": value}
+            params = {"v": str(value)}  # 'value' è GIA una stringa
 
         recs = execute_cypher_with_records(node_query, params)
         if not recs:
@@ -4176,6 +4313,7 @@ def _attach_pivot_hub(
                 break
 
         if not pivot_node:
+            logger.warning(f"Pivot node ({label}) non trovato nei record.")
             return
 
         pivot_payload = _node_to_payload(pivot_node)
@@ -4183,9 +4321,9 @@ def _attach_pivot_hub(
         if not pivot_id:
             return
 
+        # === 3. AGGIUNGI IL PIVOT AL GRAFO ===
         nodes = graph_payload.setdefault("nodes", [])
         edges = graph_payload.setdefault("edges", [])
-
         existing_ids = {str(n.get("id")) for n in nodes if n and n.get("id")}
 
         # Aggiungi pivot se mancante
@@ -4197,14 +4335,17 @@ def _attach_pivot_hub(
                 f"✅ Pivot hub aggiunto: {label} {prop}={value} (id={pivot_id})"
             )
 
-        # 2) Identifica nodi risultato (possono essere clienti, fornitori, etc)
+        # === 4. IDENTIFICA I NODI RISULTATO DA COLLEGARE ===
+        result_ids = result_ids or set()
         if not result_ids:
-            # Fallback: tutti i nodi Cliente nel grafo
-            result_ids = {
-                str(n.get("id"))
-                for n in nodes
-                if n and "Cliente" in (n.get("labels") or [])
-            }
+            # Se non abbiamo ID, collega tutti i nodi della 'result_label'
+            result_label = pivot.get("result_label")  # (Aggiunto dal nuovo 'infer')
+            if result_label:
+                result_ids = {
+                    str(n.get("id"))
+                    for n in nodes
+                    if n and result_label in (n.get("labels") or [])
+                }
 
         if not result_ids:
             logger.warning("Nessun nodo risultato identificato per collegare al pivot")
@@ -4212,49 +4353,37 @@ def _attach_pivot_hub(
 
         # 3) Query MASSIVA per recuperare TUTTE le relazioni mancanti
         # Cruciale: Filtra per il valore del pivot per evitare collegamenti errati
-        edge_query = f"""
-        UNWIND $ids AS eid
-        MATCH (c) WHERE elementId(c) = eid
-        MATCH (c)-[r:`{rel_type}`]->(d:`{label}`)
-        WHERE d.{prop} = $pivot_value
-        RETURN r, c, d
-        LIMIT $lim
-        """
+        edge_query_fwd = (
+            f"UNWIND $ids AS eid "
+            f"MATCH (c) WHERE elementId(c)=eid "
+            f"MATCH (c)-[r:`{rel_type}`]->(d) WHERE elementId(d)=$pid "
+            f"RETURN r"
+        )
+        edge_query_bwd = (
+            f"UNWIND $ids AS eid "
+            f"MATCH (c) WHERE elementId(c)=eid "
+            f"MATCH (c)<-[r:`{rel_type}`]-(d) WHERE elementId(d)=$pid "
+            f"RETURN r"
+        )
 
         lim = max(1, min(int(limit or GRAPH_DEFAULT_LIMIT), GRAPH_MAX_LIMIT))
 
-        # Converti pivot value al tipo corretto
-        if is_numeric:
-            pivot_value = float(value) if "." in value else int(value)
-        else:
-            pivot_value = value
-
+        # Prova prima in una direzione
         erecs = execute_cypher_with_records(
-            edge_query,
-            {"ids": list(result_ids), "pivot_value": pivot_value, "lim": lim},
+            edge_query_fwd, {"ids": list(result_ids), "pid": pivot_id, "lim": lim}
         )
+
+        # Se non trova, prova nella direzione opposta
+        if not erecs:
+            erecs = execute_cypher_with_records(
+                edge_query_bwd, {"ids": list(result_ids), "pid": pivot_id, "lim": lim}
+            )
 
         if not erecs:
             logger.warning(
-                f"Nessuna relazione {rel_type} trovata verso pivot {label}={value}"
+                f"Nessuna relazione '{rel_type}' trovata tra {len(result_ids)} nodi e il pivot {pivot_id}"
             )
-            # OPZIONE: Crea edge "stub" visibili ma disabilitati (tratteggiati)
-            # Commentare questa sezione se non si vuole creare collegamenti fittizi
-            edge_map = {str(e.get("id")) for e in edges if e and e.get("id")}
-            for rid in result_ids:
-                stub_edge_id = f"stub::{rid}-->{pivot_id}"
-                if stub_edge_id not in edge_map:
-                    edges.append(
-                        {
-                            "id": stub_edge_id,
-                            "type": rel_type,
-                            "source": rid,
-                            "target": pivot_id,
-                            "properties": {},
-                            "_stub": True,  # Marker per frontend (stile tratteggiato)
-                        }
-                    )
-                    edge_map.add(stub_edge_id)
+            # NON creare edge "stub" fittizi se non esistono
             return
 
         # Aggiungi relazioni reali
@@ -4263,13 +4392,19 @@ def _attach_pivot_hub(
 
         for er in erecs:
             rel = er.get("r")
-            source_node = er.get("c")
-            target_node = er.get("d")
 
             if not isinstance(rel, Relationship):
                 continue
 
+            # === INIZIO FIX ===
+            # Non abbiamo 'source_node' e 'target_node' dai risultati della query.
+            # Li prendiamo direttamente dall'oggetto 'rel'.
+            source_node = rel.start_node
+            target_node = rel.end_node
+            # === FINE FIX ===
+
             # Assicurati che i nodi sorgente/destinazione siano nel grafo
+            # (Questa logica ora funzionerà)
             if source_node and isinstance(source_node, Node):
                 src_id = _extract_node_identity(source_node)
                 if src_id and src_id not in existing_ids:
@@ -4281,6 +4416,7 @@ def _attach_pivot_hub(
                 if tgt_id and tgt_id not in existing_ids:
                     nodes.append(_node_to_payload(target_node))
                     existing_ids.add(tgt_id)
+            # === FINE BLOCCO CORRETTO ===
 
             ep = _relationship_to_payload(rel)
             eid = str(ep.get("id"))
@@ -4297,7 +4433,7 @@ def _attach_pivot_hub(
         meta["pivot"] = {
             "id": pivot_id,
             "label": label,
-            "property": prop,
+            "prop": prop,
             "value": value,
             "rel_type": rel_type,
             "edges_added": added_count,

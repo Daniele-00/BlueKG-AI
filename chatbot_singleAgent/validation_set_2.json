@@ -11,8 +11,8 @@
     },
     {
         "id": "TEST-03-Genera la query Cypher per rispondere a questo input in italiano",
-        "input": "Elenca i 5 clienti che hanno fatturato di più che si trovano in Umbria",
-        "output": "MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) WHERE toLower(trim(l.regione)) = 'umbria' MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN c.name AS cliente, sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC LIMIT 5"
+        "input": "Elenca i 5 clienti che hanno fatturato di più che si trovano a Perugia",
+        "output": "MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) WHERE toLower(trim(l.localita)) = 'perugia' MATCH (c)-[:HA_RICEVUTO]->(:Documento)-[:CONTIENE_RIGA]->(dr:RigaDocumento) WHERE dr.tipoValore = 'Fatturato' AND dr.importo > 0 RETURN c.name AS cliente, sum(dr.importo) AS fatturatoTotale ORDER BY fatturatoTotale DESC LIMIT 5"
     },
     {
         "id": "TEST-04-Genera la query Cypher per rispondere a questo input in italiano",
@@ -191,8 +191,8 @@
     },
     {
         "id": "TEST-39-Genera la query Cypher per rispondere a questo input in italiano",
-        "input": "Elenca 10 clienti dell'azienda '1'",
-        "output": "MATCH (d:Ditta {dittaId: '1'})<-[:APPARTIENE_A]-(c:Cliente) RETURN c.name AS cliente ORDER BY cliente LIMIT 10"
+        "input": "Elenca i clienti dell'azienda '1' situati nella provincia di 'PG'",
+        "output": "MATCH (d:Ditta {dittaId: '1'})<-[:APPARTIENE_A]-(c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) WHERE toLower(trim(l.provincia)) = 'pg' RETURN c.name AS cliente ORDER BY cliente"
     },
     {
         "id": "TEST-40-Genera la query Cypher per rispondere a questo input in italiano",
@@ -356,8 +356,8 @@
     },
     {
         "id": "TEST-72-Genera la query Cypher per rispondere a questo input in italiano",
-        "input": "Elenca 5 clienti situati in Umbria",
-        "output": "MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) WHERE toLower(trim(l.regione)) = 'umbria' RETURN DISTINCT c.name AS cliente ORDER BY cliente LIMIT 5"
+        "input": "Elenca 5 clienti situati a Perugia",
+        "output": "MATCH (c:Cliente)-[:HAS_ADDRESS]->(l:Luogo) WHERE toLower(trim(l.localita)) = 'perugia' RETURN DISTINCT c.name AS cliente ORDER BY cliente LIMIT 5"
     },
     {
         "id": "TEST-73-Genera la query Cypher per rispondere a questo input in italiano",

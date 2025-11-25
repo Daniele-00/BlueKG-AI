@@ -1,11 +1,13 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
-from langchain_community.graphs import Neo4jGraph
+from langchain_neo4j import Neo4jGraph
 
 # from langchain_ollama import OllamaLLM
-from langchain.chains import GraphCypherQAChain
+# Correggi la riga 6 (o quella dove si trova l'import)
+from langchain_neo4j.chains.graph_qa.cypher import GraphCypherQAChain
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.output_parsers import StrOutputParser
-from langchain.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate
 from cachetools import TTLCache
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
@@ -15,7 +17,7 @@ import logging
 import time
 
 # Importazione dei modelli LLM
-from langchain_community.chat_models import ChatOllama
+from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
 import os
 
@@ -43,10 +45,16 @@ MODELS = {
         base_url="http://172.16.30.23:11434",
         request_timeout=120.0,
     ),
+    "gemini-2.5-flash": ChatGoogleGenerativeAI(
+        model="gemini-2.5-flash",
+        temperature=0,
+        max_output_tokens=8000,
+        api_key="AIzaSyDrZGR3fth5wq1eR1WjFfKezz0e20i9eDs",
+    ),
 }
 
 # 2. Scelta del modello
-MODELLO_SELEZIONATO = "gpt-4o"
+MODELLO_SELEZIONATO = "llama3"  # Cambia qui per selezionare il modello desiderato
 
 # 3. Inizializza l'LLM scelto
 llm = MODELS[MODELLO_SELEZIONATO]

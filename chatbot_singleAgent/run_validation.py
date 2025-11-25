@@ -112,123 +112,6 @@ def _env_float(name: str, default: float) -> float:
 
 NEO4J_QUERY_TIMEOUT_SECONDS = _env_float("NEO4J_QUERY_TIMEOUT_SECONDS", 30.0)
 
-# =======================================================================
-# CONFIGURAZIONI MODELLI
-# =======================================================================
-
-# Config per approccio SPECIALIST
-CONFIGS_SPECIALIST = {
-    "gpt4o-mini": {
-        "contextualizer": "gpt-4o-mini",
-        "router": "gpt-4o-mini",
-        "coder": "gpt-4o-mini",
-        "general_conversation": "gpt-4o-mini",
-        "synthesizer": "gpt-4o-mini",
-        "translator": "gpt-4o-mini",
-    },
-    "llama3-groq": {
-        "contextualizer": "llama-70b-groq-versatile",
-        "router": "llama-70b-groq-versatile",
-        "coder": "llama-70b-groq-versatile",
-        "synthesizer": "llama-70b-groq-versatile",
-        "translator": "llama-70b-groq-versatile",
-        "general_conversation": "llama-70b-groq-versatile",
-    },
-    "gemini-2.5-pro": {
-        "contextualizer": "gemini-2.5-pro",
-        "router": "gemini-2.5-pro",
-        "coder": "gemini-2.5-pro",
-        "general_conversation": "gemini-2.5-pro",
-        "synthesizer": "gemini-2.5-pro",
-        "translator": "gemini-2.5-pro",
-    },
-    "gemini-2.5-flash": {
-        "contextualizer": "gemini-2.5-flash",
-        "router": "gemini-2.5-flash",
-        "coder": "gemini-2.5-flash",
-        "general_conversation": "gemini-2.5-flash",
-        "social_router": "gemini-2.5-flash",
-        "entity_extractor": "gemini-2.5-flash",
-        "social_conversation": "gemini-2.5-flash",
-        "synthesizer": "gemini-2.5-flash",
-        "translator": "gemini-2.5-flash",
-    },
-    "gpt4o": {
-        "contextualizer": "gpt4o",
-        "router": "gpt4o",
-        "coder": "gpt4o",
-        "general_conversation": "gpt4o",
-        "synthesizer": "gpt4o",
-        "translator": "gpt4o",
-    },
-    "llama3": {
-        "contextualizer": "llama3",
-        "router": "llama3",
-        "coder": "llama3",
-        "general_conversation": "llama3",
-        "social_router": "llama3",
-        "entity_extractor": "gemini-2.5-flash",
-        "social_conversation": "llama3",
-        "synthesizer": "gemini-2.5-flash",
-        "translator": "llama3",
-    },
-    "llama3-coder": {
-        "contextualizer": "gpt-4o-mini",
-        "router": "gpt-4o-mini",
-        "coder": "llama3",
-        "general_conversation": "llama3",
-        "synthesizer": "gpt-4o-mini",
-        "translator": "gpt-4o-mini",
-    },
-    "llama3-8b-vertex": {
-        "contextualizer": "llama3-8b-vertex",
-        "coder": "llama3-8b-vertex",
-        "router": "gpt-4o-mini",
-        "general_conversation": "gemini-1.5-pro",
-        "synthesizer": "gpt-4o-mini",
-        "translator": "llama3-8b-vertex",
-    },
-}
-
-# Config per approccio HYBRID (senza router)
-CONFIGS_HYBRID = {
-    "gpt4o-mini": {
-        "contextualizer": "gpt-4o-mini",
-        "coder": "gpt-4o-mini",
-        "synthesizer": "llama3",
-        "translator": "gpt-4o-mini",
-    },
-    "gpt4o-coder": {
-        "contextualizer": "gpt-4o-mini",
-        "coder": "gpt-4o",
-        "synthesizer": "llama3",
-        "translator": "gpt-4o-mini",
-    },
-    "llama3-coder": {
-        "contextualizer": "gpt-4o-mini",
-        "coder": "llama3",
-        "synthesizer": "gpt-4o-mini",
-        "translator": "gpt-4o-mini",
-    },
-    "llama3-full": {
-        "contextualizer": "llama3",
-        "coder": "llama3",
-        "synthesizer": "llama3",
-        "translator": "llama3",
-    },
-    "gpt4o-full": {
-        "contextualizer": "gpt-4o",
-        "coder": "gpt-4o",
-        "synthesizer": "gpt-4o",
-        "translator": "gpt-4o",
-    },
-    "llama3-8b-vertex": {
-        "contextualizer": "llama3-8b-vertex",
-        "coder": "llama3-8b-vertex",
-        "synthesizer": "gpt-4o-mini",
-        "translator": "llama3-8b-vertex",
-    },
-}
 
 # =======================================================================
 # UTILITY FUNCTIONS
@@ -545,61 +428,6 @@ def clear_system_cache():
     except:
         pass
     return False
-
-
-def get_config_path(approach: str) -> Path:
-    """Ritorna il path di config/models.yaml per l'approccio."""
-    if approach == "specialist":
-        return SPECIALIST_DIR / "config" / "models.yaml"
-    elif approach == "hybrid":
-        return HYBRID_DIR / "config" / "models.yaml"
-    else:
-        raise ValueError(f"Approccio sconosciuto: {approach}")
-
-
-def update_model_config(approach: str, config_name: str):
-    """Aggiorna config/models.yaml dell'approccio specificato."""
-    config_path = get_config_path(approach)
-
-    if not config_path.exists():
-        print(f"Config non trovato: {config_path}")
-        return False
-
-    # Scegli config giusta
-    configs = CONFIGS_SPECIALIST if approach == "specialist" else CONFIGS_HYBRID
-
-    if config_name not in configs:
-        print(f"Config '{config_name}' non esiste per approccio '{approach}'")
-        return False
-
-    # Leggi e aggiorna
-    with open(config_path, "r") as f:
-        config = yaml.safe_load(f)
-
-    config["agent_models"] = configs[config_name]
-
-    with open(config_path, "w") as f:
-        yaml.dump(config, f, default_flow_style=False)
-
-    print(f"Config aggiornata: {approach}/{config_name}")
-    return True
-
-
-def prompt_restart_api(approach: str):
-    """Chiede all'utente di riavviare l'API giusta."""
-    if approach == "specialist":
-        script = "chatbot_specialist/chatbot_specialist.py"
-    else:
-        script = "chatbot_hybrid/chatbot_hybrid.py"
-
-    print(f"\n RIAVVIA L'API!")
-    print(
-        f"   cd {SPECIALIST_DIR.parent.name}/{approach.replace('specialist', 'chatbot_specialist').replace('hybrid', 'chatbot_hybrid')}"
-    )
-    print(
-        f"   uvicorn {'chatbot_specialist' if approach == 'specialist' else 'chatbot_hybrid'}:app --reload"
-    )
-    input("\n   Premi ENTER quando pronto...")
 
 
 def wait_for_api():
@@ -957,186 +785,50 @@ def run_validation(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Validation universale")
-    parser.add_argument(
-        "--approach", choices=["specialist", "hybrid"], help="Approccio da testare"
-    )
-    parser.add_argument("--config", help="Config da testare")
-    parser.add_argument(
-        "--compare",
-        nargs="+",
-        help="Confronta config specifiche (formato: specialist-gpt4o-mini hybrid-gpt4o-mini)",
-    )
-    parser.add_argument(
-        "--compare-approaches",
-        action="store_true",
-        help="Confronta specialist-gpt4o-mini vs hybrid-gpt4o-mini",
-    )
-    parser.add_argument(
-        "--compare-all",
-        action="store_true",
-        help="Testa tutte le config dell'approccio scelto",
-    )
-    parser.add_argument("--list", action="store_true", help="Lista config")
-    # Soglie informative (CLI override; fallback a env o default)
-    try:
-        import os as _os
+    import argparse
 
-        _def_min_qsim = float(_os.getenv("VAL_MIN_QUERY_SIM", "0.8"))
-    except Exception:
-        _def_min_qsim = 0.8
+    parser = argparse.ArgumentParser(description="Validation versione monolitica")
+    parser.add_argument(
+        "--model-name",
+        default="gpt-4o",
+        help="Nome del modello usato dal monolitico (solo per etichetta nei report)",
+    )
     parser.add_argument(
         "--min-query-sim",
         type=float,
-        default=_def_min_qsim,
-        help="Soglia minima query similarity registrata nei report (default 0.8 o VAL_MIN_QUERY_SIM)",
+        default=0.8,
+        help="Soglia minima per registrare la query similarity (non influenza la PASS principale)",
     )
-    try:
-        _def_min_jaccard = float(os.getenv("VAL_MIN_JACCARD", "0.8"))
-    except Exception:
-        _def_min_jaccard = 0.8
     parser.add_argument(
         "--min-jaccard",
         type=float,
-        default=_def_min_jaccard,
-        help="Soglia minima dell'indice di Jaccard per considerare i risultati equivalenti (default 0.8 o VAL_MIN_JACCARD)",
+        default=0.8,
+        help="Soglia minima dell'indice di Jaccard (metrica ausiliaria)",
     )
     parser.add_argument(
         "--examples-top-k",
         type=int,
-        help="Override del numero di esempi RAG passati al coder (se omesso usa il default del server)",
+        help="Se lo passi, forza il numero di esempi few-shot (se supportato dal server)",
     )
 
     args = parser.parse_args()
 
-    if args.list:
-        print("\nSPECIALIST Configs (with router):")
-        for name in CONFIGS_SPECIALIST.keys():
-            print(f"  - specialist-{name}")
-        print("\nHYBRID Configs (without router):")
-        for name in CONFIGS_HYBRID.keys():
-            print(f"  - hybrid-{name}")
+    # 1) Controlla che l'API monolitica sia su /health
+    if not wait_for_api():
+        print("❌ API non raggiungibile su", API_URL)
         return
 
-    if args.compare_approaches:
-        # Confronta rappresentativi
-        print("Confronto Specialist vs Hybrid (entrambi gpt4o-mini)\n")
+    # 2) Pulisci cache lato server
+    clear_system_cache()
 
-        # Test specialist
-        print("1Testing SPECIALIST...")
-        update_model_config("specialist", "gpt4o-mini")
-        prompt_restart_api("specialist")
-        wait_for_api()
-        res1 = run_validation(
-            "specialist",
-            "gpt4o-mini",
-            args.min_query_sim,
-            args.min_jaccard,
-            args.examples_top_k,
-        )
-
-        # Test hybrid
-        print("\nTesting HYBRID...")
-        update_model_config("hybrid", "gpt4o-mini")
-        prompt_restart_api("hybrid")
-        wait_for_api()
-        res2 = run_validation(
-            "hybrid",
-            "gpt4o-mini",
-            args.min_query_sim,
-            args.min_jaccard,
-            args.examples_top_k,
-        )
-
-        # Confronto
-        if res1 and res2:
-            print("\n" + "=" * 70)
-            print("CONFRONTO FINALE")
-            print("=" * 70)
-            print(
-                f"Specialist: {res1['accuracy']:.1f}% ({res1['success']}/{res1['total']})"
-            )
-            print(
-                f"Hybrid:     {res2['accuracy']:.1f}% ({res2['success']}/{res2['total']})"
-            )
-            diff = res1["accuracy"] - res2["accuracy"]
-            winner = "Specialist" if diff > 0 else "Hybrid"
-            print(f"\n Winner: {winner} (+{abs(diff):.1f}%)")
-        return
-
-    if args.compare:
-        # Parse formato: specialist-gpt4o-mini hybrid-gpt4o-mini
-        all_results = []
-        for full_name in args.compare:
-            parts = full_name.split("-", 1)
-            if len(parts) != 2:
-                print(f"Formato errato: {full_name} (usa: specialist-gpt4o-mini)")
-                continue
-
-            approach, config = parts
-            update_model_config(approach, config)
-            prompt_restart_api(approach)
-            wait_for_api()
-            res = run_validation(
-                approach,
-                config,
-                args.min_query_sim,
-                args.min_jaccard,
-                args.examples_top_k,
-            )
-            if res:
-                all_results.append(res)
-
-        # Summary
-        if len(all_results) > 1:
-            print("\n" + "=" * 70)
-            print("COMPARISON SUMMARY")
-            print("=" * 70)
-            for r in all_results:
-                print(
-                    f"{r['config']:<30} {r['accuracy']:>5.1f}% ({r['success']}/{r['total']})"
-                )
-        return
-
-    if args.approach and args.config:
-        if args.compare_all:
-            # Tutte le config dell'approccio
-            configs = (
-                CONFIGS_SPECIALIST if args.approach == "specialist" else CONFIGS_HYBRID
-            )
-            for cfg_name in configs.keys():
-                update_model_config(args.approach, cfg_name)
-                prompt_restart_api(args.approach)
-                wait_for_api()
-                run_validation(
-                    args.approach,
-                    cfg_name,
-                    args.min_query_sim,
-                    args.min_jaccard,
-                    args.examples_top_k,
-                )
-        else:
-            # Singola config
-            update_model_config(args.approach, args.config)
-            prompt_restart_api(args.approach)
-            wait_for_api()
-            run_validation(
-                args.approach,
-                args.config,
-                args.min_query_sim,
-                args.min_jaccard,
-                args.examples_top_k,
-            )
-        return
-
-    # Help
-    parser.print_help()
-    print("\nEsempi:")
-    print("  python run_validation.py --approach specialist --config gpt4o-mini")
-    print("  python run_validation.py --approach hybrid --config gpt4o-mini")
-    print("  python run_validation.py --compare-approaches")
-    print(
-        "  python run_validation.py --compare specialist-gpt4o-mini hybrid-gpt4o-coder"
+    # 3) Esegui la validazione.
+    # Qui uso 'monolithic' come etichetta di approach e il nome modello passato da CLI
+    run_validation(
+        approach="monolithic",
+        config_name=args.model_name,
+        min_query_sim=args.min_query_sim,
+        min_jaccard=args.min_jaccard,
+        examples_top_k=args.examples_top_k,
     )
 
 
