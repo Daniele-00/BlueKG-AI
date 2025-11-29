@@ -1,0 +1,68 @@
+================================================================================
+VALIDATION SUMMARY REPORT
+Generated: 2025-11-25 15:54:32
+================================================================================
+
+
+============================================================
+Configuration: specialist-gemini-2.5-flash
+============================================================
+Accuracy:      83.02%
+Success:       0/106
+Avg Time:      13.96s
+Repair Triggered: 0
+Repair Fixed:     0
+
+============================================================
+Configuration: specialist-gemini-2.5-flash
+============================================================
+Accuracy:      80.19%
+Success:       0/106
+Avg Time:      13.24s
+Repair Triggered: 0
+Repair Fixed:     0
+
+============================================================
+Configuration: specialist-gemini-2.5-flash
+============================================================
+Accuracy:      61.32%
+Success:       0/106
+Avg Time:      15.87s
+Repair Triggered: 0
+Repair Fixed:     0
+
+============================================================
+Configuration: specialist-gemini-2.5-flash
+============================================================
+Accuracy:      77.36%
+Success:       0/106
+Avg Time:      13.85s
+Repair Triggered: 0
+Repair Fixed:     0
+
+============================================================
+Configuration: specialist-gemini-2.5-flash
+============================================================
+Accuracy:      78.30%
+Success:       0/106
+Avg Time:      17.39s
+Repair Triggered: 0
+Repair Fixed:     0
+
+============================================================
+Configuration: specialist-gemini-2.5-flash
+============================================================
+Accuracy:      72.64%
+Success:       0/106
+Avg Time:      63.40s
+Repair Triggered: 0
+Repair Fixed:     0
+
+============================================================
+Configuration: specialist-gemini-2.5-flash
+============================================================
+Accuracy:      25.00%
+Success:       0/4
+Avg Time:      23.71s
+Repair Triggered: 1
+Repair Fixed:     0

@@ -82,7 +82,7 @@ SPECIALIST_DIR = SCRIPT_DIR.parent / "chatbot_specialist"
 HYBRID_DIR = SCRIPT_DIR.parent / "chatbot_hybrid"
 
 # Output directories (dentro validation/)
-VALIDATION_SET = SCRIPT_DIR / "validation_set_2.json"
+VALIDATION_SET = SCRIPT_DIR / "validation_set.json"
 # VALIDATION_SET = SCRIPT_DIR / "test_set.json"
 RESULTS_DIR = SCRIPT_DIR / "validation_results"
 RESULTS_DIR.mkdir(exist_ok=True)
@@ -628,14 +628,7 @@ def run_validation(
     min_jaccard: float = 0.8,
     examples_top_k: Optional[int] = None,
 ):
-    """Esegue la validazione.
-
-    Criterio di successo:
-    - strict: risultati uguali (o equivalenti via fallback). Solo questo determina il PASS.
-    - jaccard_similarity viene registrata per analisi, ma non influisce sull'esito.
-      Lo stesso per la query similarity.
-    """
-    """Esegue validazione."""
+    """Esegue la validazione con metriche avanzate per il Repair Loop."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     full_config_name = f"{approach}-{config_name}"
 
@@ -661,10 +654,15 @@ def run_validation(
         validation_data = json.load(f)
 
     total = len(validation_data)
-    # Contatori
+    # Contatori esistenti
     success_strict = 0
     success_similarity = 0
     success_jaccard = 0
+
+    # Nuovi contatori per Repair
+    total_repair_triggered = 0
+    total_repair_success = 0
+
     results = []
 
     print(f"Test totali: {total}\n")
@@ -676,6 +674,15 @@ def run_validation(
         expected_cypher = test["output"]
 
         print(f"[{i}/{total}] {test_id}")
+
+        # Inizializza metriche Repair per questo test
+        metrics = {
+            "strict_match_final": False,
+            "neo4j_error_before": False,
+            "neo4j_error_after": False,
+            "repair_used": False,
+            "repair_iterations": 0,
+        }
 
         result = {
             "config": full_config_name,
@@ -696,6 +703,12 @@ def run_validation(
             "similarity_success": None,
             "examples_top_k": examples_top_k,
             "success_reason": None,
+            # Placeholder per metriche repair nel JSON finale
+            "strict_match_final": False,
+            "neo4j_error_before": False,
+            "neo4j_error_after": False,
+            "repair_used": False,
+            "repair_iterations": 0,
         }
 
         try:
@@ -703,6 +716,7 @@ def run_validation(
             payload = {"question": question, "user_id": f"val_{i}_{timestamp}"}
             if examples_top_k is not None and examples_top_k > 0:
                 payload["examples_top_k"] = examples_top_k
+
             response = requests.post(
                 f"{API_URL}/ask",
                 json=payload,
@@ -722,6 +736,16 @@ def run_validation(
             timing = data.get("timing_details", {})
             specialist_used = data.get("specialist")
 
+            # --- NUOVO: Estrazione dati Repair Audit ---
+            repair_audit = data.get("repair_audit", [])
+
+            if repair_audit and len(repair_audit) > 0:
+                metrics["repair_used"] = True
+                metrics["repair_iterations"] = len(repair_audit)
+                # Se il repair è scattato, significa che c'è stato un errore prima
+                metrics["neo4j_error_before"] = True
+                total_repair_triggered += 1
+
             result["generated_cypher"] = generated
             result["time_total"] = timing.get("totale")
             result["time_generation"] = timing.get("generazione_query")
@@ -737,6 +761,8 @@ def run_validation(
                 try:
                     gen_res = session.execute_read(run_query, generated)
                 except Exception as e:
+                    # Se fallisce qui, l'errore persiste anche dopo il repair (o senza repair)
+                    metrics["neo4j_error_after"] = True
                     raise ValueError(f"Syntax error: {str(e)[:80]}")
 
                 exp_res = session.execute_read(run_query, expected_cypher)
@@ -753,8 +779,10 @@ def run_validation(
                 jaccard_success = isinstance(jac, (int, float)) and jac >= float(
                     min_jaccard
                 )
+
                 result["similarity_success"] = bool(similarity_success)
                 result["jaccard_success"] = bool(jaccard_success)
+
                 if similarity_success:
                     success_similarity += 1
                 if jaccard_success:
@@ -762,17 +790,25 @@ def run_validation(
 
                 same = compare_results(gen_res, exp_res)
                 if not same:
-                    # Fallback 1: consenti colonne extra nella generata se i valori delle colonne attese coincidono
                     same = compare_subset_on_expected_columns(gen_res, exp_res)
                 if not same:
-                    # Fallback 2: se entrambe sono scalari numerici uguali entro tolleranza, considera PASS
                     same = compare_numeric_scalar(gen_res, exp_res)
+
+                # --- AGGIORNAMENTO METRICHE STRICT ---
+                metrics["strict_match_final"] = bool(same)
                 result["strict_success"] = bool(same)
+
                 if same:
                     result["success"] = True
                     result["success_reason"] = "strict"
                     success_strict += 1
-                    print("  ✅ PASS (strict)")
+
+                    # Se il repair era stato usato ed è finito con successo
+                    if metrics["repair_used"]:
+                        total_repair_success += 1
+                        print("  ✅ PASS (strict) [REPAIRED]")
+                    else:
+                        print("  ✅ PASS (strict)")
                 else:
                     # Spiega mismatch
                     diff = explain_mismatch(gen_res, exp_res, max_rows=3)
@@ -783,28 +819,36 @@ def run_validation(
                     print("  ❌ MISMATCH")
                     if diff.get("note"):
                         print(f"     diff: {diff['note']}")
-                    if diff.get("missing"):
-                        print(f"     missing sample: {diff['missing']}")
-                    if diff.get("extra"):
-                        print(f"     extra sample: {diff['extra']}")
-                    # Non interrompo; salvo risultato e continuo
 
         except Exception as e:
             result["error"] = str(e)[:200]
+            # Se siamo qui, c'è un errore finale
+            metrics["neo4j_error_after"] = True
             label = "TIMEOUT" if isinstance(e, TimeoutError) else "FAIL"
             print(f"  {label}: {str(e)[:120]}")
+
+        # Aggiorna il dizionario result con le metriche del repair
+        result.update(
+            {
+                "strict_match_final": metrics["strict_match_final"],
+                "neo4j_error_before": metrics["neo4j_error_before"],
+                "neo4j_error_after": metrics["neo4j_error_after"],
+                "repair_used": metrics["repair_used"],
+                "repair_iterations": metrics["repair_iterations"],
+            }
+        )
 
         results.append(result)
 
     driver.close()
 
     # Metriche
-    # Accuracy basata esclusivamente sullo strict
     accuracy_str = (success_strict / total * 100) if total > 0 else 0
     accuracy_sim = (success_similarity / total * 100) if total > 0 else 0
     accuracy_jac = (success_jaccard / total * 100) if total > 0 else 0
     avg_time = sum(r["time_total"] for r in results if r["time_total"]) / total
-    # Medie indici (solo dove calcolati)
+
+    # Medie indici
     jac_values = [
         r["jaccard_index"]
         for r in results
@@ -845,8 +889,10 @@ def run_validation(
                     "min_jaccard": float(min_jaccard),
                     "avg_time": avg_time,
                     "avg_jaccard": avg_jaccard,
-                    # Manteniamo solo l'avg del Jaccard principale come metrica informativa
                     "avg_query_similarity": avg_qsim,
+                    # Nuovi Summary Repair
+                    "total_repair_triggered": total_repair_triggered,
+                    "total_repair_success": total_repair_success,
                 },
                 "results": results,
             },
@@ -855,7 +901,7 @@ def run_validation(
             default=_json_default,
         )
 
-    # Scrive anche un report testuale/Markdown affiancato al JSON, con le metriche chiave
+    # Report Markdown Aggiornato
     report_md = model_results_dir / f"{timestamp}.md"
     try:
         lines = []
@@ -864,51 +910,39 @@ def run_validation(
         lines.append("## Summary")
         lines.append(f"- Total: {total}")
         lines.append(f"- Success (strict): {success_strict}")
-        lines.append(f"- Success (jaccard>=threshold): {success_jaccard}")
         lines.append(f"- Success (query-sim): {success_similarity}")
         lines.append(f"- Failures: {total - success_strict}")
         lines.append(f"- Accuracy (strict): {accuracy_str:.1f}%")
-        lines.append(
-            f"- Accuracy (query-sim): {accuracy_sim:.1f}%  |  Accuracy (jaccard): {accuracy_jac:.1f}%"
-        )
-        lines.append(
-            f"- Thresholds: min_query_sim={float(min_query_sim):.2f} | min_jaccard={float(min_jaccard):.2f}"
-        )
-        if examples_top_k is not None:
-            lines.append(f"- Examples Top-K override: {examples_top_k}")
-        else:
-            lines.append("- Examples Top-K override: default server value")
         lines.append(f"- Avg Time: {avg_time:.2f}s")
-        if avg_jaccard is not None:
-            lines.append(f"- Avg Jaccard: {avg_jaccard:.3f}")
-        # Solo il Jaccard principale come informazione
-        if avg_qsim is not None:
-            lines.append(f"- Avg Query Similarity: {avg_qsim:.3f}")
         lines.append("")
-        lines.append("## Tests")
+        lines.append("## Repair Analysis")
+        lines.append(f"- Repair Triggered: {total_repair_triggered}")
+        lines.append(f"- Repair Success (Strict Match): {total_repair_success}")
+        if total_repair_triggered > 0:
+            rate = (total_repair_success / total_repair_triggered) * 100
+            lines.append(f"- Repair Success Rate: {rate:.1f}%")
+        lines.append("")
+        lines.append("## Tests Detail")
         lines.append(
-            "| # | Test ID | PASS | Strict | Jac | QuerySim | Gen Time (s) | Note |"
+            "| ID | Strict | Repair? | Err Before | Err After | Gen Time | Note |"
         )
-        lines.append(
-            "|:-:|:--------|:----:|:------:|:---:|:--------:|:------------:|:-----|"
-        )
-        for idx, r in enumerate(results, 1):
-            ok = "✅" if r.get("success") else "❌"
-            strict_mark = "✅" if r.get("strict_success") else "❌"
-            jac = r.get("jaccard_index")
-            qsim = r.get("query_similarity")
-            jac_s = f"{jac:.3f}" if isinstance(jac, (int, float)) else "-"
-            qsim_s = f"{qsim:.3f}" if isinstance(qsim, (int, float)) else "-"
+        lines.append("|:---|:---:|:---:|:---:|:---:|:---:|:-----|")
+        for r in results:
+            ok = "✅" if r.get("strict_match_final") else "❌"
+            rep = "🔧" if r.get("repair_used") else "-"
+            err_b = "⚠️" if r.get("neo4j_error_before") else "-"
+            err_a = "💀" if r.get("neo4j_error_after") else "-"
             tgen = r.get("time_total")
-            tgen_s = f"{tgen:.2f}" if isinstance(tgen, (int, float)) else "-"
+            tgen_s = f"{tgen:.2f}s" if isinstance(tgen, (int, float)) else "-"
             note = r.get("error") or ""
+            if len(note) > 30:
+                note = note[:27] + "..."
             lines.append(
-                f"| {idx} | {r.get('test_id','')} | {ok} | {strict_mark} | {jac_s} | {qsim_s} | {tgen_s} | {note} |"
+                f"| {r.get('test_id','')} | {ok} | {rep} | {err_b} | {err_a} | {tgen_s} | {note} |"
             )
         with open(report_md, "w", encoding="utf-8") as rf:
             rf.write("\n".join(lines) + "\n")
     except Exception:
-        # Il report testo non deve bloccare la validazione
         pass
 
     print("\n" + "=" * 70)
@@ -916,21 +950,10 @@ def run_validation(
     print("=" * 70)
     print(f"Config:    {full_config_name}")
     print(f"Accuracy (strict):     {accuracy_str:.1f}% ({success_strict}/{total})")
-    print(f"Accuracy (jaccard):    {accuracy_jac:.1f}% ({success_jaccard}/{total})")
-    print(f"Accuracy (query-sim):  {accuracy_sim:.1f}% ({success_similarity}/{total})")
     print(f"Avg Time:  {avg_time:.2f}s")
-    if avg_jaccard is not None:
-        print(f"Avg Jaccard: {avg_jaccard:.3f}")
-    # NOTE: rimosse varianti di Jaccard per semplicità
-    if avg_qsim is not None:
-        print(f"Avg QuerySim: {avg_qsim:.3f}")
-    print(
-        f"Thresholds → min_query_sim={float(min_query_sim):.2f} | min_jaccard={float(min_jaccard):.2f}"
-    )
-    if examples_top_k is not None:
-        print(f"Examples Top-K override: {examples_top_k}")
-    else:
-        print("Examples Top-K override: default server value")
+    print(f"Repair Triggered:      {total_repair_triggered}")
+    print(f"Repair Success:        {total_repair_success}")
+
     print(f"Saved:     {output_file.name}")
 
     return {
@@ -938,16 +961,10 @@ def run_validation(
         "approach": approach,
         "config_name": config_name,
         "accuracy": accuracy_str,
-        "accuracy_strict": accuracy_str,
-        "accuracy_similarity": accuracy_sim,
-        "accuracy_jaccard": accuracy_jac,
         "success": success_strict,
-        "success_strict": success_strict,
-        "success_similarity": success_similarity,
-        "success_jaccard": success_jaccard,
         "total": total,
         "avg_time": avg_time,
-        "examples_top_k": examples_top_k,
+        "repair_triggered": total_repair_triggered,
     }
 
 

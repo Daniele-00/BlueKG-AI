@@ -9,6 +9,7 @@ Usage:
 
 import json
 import os
+import textwrap
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import seaborn as sns
@@ -56,18 +57,30 @@ def load_results(json_paths):
     """Carica uno o più file JSON di risultati."""
     results = []
     for path in json_paths:
-        with open(path, "r") as f:
-            data = json.load(f)
-            results.append(data)
+        try:
+            with open(path, "r") as f:
+                data = json.load(f)
+                results.append(data)
+        except Exception as e:
+            print(f"⚠️ Errore caricamento {path}: {e}")
     return results
 
 
 def build_config_label(result):
-    """Ritorna etichetta con config e top-k."""
-    top_k = result.get("examples_top_k") or result["summary"].get("examples_top_k")
-    if top_k is None:
-        top_k = "0"
-    return f"{result['config']}\n(k={top_k})"
+    """
+    Ritorna etichetta con config.
+    Aggiunge top-k solo se presente e diverso da None.
+    """
+    # Cerca top_k nel livello principale o nel summary
+    top_k = result.get("examples_top_k")
+
+    if top_k is None and "summary" in result:
+        top_k = result["summary"].get("examples_top_k")
+
+    if top_k is not None:
+        return f"{result['config']}\n(k={top_k})"
+    else:
+        return result["config"]
 
 
 def extract_timing_data(results_list):
@@ -102,51 +115,50 @@ def plot_accuracy_comparison(results_list, output_dir):
     labels = [build_config_label(r) for r in results_list]
     x = np.arange(len(labels))
     width = 0.6
-    values = [r["summary"].get("accuracy_strict", 0.0) for r in results_list]
 
-    # --- MODIFICA 1: Mappa Colori per Configurazione ---
-    # Sostituisci il gradiente con una mappa di colori
-    # Aggiungi i tuoi modelli e i colori che preferisci
+    # FIX: Usa .get con fallback alla vecchia chiave 'accuracy'
+    values = [
+        r["summary"].get("accuracy_strict", r["summary"].get("accuracy", 0.0))
+        for r in results_list
+    ]
+
     color_map = {
-        "gpt-4o": "#2ecc71",  # Verde (Ho usato "gpt-4o" invece di "gpt4o")
-        "gpt4o": "#2ecc71",  # Verde (Aggiungo entrambi per sicurezza)
-        "llama3": "#3498db",  # Blu
-        "llama3-groq": "#9b59b6",  # Viola
-        "gemini": "#f1c40f",  # Giallo
-        "default": "#95a5a6",  # Grigio per modelli non mappati
+        "gpt-4o": "#2ecc71",
+        "gpt4o": "#2ecc71",
+        "llama3": "#3498db",
+        "llama3-groq": "#9b59b6",
+        "gemini": "#f1c40f",
+        "default": "#95a5a6",
     }
 
     colors = []
-    model_names_in_data = set()  # Per creare la legenda dinamicamente
+    model_names_in_data = set()
 
-    # Assegna un colore a ogni barra in base al nome modello/config
     for r in results_list:
-        # Deriva il nome modello dalla config (es. "specialist-gpt4o", "specialist-llama3-coder")
         specialist_name = r.get("config", "default").lower()
-
         found_key = "default"
         for model_key in color_map:
             if model_key in specialist_name:
                 found_key = model_key
                 break
-
         colors.append(color_map[found_key])
         if found_key != "default":
-            model_names_in_data.add(found_key)  # Aggiunge "gpt4o", "llama3", etc.
+            model_names_in_data.add(found_key)
 
-    # --------------------------------------------------
+    wrapped_labels = [
+        "\n".join(textwrap.wrap(l, width=15, break_long_words=False)) for l in labels
+    ]
 
     bars = ax.bar(
         x,
         values,
         width,
-        color=colors,  # <-- MODIFICA: Usa la nuova lista di colori
+        color=colors,
         edgecolor="black",
         linewidth=1.5,
         alpha=0.85,
     )
 
-    # (Il tuo codice per le etichette va bene)
     for bar, value in zip(bars, values):
         height = bar.get_height()
         ax.text(
@@ -161,7 +173,15 @@ def plot_accuracy_comparison(results_list, output_dir):
         )
 
     ax.set_ylabel("Accuracy (%)", fontsize=13, fontweight="bold")
-    ax.set_xlabel("Configuration (Top-K)", fontsize=13, fontweight="bold")
+    has_top_k = any(
+        (r.get("examples_top_k") is not None)
+        or (r.get("summary", {}).get("examples_top_k") is not None)
+        for r in results_list
+    )
+
+    x_label_text = "Configuration (Top-K)" if has_top_k else "Configuration"
+
+    ax.set_xlabel(x_label_text, fontsize=13, fontweight="bold")
     ax.set_title(
         "Strict Accuracy by Configuration",
         fontsize=16,
@@ -169,15 +189,13 @@ def plot_accuracy_comparison(results_list, output_dir):
         pad=20,
     )
     ax.set_xticks(x)
-    ax.set_xticklabels(labels, rotation=15, ha="right")
+    ax.set_xticklabels(wrapped_labels, rotation=0, ha="center", fontsize=11)
     ax.set_ylim(0, 110)
     ax.grid(axis="y", alpha=0.4, linestyle="--")
     ax.set_axisbelow(True)
 
     ax.axhline(y=50, color="gray", linestyle=":", alpha=0.5, linewidth=2)
 
-    # --- MODIFICA 2: Aggiungi la Legenda ---
-    # Creiamo una legenda "manuale" con i colori che abbiamo trovato
     legend_patches = []
     for model_name in sorted(list(model_names_in_data)):
         if model_name in color_map:
@@ -187,23 +205,19 @@ def plot_accuracy_comparison(results_list, output_dir):
     if legend_patches:
         ax.legend(
             handles=legend_patches,
-            title="Modello",  # Titolo della legenda
+            title="Modello",
             fontsize=11,
             title_fontsize=13,
-            bbox_to_anchor=(1.02, 1),  # Posiziona fuori dal grafico
+            bbox_to_anchor=(1.02, 1),
             loc="upper left",
         )
-    # ----------------------------------------
 
-    # --- MODIFICA 3: Fai spazio alla legenda ---
-    # Sostituisci plt.tight_layout() con questo per lasciare spazio a destra
     plt.subplots_adjust(right=0.85)
-    # ------------------------------------------
 
     plt.savefig(
         output_dir / "accuracy_comparison.png",
         dpi=300,
-        bbox_inches="tight",  # 'bbox_inches' includerà la legenda nel salvataggio
+        bbox_inches="tight",
         facecolor="white",
     )
     print(f"✅ Salvato: accuracy_comparison.png")
@@ -215,13 +229,14 @@ def plot_timing_breakdown(results_list, output_dir):
 
     labels = [build_config_label(r) for r in results_list]
 
-    # Calcola medie
     avg_generation = []
     avg_db = []
     avg_synthesis = []
 
     for result in results_list:
         n = result["summary"]["total"]
+        if n == 0:
+            n = 1  # avoid zero division
         gen = sum((t.get("time_generation") or 0) for t in result["results"]) / n
         db = sum((t.get("time_db") or 0) for t in result["results"]) / n
         syn = sum((t.get("time_synthesis") or 0) for t in result["results"]) / n
@@ -233,7 +248,6 @@ def plot_timing_breakdown(results_list, output_dir):
     x = np.arange(len(labels))
     width = 0.65
 
-    # Stacked bars con colori moderni
     p1 = ax.bar(
         x,
         avg_generation,
@@ -264,7 +278,6 @@ def plot_timing_breakdown(results_list, output_dir):
         linewidth=2,
     )
 
-    # Totale sopra
     totals = [sum(x) for x in zip(avg_generation, avg_db, avg_synthesis)]
     for i, total in enumerate(totals):
         ax.text(
@@ -304,7 +317,6 @@ def plot_timing_breakdown(results_list, output_dir):
 
 
 def plot_success_rate_by_test(results_list, output_dir):
-    """Heatmap disattivata (non generiamo questo grafico)."""
     return
 
 
@@ -313,12 +325,17 @@ def plot_time_vs_accuracy(results_list, output_dir):
     fig, ax = plt.subplots(figsize=(11, 8))
 
     labels = [build_config_label(r) for r in results_list]
-    accuracies = [r["summary"]["accuracy_strict"] for r in results_list]
+
+    # --- FIX HERE: Fallback to 'accuracy' if 'accuracy_strict' is missing ---
+    accuracies = [
+        r["summary"].get("accuracy_strict", r["summary"].get("accuracy", 0.0))
+        for r in results_list
+    ]
+
     avg_times = [r["summary"]["avg_time"] for r in results_list]
 
     colors = sns.color_palette("husl", len(labels))
 
-    # Scatter con annotazioni migliorate
     for i, (label, acc, time) in enumerate(zip(labels, accuracies, avg_times)):
         ax.scatter(
             time,
@@ -330,7 +347,6 @@ def plot_time_vs_accuracy(results_list, output_dir):
             alpha=0.75,
             zorder=3,
         )
-        # Annotazioni con sfondo
         ax.annotate(
             label,
             (time, acc),
@@ -370,46 +386,46 @@ def plot_jaccard_metrics(results_list, output_dir):
     avg_jac = [r.get("summary", {}).get("avg_jaccard") for r in results_list]
 
     color_map = {
-        "gpt-4o": "#2ecc71",  # Verde (Ho usato "gpt-4o" invece di "gpt4o")
-        "gpt4o": "#2ecc71",  # Verde (Aggiungo entrambi per sicurezza)
-        "llama3": "#3498db",  # Blu
-        "llama3-groq": "#9b59b6",  # Viola
-        "gemini": "#f1c40f",  # Giallo
-        "default": "#95a5a6",  # Grigio per modelli non mappati
+        "gpt-4o": "#2ecc71",
+        "gpt4o": "#2ecc71",
+        "llama3": "#3498db",
+        "llama3-groq": "#9b59b6",
+        "gemini": "#f1c40f",
+        "default": "#95a5a6",
     }
     colors = []
     model_names_in_data = set()
 
     for r in results_list:
-        # Deriva il nome modello dalla config (es. "specialist-gpt4o", "specialist-llama3-coder")
         specialist_name = r.get("config", "default").lower()
-
         found_key = "default"
         for model_key in color_map:
             if model_key in specialist_name:
                 found_key = model_key
                 break
-
         colors.append(color_map[found_key])
         if found_key != "default":
-            model_names_in_data.add(found_key)  # Aggiunge "gpt4o", "llama3", etc.
-    # Se nessuna metrica è presente, non generare il grafico
+            model_names_in_data.add(found_key)
+
+    wrapped_labels = [
+        "\n".join(textwrap.wrap(l, width=15, break_long_words=False)) for l in configs
+    ]
     if not any(x is not None for x in (avg_jac)):
         return
 
     x = np.arange(len(configs))
-    width = 0.26
+    width = 0.5
 
-    fig, ax = plt.subplots(figsize=(13, 7))
+    fig, ax = plt.subplots(figsize=(12, 7))
 
     bars1 = ax.bar(
-        x - width,
-        [v if v is not None else np.nan for v in avg_jac],
+        x,
+        [v if v is not None else 0 for v in avg_jac],
         width,
-        label="Jaccard",
         color=colors,
         edgecolor="black",
         linewidth=1.2,
+        zorder=3,
     )
 
     ax.set_ylabel("Average Jaccard", fontsize=13, fontweight="bold")
@@ -420,12 +436,11 @@ def plot_jaccard_metrics(results_list, output_dir):
         pad=20,
     )
     ax.set_xticks(x)
-    ax.set_xticklabels(configs, rotation=15, ha="right")
-    ax.set_ylim(0, 1.08)
-    ax.grid(axis="y", alpha=0.4, linestyle="--")
+    ax.set_xticklabels(wrapped_labels, rotation=0, ha="center", fontsize=11)
+    ax.set_ylim(0, 1.1)
+    ax.grid(axis="y", alpha=0.4, linestyle="--", zorder=0)
     ax.set_axisbelow(True)
 
-    # Annotazioni sopra le barre
     for bar in bars1:
         height = bar.get_height()
         if not np.isnan(height):
@@ -437,8 +452,9 @@ def plot_jaccard_metrics(results_list, output_dir):
                 va="bottom",
                 fontsize=9,
                 fontweight="bold",
+                color="#333333",
             )
-    # Creiamo una legenda "manuale" con i colori che abbiamo trovato
+
     legend_patches = []
     for model_name in sorted(list(model_names_in_data)):
         if model_name in color_map:
@@ -448,18 +464,14 @@ def plot_jaccard_metrics(results_list, output_dir):
     if legend_patches:
         ax.legend(
             handles=legend_patches,
-            title="Modello",  # Titolo della legenda
+            title="Modello",
             fontsize=11,
             title_fontsize=13,
-            bbox_to_anchor=(1.02, 1),  # Posiziona fuori dal grafico
+            bbox_to_anchor=(1.02, 1),
             loc="upper left",
         )
-    # ----------------------------------------
 
-    # --- MODIFICA 3: Fai spazio alla legenda ---
-    # Sostituisci plt.tight_layout() con questo per lasciare spazio a destra
     plt.subplots_adjust(right=0.85)
-
     plt.tight_layout()
     plt.savefig(
         output_dir / "jaccard_metrics.png",
@@ -506,7 +518,6 @@ def plot_jaccard_distribution(results_list, output_dir):
             alpha=0.85,
         )
 
-        # Aggiungi valori sopra le barre se sono significativi
         for bar, count in zip(bars, counts):
             if count > 0:
                 ax.text(
@@ -528,7 +539,7 @@ def plot_jaccard_distribution(results_list, output_dir):
     ax.set_xticklabels(bin_labels, rotation=0)
     ax.grid(axis="y", alpha=0.4, linestyle="--")
     ax.set_axisbelow(True)
-    ax.legend(frameon=True, shadow=True, fancybox=True, loc="upper left")
+    ax.legend(frameon=True, shadow=True, fancybox=True, loc="upper center")
 
     plt.tight_layout()
     plt.savefig(
@@ -542,6 +553,8 @@ def plot_jaccard_distribution(results_list, output_dir):
 
 def plot_timing_distribution(df, output_dir):
     """Box plot: Distribuzione tempi per fase."""
+    if df.empty:
+        return
     fig, axes = plt.subplots(2, 2, figsize=(15, 11))
 
     phases = [
@@ -557,6 +570,9 @@ def plot_timing_distribution(df, output_dir):
             for config in df["config"].unique()
         ]
 
+        if not data_to_plot:
+            continue
+
         bp = ax.boxplot(
             data_to_plot,
             tick_labels=df["config"].unique(),
@@ -567,7 +583,6 @@ def plot_timing_distribution(df, output_dir):
             medianprops=dict(color="darkblue", linewidth=2),
         )
 
-        # Colori moderni
         colors = sns.color_palette("Set2", len(data_to_plot))
         for patch, color in zip(bp["boxes"], colors):
             patch.set_facecolor(color)
@@ -592,6 +607,143 @@ def plot_timing_distribution(df, output_dir):
     print(f"✅ Salvato: timing_distribution.png")
 
 
+def plot_repair_metrics(results_list, output_dir):
+    """
+    Genera grafici specifici per l'analisi del Repair Loop.
+    """
+    # Prepariamo i dati
+    data = []
+    for r in results_list:
+        config_label = build_config_label(r)
+
+        # Calcoli per config
+        total_tests = len(r["results"])
+        repair_triggered = sum(1 for t in r["results"] if t.get("repair_used"))
+
+        # Di quelli dove il repair è scattato, quanti sono finiti con successo (strict match)?
+        repair_success = sum(
+            1
+            for t in r["results"]
+            if t.get("repair_used") and t.get("strict_match_final")
+        )
+
+        # Errori tecnici
+        errors_before = sum(1 for t in r["results"] if t.get("neo4j_error_before"))
+        errors_after = sum(1 for t in r["results"] if t.get("neo4j_error_after"))
+
+        data.append(
+            {
+                "config": config_label,
+                "repair_triggered": repair_triggered,
+                "repair_success": repair_success,
+                "repair_fail": repair_triggered - repair_success,
+                "errors_before": errors_before,
+                "errors_after": errors_after,
+            }
+        )
+
+    df = pd.DataFrame(data)
+
+    # Se nessun modello ha usato il repair, saltiamo
+    if df.empty or df["repair_triggered"].sum() == 0:
+        print(
+            "⚠️ Nessun dato di Repair trovato nei risultati. Salto i grafici relativi."
+        )
+        return
+
+    # --- GRAFICO 1: EFFICACIA REPAIR (Stacked Bar) ---
+    fig1, ax1 = plt.subplots(figsize=(12, 7))
+    x = np.arange(len(df["config"]))
+    width = 0.5
+
+    # Barra totale triggerata (Sfondo rosso = falliti)
+    p1 = ax1.bar(
+        x,
+        df["repair_fail"],
+        width,
+        label="Repair Failed (Wrong Result)",
+        color="#e74c3c",
+        edgecolor="black",
+        bottom=df["repair_success"],
+    )
+    # Barra successi (Verde = corretti)
+    p2 = ax1.bar(
+        x,
+        df["repair_success"],
+        width,
+        label="Repair Succeeded (Strict Match)",
+        color="#2ecc71",
+        edgecolor="black",
+    )
+
+    ax1.set_ylabel("Number of Queries", fontsize=13, fontweight="bold")
+    ax1.set_title(
+        "Repair Loop Effectiveness\n(Triggered vs Fixed)",
+        fontsize=16,
+        fontweight="bold",
+        pad=20,
+    )
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(df["config"], rotation=15, ha="right")
+    ax1.legend()
+
+    # Annotazioni
+    for i in x:
+        total_trig = df.iloc[i]["repair_triggered"]
+        success = df.iloc[i]["repair_success"]
+        if total_trig > 0:
+            rate = (success / total_trig) * 100
+            ax1.text(
+                i,
+                total_trig + 0.5,
+                f"{rate:.0f}% Fixed",
+                ha="center",
+                va="bottom",
+                fontweight="bold",
+            )
+
+    plt.tight_layout()
+    plt.savefig(output_dir / "repair_effectiveness.png", dpi=300)
+    print(f"✅ Salvato: repair_effectiveness.png")
+
+    # --- GRAFICO 2: RIDUZIONE ERRORI TECNICI (Grouped Bar) ---
+    fig2, ax2 = plt.subplots(figsize=(12, 7))
+    width = 0.35
+
+    rects1 = ax2.bar(
+        x - width / 2,
+        df["errors_before"],
+        width,
+        label="Syntax Errors BEFORE Repair",
+        color="#f39c12",
+    )
+    rects2 = ax2.bar(
+        x + width / 2,
+        df["errors_after"],
+        width,
+        label="Syntax Errors AFTER Repair",
+        color="#8e44ad",
+    )
+
+    ax2.set_ylabel("Number of Technical Errors", fontsize=13, fontweight="bold")
+    ax2.set_title(
+        "Technical Error Mitigation\n(Before vs After Repair Loop)",
+        fontsize=16,
+        fontweight="bold",
+        pad=20,
+    )
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(df["config"], rotation=15, ha="right")
+    ax2.legend()
+
+    ax2.bar_label(rects1, padding=3)
+    ax2.bar_label(rects2, padding=3)
+
+    plt.tight_layout()
+    plt.savefig(output_dir / "repair_error_mitigation.png", dpi=300)
+    print(f"✅ Salvato: repair_error_mitigation.png")
+
+
 def generate_summary_report(results_list, output_dir):
     """Genera report testuale riassuntivo."""
     report_path = output_dir / "summary_report.txt"
@@ -606,7 +758,13 @@ def generate_summary_report(results_list, output_dir):
             f.write(f"\n{'='*60}\n")
             f.write(f"Configuration: {result['config']}\n")
             f.write(f"{'='*60}\n")
-            f.write(f"Accuracy:      {result['summary']['accuracy']:.2f}%\n")
+
+            # Safe access to accuracy
+            acc = result["summary"].get(
+                "accuracy_strict", result["summary"].get("accuracy", 0.0)
+            )
+            f.write(f"Accuracy:      {acc:.2f}%\n")
+
             success_total = (
                 result["summary"].get("success_attendibile")
                 or result["summary"].get("success")
@@ -614,55 +772,16 @@ def generate_summary_report(results_list, output_dir):
             )
             f.write(f"Success:       {success_total}/{result['summary']['total']}\n")
             f.write(f"Avg Time:      {result['summary']['avg_time']:.2f}s\n")
-            if "accuracy_strict" in result["summary"]:
-                f.write(
-                    f"Accuracy (strict):   {result['summary']['accuracy_strict']:.2f}%\n"
-                )
-            if "accuracy_jaccard" in result["summary"]:
-                f.write(
-                    f"Accuracy (jaccard):  {result['summary']['accuracy_jaccard']:.2f}%\n"
-                )
-            if "accuracy_similarity" in result["summary"]:
-                f.write(
-                    f"Accuracy (query-sim): {result['summary']['accuracy_similarity']:.2f}%\n"
-                )
-            thresholds = []
-            if "min_jaccard" in result["summary"]:
-                thresholds.append(f"Jaccard≥{result['summary']['min_jaccard']:.2f}")
-            if "min_query_similarity" in result["summary"]:
-                thresholds.append(
-                    f"QuerySim≥{result['summary']['min_query_similarity']:.2f}"
-                )
-            if thresholds:
-                f.write(f"Thresholds:   {', '.join(thresholds)}\n")
-            if result.get("examples_top_k") is not None:
-                f.write(f"Examples Top-K: {result['examples_top_k']}\n")
-            # Jaccard metrics (if present)
-            avg_jac = result.get("summary", {}).get("avg_jaccard")
 
-            if avg_jac is not None:
-                f.write(f"Avg Jaccard:   {avg_jac:.3f}\n")
-
-            # Failed tests
-            failed = [t for t in result["results"] if not t["success"]]
-            if failed:
-                f.write(f"\nFailed Tests ({len(failed)}):\n")
-                for test in failed:
-                    f.write(f"  - {test['test_id']}: {test['error'][:80]}...\n")
-
-        # Best config
-        best = max(results_list, key=lambda x: x["summary"]["accuracy"])
-        fastest = min(results_list, key=lambda x: x["summary"]["avg_time"])
-
-        f.write(f"\n\n{'='*80}\n")
-        f.write("BEST CONFIGURATIONS\n")
-        f.write(f"{'='*80}\n")
-        f.write(
-            f"Best Accuracy:  {best['config']} ({best['summary']['accuracy']:.2f}%)\n"
-        )
-        f.write(
-            f"Fastest:        {fastest['config']} ({fastest['summary']['avg_time']:.2f}s)\n"
-        )
+            # Dati repair se presenti
+            trig = sum(1 for t in result["results"] if t.get("repair_used"))
+            succ = sum(
+                1
+                for t in result["results"]
+                if t.get("repair_used") and t.get("strict_match_final")
+            )
+            f.write(f"Repair Triggered: {trig}\n")
+            f.write(f"Repair Fixed:     {succ}\n")
 
     print(f"✅ Salvato: summary_report.txt")
 
@@ -704,7 +823,7 @@ def main():
     plot_time_vs_accuracy(results, output_dir)
     plot_jaccard_metrics(results, output_dir)
     plot_jaccard_distribution(results, output_dir)
-
+    plot_repair_metrics(results, output_dir)
     # Timing distribution (serve DataFrame)
     df = extract_timing_data(results)
     plot_timing_distribution(df, output_dir)
@@ -715,14 +834,6 @@ def main():
     print("\n" + "=" * 60)
     print(f"✅ Tutti i grafici salvati in: {output_dir}/")
     print("=" * 60)
-    print("\nGrafici generati:")
-    print("  accuracy_comparison.png")
-    print("  timing_breakdown.png")
-    print("  accuracy_vs_time.png")
-    print("  jaccard_metrics.png")
-    print("  jaccard_distribution.png")
-    print("  timing_distribution.png")
-    print("  summary_report.txt")
 
 
 if __name__ == "__main__":

@@ -1,3 +1,0 @@
-Migliorare gestione nomi nelle domande (ovvero per far capire al sistema se la domanda è riferita a forntiroe, clinet o altro). 
-test improvement con e senza repair per far veder al prof miglioramento, espandere vlidation set e rivedere la struttura del grafo.  
-imgliroae anche visualizzazione del grafo con le rispsote

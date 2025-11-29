@@ -4595,7 +4595,6 @@ async def health_check():
 
 # ENDPOINT PER LE DOMANDE
 @app.post("/graph/expand")
-@app.post("/graph/expand")
 async def expand_graph(request: dict):
     """
     Endpoint migliorato con supporto pivot context.

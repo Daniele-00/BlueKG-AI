@@ -23,7 +23,7 @@ query_limits:
 retry:
   enabled: true
   max_attempts: 2                   # Numero massimo retry per query
-  retry_on_zero_results: false      # Retry se 0 risultati (costoso!)
+  retry_on_zero_results: true      # Retry se 0 risultati (costoso!)
   retry_on_syntax_error: true       # Retry se errore sintassi
 
 # Logging

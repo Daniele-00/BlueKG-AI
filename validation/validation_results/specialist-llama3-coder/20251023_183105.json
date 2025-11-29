@@ -1,7 +1,7 @@
 {
-  "config": "specialist-llama3-coder",
+  "config": "specialist-llama3",
   "approach": "specialist",
-  "config_name": "llama3-coder",
+  "config_name": "llama3",
   "timestamp": "20251023_183105",
   "examples_top_k": 10,
   "summary": {
