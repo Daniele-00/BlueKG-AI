@@ -1,4 +1,5 @@
-/venv
+venv/
+training_set/
 /sqlserver-backups
 /sqlserver-data
 /plugins
