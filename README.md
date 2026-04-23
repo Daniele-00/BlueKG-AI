@@ -50,48 +50,20 @@ ERP data is migrated from relational tables into a semantic graph through a cust
 ### 2. Multi-Agent Pipeline (LangChain + FastAPI)
 A request doesn't go through a single prompt. It flows through a sequence of specialized agents, each with a defined role and strict input/output contracts:
 
+```mermaid
+flowchart TD
+    A([User question]) --> B[Contextualizer\nresolves references]
+    B --> C[Router\nclassifies intent]
+    C --> D[Entity Extractor\n+ fuzzy resolver]
+    D --> E[Translator\nNL → English pivot]
+    F([Dynamic examples\nvia embeddings]) -.-> G
+    E --> G[Few-Shot Coder\ngenerates Cypher]
+    G --> H[Safety & Guards\nread-only · complexity · timeout]
+    H --> I[Query Repair\nauto-fix on failure]
+    J([Error feedback\nup to 3 retries]) -.-> I
+    I --> K[Synthesizer\nNL answer + data]
+    K --> L([Answer · Cypher · D3.js graph])
 ```
-User question (Italian/English)
-        │
-        ▼
-┌───────────────┐     ┌────────────┐     ┌──────────────────┐
-│ Contextualizer│────▶│   Router   │────▶│ Entity Extractor │
-│ resolves refs │     │ classifies │     │ + Fuzzy Resolver │
-└───────────────┘     └────────────┘     └────────┬─────────┘
-                                                   │
-                                                   ▼
-                                        ┌──────────────────┐
-                                        │    Translator    │
-                                        │  NL → EN pivot   │
-                                        └────────┬─────────┘
-                                                 │
-                                                 ▼
-                                        ┌──────────────────┐
-                                        │  Few-Shot Coder  │◀── Dynamic examples
-                                        │ generates Cypher │    via embeddings
-                                        └────────┬─────────┘
-                                                 │
-                                    ┌────────────▼────────────┐
-                                    │     Safety & Guards      │
-                                    │  read-only · complexity  │
-                                    │  timeout · SQL blocker   │
-                                    └────────────┬────────────┘
-                                                 │
-                                    ┌────────────▼────────────┐
-                                    │      Query Repair        │◀── error feedback
-                                    │  auto-fix on Neo4j fail  │    up to 3 retries
-                                    └────────────┬────────────┘
-                                                 │
-                                                 ▼
-                                        ┌──────────────────┐
-                                        │   Synthesizer    │
-                                        │ NL answer + data │
-                                        └────────┬─────────┘
-                                                 │
-                                                 ▼
-                                   Answer + Cypher + D3.js Graph
-```
-
 ### 3. Robustness by Design
 BlueAI is built for production enterprise environments:
 
