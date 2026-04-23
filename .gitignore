@@ -3,6 +3,7 @@ training_set/
 /sqlserver-backups
 /sqlserver-data
 /plugins
+chatbot_singleAgent/
 /ollama
 /__pycache__
 /nextCloudTables

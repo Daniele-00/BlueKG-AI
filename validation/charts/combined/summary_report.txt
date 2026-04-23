@@ -1,24 +1,15 @@
 ================================================================================
 VALIDATION SUMMARY REPORT
-Generated: 2025-11-30 18:06:43
+Generated: 2026-03-24 18:01:29
 ================================================================================
 
 
 ============================================================
-Configuration: monolithic-gemini-2.5-flash
+Configuration: specialist-gemini-2.5-flash
 ============================================================
-Accuracy:      65.09%
+Accuracy:      61.32%
 Success:       0/106
-Avg Time:      0.00s
-Repair Triggered: 0
-Repair Fixed:     0
-
-============================================================
-Configuration: monolithic-llama3
-============================================================
-Accuracy:      28.30%
-Success:       0/106
-Avg Time:      0.00s
+Avg Time:      15.87s
 Repair Triggered: 0
 Repair Fixed:     0
 
@@ -28,6 +19,60 @@ Configuration: specialist-gemini-2.5-flash
 Accuracy:      83.02%
 Success:       0/106
 Avg Time:      13.96s
+Repair Triggered: 0
+Repair Fixed:     0
+
+============================================================
+Configuration: specialist-gemini-2.5-flash
+============================================================
+Accuracy:      80.19%
+Success:       0/106
+Avg Time:      13.24s
+Repair Triggered: 0
+Repair Fixed:     0
+
+============================================================
+Configuration: specialist-gpt4o
+============================================================
+Accuracy:      84.91%
+Success:       0/106
+Avg Time:      16.39s
+Repair Triggered: 0
+Repair Fixed:     0
+
+============================================================
+Configuration: specialist-gpt4o
+============================================================
+Accuracy:      92.45%
+Success:       100/106
+Avg Time:      6.65s
+Repair Triggered: 0
+Repair Fixed:     0
+
+============================================================
+Configuration: specialist-gpt4o
+============================================================
+Accuracy:      86.79%
+Success:       95/106
+Avg Time:      6.78s
+Repair Triggered: 0
+Repair Fixed:     0
+
+============================================================
+Configuration: specialist-llama3
+============================================================
+Accuracy:      18.87%
+Success:       0/106
+Avg Time:      48.73s
+Repair Triggered: 0
+Repair Fixed:     0
+
+============================================================
+Configuration: specialist-llama3
+============================================================
+Accuracy:      76.42%
+Success:       81/106
+Avg Time:      34.86s
 Repair Triggered: 0
 Repair Fixed:     0
 

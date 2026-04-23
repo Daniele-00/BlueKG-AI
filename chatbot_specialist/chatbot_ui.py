@@ -751,7 +751,7 @@ HEALTH_URL = "http://localhost:8000/health"
 CACHE_URL = "http://localhost:8000/cache"
 CONVERSATION_URL = "http://localhost:8000/conversation"
 FEEDBACK_URL = "http://localhost:8000/feedback"
-GRAPH_EXPAND_URL = "http://localhost:8000/graph/expand"
+GRAPH_EXPAND_URL = "http://172.16.200.136:8000/graph/expand"
 SLOW_QUERY_LOG_PATH = Path("diagnostics/slow_queries.log")
 
 # --- INIZIALIZZAZIONE STATO SESSIONE ---
@@ -938,6 +938,8 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
         <button id="{element_id}-back"     class="btn">Indietro</button>
         <button id="{element_id}-freeze"   class="btn">Freeze</button>
         <button id="{element_id}-restore"  class="btn">Ripristina</button>
+        <button id="{element_id}-fullscreen" class="btn">⛶ Schermo intero</button>
+        <button id="{element_id}-export"   class="btn">📷 Esporta</button>
       </div>
 
       <!-- TOOLTIP -->
@@ -981,12 +983,12 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
 
       // PIVOT CONTEXT (usato per espansioni filtrate)
       const pivotContext = meta && meta.query_pivot ? meta.query_pivot : null;
-      
+
       const svg = d3.select("#{element_id}-svg")
         .attr("viewBox", [0, 0, width, height])
         .style("width","100%")
         .style("height","100%")
-        .style("background","#0b1220")
+        .style("background","#f8fafc")
         .style("border-radius","12px");
 
       const viewport = svg.append("g").attr("class", "viewport");
@@ -1005,7 +1007,7 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
       infoPanel.on("click", ev => ev.stopPropagation());
       const color = d3.scaleOrdinal(d3.schemeCategory10);
       const legend = d3.select("#{element_id}-legend");
-      
+
       const zoomInBtn = document.getElementById("{element_id}-zoom-in");
       const zoomOutBtn = document.getElementById("{element_id}-zoom-out");
       const fitBtn = document.getElementById("{element_id}-fit");
@@ -1013,7 +1015,7 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
       const backBtn = document.getElementById("{element_id}-back");
       const freezeBtn = document.getElementById("{element_id}-freeze");
       const restoreBtn = document.getElementById("{element_id}-restore");
-      
+
       let layoutFrozen = false;
       let selectedNode = null;
       let selectedEdge = null;
@@ -1061,7 +1063,7 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
         const rows = buildRowsFromObject(nodeData.properties || {{}}).slice(0,6);
         let html = `<div style='font-weight:600;margin-bottom:4px;'>${{escapeHtml(getNodeLabel(nodeData))}}</div>`;
         if(rows.length) {{
-          html += rows.map(row => 
+          html += rows.map(row =>
             `<div><span style='color:#94a3b8'>${{escapeHtml(row.label)}}:</span> ${{escapeHtml(row.value)}}</div>`
           ).join("");
         }} else {{
@@ -1088,13 +1090,13 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
         }}
         const rows = payload.rows || [];
         const rowsHtml = rows.length
-          ? rows.map(row => 
+          ? rows.map(row =>
               `<div class="info-row"><span>${{escapeHtml(row.label)}}</span><span>${{escapeHtml(row.value)}}</span></div>`
             ).join("")
           : '<div class="info-empty">Nessuna informazione disponibile</div>';
         const subtitleHtml = payload.subtitle ? `<div class="info-subtitle">${{escapeHtml(payload.subtitle)}}</div>` : "";
         const noteHtml = payload.note ? `<div class="info-note">${{escapeHtml(payload.note)}}</div>` : "";
-        
+
         infoPanel.style("display","block").html(
           `<div class="info-title">${{escapeHtml(payload.title || "Dettagli nodo")}}</div>` +
           subtitleHtml +
@@ -1178,7 +1180,7 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
         event.stopPropagation();
         if (event.altKey || event.metaKey) {{ focusNode(nodeData); return; }}
         if (event.shiftKey || event.ctrlKey) {{ togglePin(nodeData, event.currentTarget); return; }}
-        
+
         selectedNode = nodeData;
         selectedEdge = null;
         refreshSelections();
@@ -1206,7 +1208,7 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
       function mergeExpandedGraph(graphPayload, expandedNode) {{
         if(!graphPayload) return false;
         let changed = false;
-        
+
         const incomingNodes = (graphPayload.nodes || []).map(n => ({{...n, id:String(n.id)}}));
         incomingNodes.forEach(n => {{
           if(!nodeMap.has(n.id)) {{
@@ -1225,18 +1227,18 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
           const sourceNode = nodeMap.get(String(e.source));
           const targetNode = nodeMap.get(String(e.target));
           if(!sourceNode || !targetNode) return;
-          
+
           const enriched = {{
             ...e,
             id: e.id ? String(e.id) : `${{sourceNode.id}}->${{targetNode.id}}:${{e.type || "REL"}}`,
             source: sourceNode,
             target: targetNode,
           }};
-          
+
           const key = edgeKey(enriched);
           if(existingEdgeIds.has(key)) return;
           existingEdgeIds.add(key);
-          
+
           const withMark = expandedNode ? {{...enriched, _addedBy: expandedNode.id}} : enriched;
           links.push(withMark);
           changed = true;
@@ -1250,7 +1252,7 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
       async function expandNode(event, nodeData) {{
         event.stopPropagation();
         if(!nodeData || !nodeData.id) return;
-        
+
         // COLLAPSE se già espanso
         if (nodeData._expanded) {{
           const addedLinks = links.filter(l => l._addedBy === nodeData.id);
@@ -1261,7 +1263,7 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
             ])
           );
           // Rimuovi il nodo cliccato (che non va rimosso)
-          addedNodeIds.delete(nodeData.id);  
+          addedNodeIds.delete(nodeData.id);
           // 2. Controlla quali nodi rimuovere (non rimuovere se sono "ancorati" ad altri nodi espansi)
           const nodesToRemove = new Set(addedNodeIds);
           links.forEach(l => {{
@@ -1285,7 +1287,7 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
               links.splice(i, 1);
             }}
           }}
-          
+
           // 4. Rimuovi i nodi "orfani"
           for (let i = nodes.length - 1; i >= 0; i--) {{
             if (nodesToRemove.has(nodes[i].id)) {{
@@ -1297,39 +1299,39 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
           handleNodeClick({{ stopPropagation: () => {{}} }}, nodeData);
           return;
         }}
-        
+
         if(nodeData._expanding) return;
         nodeData._expanding = true;
-        
+
         showInfoPanel({{
           title: getNodeLabel(nodeData),
           subtitle: "Espansione vicini",
           note: "Recupero del vicinato in corso..."
         }});
-        
+
         try {{
           // 🆕 Passa pivot context se disponibile
           const requestBody = {{
             node_id: nodeData.id,
             limit: 25
           }};
-          
+
           if (pivotContext) {{
             requestBody.pivot_context = pivotContext;
           }}
-          
+
           const response = await fetch(expandEndpoint, {{
             method: "POST",
             headers: {{"Content-Type":"application/json"}},
             body: JSON.stringify(requestBody)
           }});
-          
+
           if(!response.ok) throw new Error("Espansione non disponibile");
-          
+
           const payload = await response.json();
           const graphPayload = (payload && payload.graph_data) || {{}};
           const changed = mergeExpandedGraph(graphPayload, nodeData);
-          
+
           if(changed) {{
             updateGraph(true);
             handleNodeClick({{ stopPropagation: () => {{}} }}, nodeData);
@@ -1451,7 +1453,7 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
 
       function getNodeLabel(d){{
         const p=d.properties||{{}};
-        
+
         // === FIX: Controlla TUTTE le proprietà "nome" conosciute ===
         return p.name || // Per Cliente
                p.nome || // Per Famiglia/Sottofamiglia
@@ -1489,83 +1491,83 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
 
       function updateLegend() {{
         const uniqueLabels = Array.from(new Set(nodes.flatMap(n => n.labels || ["Node"])));
-        
+
         // Inizializza visibleLabels se vuoto
         uniqueLabels.forEach(l => {{
           if (!visibleLabels.has(l)) {{
             visibleLabels.add(l);
           }}
         }});
-        
+
         const resultCount = (meta && meta.result_node_ids && meta.result_node_ids.length)
           ? meta.result_node_ids.length
           : nodes.filter(n => n.isResult).length;
         const nodeCount = nodes.length;
         const linkCount = links.length;
         const resultsPart = resultCount ? (' · Risultati: ' + String(resultCount)) : '';
-        
+
         let head = '';
-        head += "<div style='margin-bottom:6px;'>";
-        head += "<strong style='color:#38bdf8; font-size: 1.05rem;'>Legenda</strong>";
-        head += "<div style='color:#cbd5e1; font-size:0.9rem;'>" +
+        head += "<div style='margin-bottom:8px;'>";
+        head += "<strong style='color:#38bdf8; font-size: 1.3rem; font-weight:800; letter-spacing:0.5px;'>Legenda</strong>";
+        head += "<div style='color:#cbd5e1; font-size:1.0rem; margin-top:3px;'>" +
                 "Nodi: " + String(nodeCount) +
                 " · Relazioni: " + String(linkCount) +
                 resultsPart +
                 "</div>";
         head += "</div>";
-        
+
         const labelsHtml = uniqueLabels.map(lbl => {{
-          const col = color(lbl);
-          return (
-            "<span style='display:inline-flex;align-items:center;margin-right:10px; font-size: 0.95rem;'>" +
-            "<span style='width:10px;height:10px;background:" + col + ";" +
-            "border-radius:50%;display:inline-block;margin-right:6px;border:1px solid #334155;'></span>" +
-            String(lbl) +
-            "</span>"
-          );
-        }}).join("<br/>");
-        
-        // 🆕 FILTRI CHECKBOX
-        const filtersHtml = uniqueLabels.map(lbl => {{
-          const checked = visibleLabels.has(lbl) ? 'checked' : '';
-          return (
-            "<label style='display:flex;align-items:center;gap:6px;margin-top:4px; cursor:pointer;'>" +
-            "<input class='legend-filter' type='checkbox' data-label='" + String(lbl) + "' " + checked + " />" +
-            "<span>" + String(lbl) + "</span>" +
-            "</label>"
-          );
+            const col = color(lbl);
+            return (
+                "<div style='display:flex;align-items:center;margin-bottom:5px;'>" +
+                "<span style='width:14px;height:14px;min-width:14px;background:" + col + ";" +
+                "border-radius:50%;display:inline-block;margin-right:8px;" +
+                "border:2px solid rgba(255,255,255,0.3);box-shadow:0 0 4px " + col + "55;'></span>" +
+                "<span style='font-size:1.05rem;font-weight:600;color:#f1f5f9;'>" + String(lbl) + "</span>" +
+                "</div>"
+            );
         }}).join("");
-        
+
+        // 🆕 FILTRI CHECKBOX
+       const filtersHtml = uniqueLabels.map(lbl => {{
+            const checked = visibleLabels.has(lbl) ? 'checked' : '';
+            return (
+                "<label style='display:flex;align-items:center;gap:8px;margin-top:6px;cursor:pointer;'>" +
+                "<input class='legend-filter' type='checkbox' data-label='" + String(lbl) + "' " + checked + " />" +
+                "<span style='font-size:1.05rem;font-weight:500;color:#e2e8f0;'>" + String(lbl) + "</span>" +
+                "</label>"
+            );
+        }}).join("");
+
         let legendHtml = head + labelsHtml +
           "<hr style='border-color:rgba(59,130,246,0.15);margin:6px 0;' />" +
           "<div style='font-size:0.85rem;color:#cbd5e1;margin-bottom:4px;'>🔍 Filtri label</div>" +
           filtersHtml;
-        
+
         if(meta && meta.stub_nodes_added) {{
           legendHtml += "<hr style='border-color:rgba(59,130,246,0.35);margin:6px 0;' />";
           legendHtml += "<span style='display:flex;align-items:center;gap:8px;font-size:0.9rem;'><span style='width:12px;height:12px;border-radius:50%;border:2px dashed rgba(148,163,184,0.9);'></span>Segnaposto (nessun nodo Neo4j trovato)</span>";
         }}
-        
+
         if (pivotContext) {{
           legendHtml += "<hr style='border-color:rgba(59,130,246,0.35);margin:6px 0;' />";
-          legendHtml += "<div style='font-size:0.85rem;color:#facc15;'><strong>🎯 Pivot attivo:</strong> " + 
+          legendHtml += "<div style='font-size:0.85rem;color:#facc15;'><strong>🎯 Pivot attivo:</strong> " +
                         String(pivotContext.label) + " = " + String(pivotContext.value) + "</div>";
           legendHtml += "<div style='font-size:0.75rem;color:#94a3b8;margin-top:2px;'>Le espansioni filtreranno solo relazioni verso questo pivot</div>";
         }}
-        
+
         legendHtml += "<hr style='border-color:rgba(59,130,246,0.15);margin:6px 0;' />";
-        legendHtml += "<span style='font-size:0.85rem;color:#94a3b8;'>Clic: dettagli · Alt/⌘: focus · Shift/Ctrl: blocca · Doppio click: espandi/collassa</span>";
-        
+        legendHtml += "<span style='font-size:0.95rem;color:#94a3b8;'>Clic: dettagli · Doppio click: espandi</span>";
         legend.html(legendHtml);
-        
+
         // Listener per filtri
         d3.selectAll(`#{element_id}-legend input.legend-filter`).on('change', function(){{
           const lbl = this.getAttribute('data-label');
-          if (this.checked) visibleLabels.add(lbl); 
+          if (this.checked) visibleLabels.add(lbl);
           else visibleLabels.delete(lbl);
           applyVisibilityFilters();
         }});
-        
+
         applyVisibilityFilters();
       }}
 
@@ -1590,7 +1592,7 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
           .attr("stroke-width",2).attr("marker-end","url(#arrowhead)")
           .style("cursor","pointer")
           .on("click", handleEdgeClick);
-        
+
         // 🆕 Stile per edge stub (tratteggiati)
         link = linkEnter.merge(link)
           .classed("selected", l => selectedEdge && edgeKey(l) === edgeKey(selectedEdge))
@@ -1617,7 +1619,7 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
           .on("mouseout", hideTooltip)
           .on("click", handleNodeClick)
           .on("dblclick", expandNode);
-        
+
         node = nodeEnter.merge(node)
           .attr("fill", d => color((d.labels && d.labels[0]) || "Node"))
           .classed("result-node", d => !!d.isResult)
@@ -1629,7 +1631,7 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
         label = labelGroup.selectAll("text").data(nodes, d => d.id);
         label.exit().remove();
         const labelEnter = label.enter().append("text")
-          .attr("fill","#f1f5f9").attr("font-size",12).attr("text-anchor","middle")
+          .attr("fill","#1e293b").attr("font-size",12).attr("text-anchor","middle")
           .attr("font-family","Inter, sans-serif").attr("font-weight","600")
           .attr("pointer-events","none");
         label = labelEnter.merge(label).text(getNodeLabel);
@@ -1655,20 +1657,124 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
       simulation.on("end", () => fit(false));
       setTimeout(() => fit(false), 600);
 
+      const fullscreenBtn = document.getElementById("{element_id}-fullscreen");
+      const exportBtn = document.getElementById("{element_id}-export");
+
+      if (fullscreenBtn) fullscreenBtn.onclick = () => {{
+            const container = document.getElementById("{element_id}");
+            const legendEl = document.getElementById("{element_id}-legend");
+            const btns = container.querySelectorAll(".btn");
+            
+            if (!document.fullscreenElement) {{
+                container.requestFullscreen().catch(err => {{
+                    console.warn("Fullscreen non disponibile:", err);
+                }});
+                fullscreenBtn.textContent = "✕ Esci";
+            }} else {{
+                document.exitFullscreen();
+                fullscreenBtn.textContent = "⛶ Schermo intero";
+            }}
+        }};
+
+        document.addEventListener("fullscreenchange", () => {{
+            const container = document.getElementById("{element_id}");
+            const legendEl = document.getElementById("{element_id}-legend");
+            const btns = container.querySelectorAll(".btn");
+            const infoPanel = document.getElementById("{element_id}-info");
+            
+            if (document.fullscreenElement) {{
+                // Entrato in fullscreen — ingrandisci tutto
+                if (legendEl) {{
+                    legendEl.style.fontSize = "17px";
+                    legendEl.style.maxWidth = "420px";
+                    legendEl.style.padding = "14px 18px";
+                    legendEl.style.lineHeight = "1.7";
+                }}
+                btns.forEach(b => {{
+                    b.style.fontSize = "17px";
+                    b.style.padding = "10px 16px";
+                }});
+                if (infoPanel) {{
+                    infoPanel.style.fontSize = "15px";
+                    infoPanel.style.width = "400px";
+                }}
+                if (fullscreenBtn) fullscreenBtn.textContent = "✕ Esci";
+            }} else {{
+                // Uscito dal fullscreen — ripristina
+                if (legendEl) {{
+                    legendEl.style.fontSize = "";
+                    legendEl.style.maxWidth = "";
+                    legendEl.style.padding = "";
+                    legendEl.style.lineHeight = "";
+                }}
+                btns.forEach(b => {{
+                    b.style.fontSize = "";
+                    b.style.padding = "";
+                }});
+                if (infoPanel) {{
+                    infoPanel.style.fontSize = "";
+                    infoPanel.style.width = "";
+                }}
+                if (fullscreenBtn) fullscreenBtn.textContent = "⛶ Schermo intero";
+            }}
+        }});
+
+      document.addEventListener("fullscreenchange", () => {{
+        if (!document.fullscreenElement && fullscreenBtn) {{
+          fullscreenBtn.textContent = "⛶ Schermo intero";
+        }}
+      }});
+
+      if (exportBtn) exportBtn.onclick = () => {{
+        const svgEl = document.getElementById("{element_id}-svg");
+        if (!svgEl) return;
+
+        // Serializza SVG
+        const serializer = new XMLSerializer();
+        let svgStr = serializer.serializeToString(svgEl);
+
+        // Aggiungi sfondo bianco esplicito per l'export
+        // Aggiungi sfondo al rect trasparente invece che all'svg
+        svgStr = svgStr.replace(
+            'fill="transparent"',
+            'fill="#f8fafc"'
+        );
+
+        const blob = new Blob([svgStr], {{type: "image/svg+xml"}});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "grafo_blueai.svg";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }};
+
     }})();
     </script>
-    
+
     <style>
       #{element_id} .btn {{
-        background: rgba(15,23,42,0.85);
-        color: #cbd5f5;
-        border: 1px solid rgba(59,130,246,0.35);
-        border-radius: 8px;
-        padding: 6px 10px;
-        font-size: 13px;
-        cursor: pointer;
-        transition: all 0.2s ease;
-      }}
+            background: rgba(15,23,42,0.85);
+            color: #cbd5f5;
+            border: 1px solid rgba(59,130,246,0.35);
+            border-radius: 8px;
+            padding: 6px 10px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }}
+
+        @media all {{
+            :fullscreen #{element_id} .btn,
+            :-webkit-full-screen #{element_id} .btn,
+            :-moz-full-screen #{element_id} .btn {{
+                font-size: 18px;
+                padding: 10px 16px;
+                border-radius: 10px;
+            }}
+        }}
       #{element_id} .btn:hover {{
         background: rgba(59,130,246,0.25);
         color: #e0ecff;
@@ -1759,6 +1865,27 @@ def render_graph(graph_data: Dict[str, Any], element_id: Optional[str] = None):
         color: #94a3b8;
       }}
       /* 🆕 Stile checkbox filtri */
+      
+      :fullscreen #{element_id}-legend,
+      :-webkit-full-screen #{element_id}-legend,
+      :-moz-full-screen #{element_id}-legend {{
+          font-size: 16px;
+          max-width: 380px;
+          max-height: 600px;
+          padding: 12px 16px;
+      }}
+
+      :fullscreen #{element_id}-legend strong,
+      :-webkit-full-screen #{element_id}-legend strong {{
+          font-size: 1.2rem;
+      }}
+
+      :fullscreen #{element_id}-legend div,
+      :-webkit-full-screen #{element_id}-legend div {{
+          font-size: 15px;
+          line-height: 1.6;
+    }}
+      
       #{element_id}-legend input[type="checkbox"] {{
         cursor: pointer;
         accent-color: #3b82f6;
@@ -2584,7 +2711,7 @@ if "pending_query" in st.session_state:
     st.rerun()
 
 # Input chat
-if prompt := st.chat_input("Chiedi qualsiasi cosa sul tuo Knowledge Graph..."):
+if prompt := st.chat_input("Chiedi qualcosa sui tuoi dati aziendali.."):
     process_query(prompt)
     st.rerun()
 

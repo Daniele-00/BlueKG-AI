@@ -185,8 +185,8 @@ cypher_write_blocklist:
   - "call dbms"
   - "call apoc.write"
 query_safety:
-  risky_timeout_seconds: 12
-  critical_timeout_seconds: 8
+  risky_timeout_seconds: 45
+  critical_timeout_seconds: 90
   safe_rewrite_limit: 200
   slow_query_log: diagnostics/slow_queries.log
   enable_safe_rewrite: true
@@ -209,3 +209,4 @@ feedback:
 social_router:
   enabled: true
   confidence_threshold: 0.7
+

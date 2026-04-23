@@ -68,19 +68,38 @@ def load_results(json_paths):
 
 def build_config_label(result):
     """
-    Ritorna etichetta con config.
-    Aggiunge top-k solo se presente e diverso da None.
+    Etichetta corta per grafici:
+    - toglie "specialist-" / "hybrid-" / "monolithic-"
+    - compatta il nome modello
+    - aggiunge (k=...) se presente
     """
-    # Cerca top_k nel livello principale o nel summary
-    top_k = result.get("examples_top_k")
+    raw = result.get("config", "config").lower()
 
+    # top-k: cerca in root o summary
+    top_k = result.get("examples_top_k")
     if top_k is None and "summary" in result:
         top_k = result["summary"].get("examples_top_k")
 
-    if top_k is not None:
-        return f"{result['config']}\n(k={top_k})"
+    # Detect model (ordine importante)
+    model = None
+    if "gpt4o" in raw or "gpt-4o" in raw:
+        model = "GPT-4o"
+    elif "gemini" in raw:
+        model = "Gemini"
+    elif "llama3" in raw:
+        model = "Llama3 (coder)"
     else:
-        return result["config"]
+        # fallback: usa config “pulita”
+        model = result.get("config", "Model")
+
+    # Coder-only llama?
+    if "llama3" in raw and ("coder" in raw or "coder-only" in raw):
+        model = "Llama3 (coder)"
+
+    label = model
+    if top_k is not None:
+        label = f"{label} (k={top_k})"
+    return label
 
 
 def extract_timing_data(results_list):
@@ -179,9 +198,9 @@ def plot_accuracy_comparison(results_list, output_dir):
         for r in results_list
     )
 
-    x_label_text = "Configuration (Top-K)" if has_top_k else "Configuration"
+    # x_label_text = "Configuration"
 
-    ax.set_xlabel(x_label_text, fontsize=13, fontweight="bold")
+    # ax.set_xlabel(x_label_text, fontsize=13, fontweight="bold")
     ax.set_title(
         "Strict Accuracy by Configuration",
         fontsize=16,
@@ -189,7 +208,9 @@ def plot_accuracy_comparison(results_list, output_dir):
         pad=20,
     )
     ax.set_xticks(x)
-    ax.set_xticklabels(wrapped_labels, rotation=0, ha="center", fontsize=11)
+    ax.set_xticklabels(labels, rotation=15, ha="right", fontsize=11)
+    plt.subplots_adjust(bottom=0.22)
+    plt.tight_layout()
     ax.set_ylim(0, 110)
     ax.grid(axis="y", alpha=0.4, linestyle="--")
     ax.set_axisbelow(True)
@@ -199,7 +220,13 @@ def plot_accuracy_comparison(results_list, output_dir):
     legend_patches = []
     for model_name in sorted(list(model_names_in_data)):
         if model_name in color_map:
-            patch = mpatches.Patch(color=color_map[model_name], label=model_name)
+            display_name = {
+                "gemini": "Gemini 2.5 Flash",
+                "gpt4o": "GPT-4o",
+                "llama3": "Llama3 (coder)",
+            }.get(model_name, model_name)
+
+            patch = mpatches.Patch(color=color_map[model_name], label=display_name)
             legend_patches.append(patch)
 
     if legend_patches:
@@ -436,7 +463,9 @@ def plot_jaccard_metrics(results_list, output_dir):
         pad=20,
     )
     ax.set_xticks(x)
-    ax.set_xticklabels(wrapped_labels, rotation=0, ha="center", fontsize=11)
+    ax.set_xticklabels(configs, rotation=15, ha="right", fontsize=11)
+    plt.subplots_adjust(bottom=0.22)
+    plt.tight_layout()
     ax.set_ylim(0, 1.1)
     ax.grid(axis="y", alpha=0.4, linestyle="--", zorder=0)
     ax.set_axisbelow(True)
@@ -458,7 +487,13 @@ def plot_jaccard_metrics(results_list, output_dir):
     legend_patches = []
     for model_name in sorted(list(model_names_in_data)):
         if model_name in color_map:
-            patch = mpatches.Patch(color=color_map[model_name], label=model_name)
+            display_name = {
+                "gemini": "Gemini 2.5 Flash",
+                "gpt4o": "GPT-4o",
+                "llama3": "Llama3 (coder)",
+            }.get(model_name, model_name)
+
+            patch = mpatches.Patch(color=color_map[model_name], label=display_name)
             legend_patches.append(patch)
 
     if legend_patches:
@@ -483,72 +518,113 @@ def plot_jaccard_metrics(results_list, output_dir):
 
 
 def plot_jaccard_distribution(results_list, output_dir):
-    """Bar chart: Distribuzione dei punteggi Jaccard per configurazione."""
+    """
+    Versione a 3 subplots (uno per modello).
+    Usa build_config_label per evitare KeyError.
+    """
+    # Definiamo i 'tag' che cercheremo nelle label per raggruppare
+    model_tags = ["Gemini", "GPT-4o", "Llama3"]
     bins = np.linspace(0, 1, 11)
     bin_labels = [f"{b:.1f}" for b in bins[:-1]]
 
-    fig, ax = plt.subplots(figsize=(14, 8))
+    # Colori fissi per k (più eleganti e leggibili)
+    # Blu per k=0, Arancio per k=2, Verde per k=5
+    k_colors = {"0": "#8da0cb", "2": "#fc8d62", "5": "#66c2a5"}
 
-    x = np.arange(len(bin_labels))
-    width = 0.8 / len(results_list)
+    fig, axes = plt.subplots(3, 1, figsize=(12, 12), sharex=True)
 
-    colors = sns.color_palette("Set2", len(results_list))
+    for ax, tag in zip(axes, model_tags):
+        # Filtriamo i risultati usando build_config_label per identificare il modello
+        current_model_results = []
+        for r in results_list:
+            label_full = build_config_label(r)
+            if tag.lower() in label_full.lower():
+                current_model_results.append(r)
 
-    for idx, result in enumerate(results_list):
-        label = build_config_label(result)
-        values = [
-            v
-            for v in (test.get("jaccard_index") for test in result["results"])
-            if isinstance(v, (int, float))
-        ]
-        if not values:
+        if not current_model_results:
+            ax.text(0.5, 0.5, f"Nessun dato per {tag}", ha="center")
             continue
 
-        counts, _ = np.histogram(values, bins=bins)
+        x = np.arange(len(bin_labels))
+        width = 0.25
 
-        offset = (idx - len(results_list) / 2) * width + width / 2
-        bars = ax.bar(
-            x + offset,
-            counts,
-            width,
-            label=label,
-            color=colors[idx],
-            edgecolor="black",
-            linewidth=1,
-            alpha=0.85,
+        for i, result in enumerate(current_model_results):
+            # Estraiamo la label e cerchiamo di capire il valore di k per il colore
+            label = build_config_label(result)
+
+            # Cerchiamo 'k=0', 'k=2', ecc. nella stringa della label
+            k_val = "0"  # default
+            for k_key in ["0", "2", "5"]:
+                if f"k={k_key}" in label:
+                    k_val = k_key
+
+            # Estrazione valori Jaccard
+            values = [
+                v
+                for v in (test.get("jaccard_index") for test in result["results"])
+                if isinstance(v, (int, float))
+            ]
+
+            if not values:
+                continue
+
+            counts, _ = np.histogram(values, bins=bins)
+
+            # Posizionamento barre
+            offset = (i - len(current_model_results) / 2) * width + width / 2
+            bars = ax.bar(
+                x + offset,
+                counts,
+                width,
+                label=f"Esempi few-shot {tag} (k={k_val})",
+                color=k_colors.get(k_val, "#cccccc"),
+                edgecolor="black",
+                linewidth=0.7,
+            )
+
+            # Testo sopra le barre (solo per i valori significativi)
+            for bar in bars:
+                h = bar.get_height()
+                if h > 0:
+                    ax.text(
+                        bar.get_x() + bar.get_width() / 2,
+                        h + 0.5,
+                        str(int(h)),
+                        ha="center",
+                        va="bottom",
+                        fontsize=8,
+                        fontweight="bold",
+                    )
+
+        # Stile del singolo subplot
+        display_tag = f"{tag} 2.5 Flash" if tag == "Gemini" else tag
+        ax.set_title(
+            f"Modello: {display_tag}", fontsize=14, fontweight="bold", loc="left", pad=10
         )
+        ax.set_ylabel("N. Domande", fontsize=10)
+        ax.set_ylim(0, 115)  # Scala fissa per confronto immediato
+        ax.grid(axis="y", alpha=0.3, linestyle="--")
+        ax.legend(loc="upper left", fontsize=9, ncol=3)
 
-        for bar, count in zip(bars, counts):
-            if count > 0:
-                ax.text(
-                    bar.get_x() + bar.get_width() / 2,
-                    bar.get_height() + 0.3,
-                    str(int(count)),
-                    ha="center",
-                    va="bottom",
-                    fontsize=8,
-                    fontweight="bold",
-                )
-
-    ax.set_xlabel("Jaccard Score Range", fontsize=13, fontweight="bold")
-    ax.set_ylabel("Number of Queries", fontsize=13, fontweight="bold")
-    ax.set_title(
-        "Distribution of Jaccard Scores", fontsize=16, fontweight="bold", pad=20
+    plt.xticks(x, bin_labels)
+    axes[-1].set_xlabel(
+        "Indice di Jaccard (0.0: Fallimento | 1.0: Corrispondenza esatta)",
+        fontsize=12,
+        fontweight="bold",
     )
-    ax.set_xticks(x)
-    ax.set_xticklabels(bin_labels, rotation=0)
-    ax.grid(axis="y", alpha=0.4, linestyle="--")
-    ax.set_axisbelow(True)
-    ax.legend(frameon=True, shadow=True, fancybox=True, loc="upper center")
+
+    plt.suptitle(
+        "Distribuzione degli Score Jaccard: Analisi Comparativa per Modello e k",
+        fontsize=18,
+        fontweight="bold",
+        y=1.02,
+    )
 
     plt.tight_layout()
     plt.savefig(
-        output_dir / "jaccard_distribution.png",
-        dpi=300,
-        bbox_inches="tight",
-        facecolor="white",
+        output_dir / "jaccard_distribution_faceted.png", dpi=300, bbox_inches="tight"
     )
-    print(f"✅ Salvato: jaccard_distribution.png")
+    plt.close()  # Libera memoria
 
 
 def plot_timing_distribution(df, output_dir):
