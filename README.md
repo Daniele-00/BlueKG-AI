@@ -1,9 +1,4 @@
 # BlueAI — Conversational ERP Intelligence
-
-<p align="center">
-  <img src="assets/banner.png" alt="BlueAI" width="100%"/>
-</p>
-
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white"/>
   <img src="https://img.shields.io/badge/Neo4j-Knowledge_Graph-008CC1?logo=neo4j&logoColor=white"/>
