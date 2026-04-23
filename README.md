@@ -29,12 +29,12 @@ Ask a question in plain language. Get an accurate, traceable answer grounded in 
 ## Demo
 
 <p align="center">
-  <img src="assets/demo_chat.png" alt="BlueAI Chat Interface" width="80%"/>
+  <img src="assets/ui.png" alt="BlueAI Chat Interface" width="80%"/>
   <br/><em>Natural language query → real-time answer with auto-generated Cypher query</em>
 </p>
 
 <p align="center">
-  <img src="assets/demo_graph.png" alt="Interactive subgraph visualization" width="80%"/>
+  <img src="assets/grafo.png" alt="Interactive subgraph visualization" width="80%"/>
   <br/><em>Interactive subgraph view powered by D3.js — every answer is explainable</em>
 </p>
 
