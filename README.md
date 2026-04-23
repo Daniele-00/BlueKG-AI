@@ -135,4 +135,6 @@ The project covers the full stack: data engineering (ontological modeling + ETL)
 
 **Daniele Nanni Cirulli**  
 MSc Computer Science and Robotics Engineering  
-[LinkedIn](#) · [GitHub](#) · [Email](#)
+- 📧 Email: [danielenannicirulli00@gmail.com](mailto:danielenannicirulli00@gmail.com)
+- 🔗 LinkedIn: [linkedin.com/in/daniele-nanni-cirulli](https://www.linkedin.com/in/daniele-nanni-cirulli-6052b2231/)
+- 🐙 GitHub: [@Daniele-00](https://github.com/Daniele-00)
