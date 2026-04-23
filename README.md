@@ -91,7 +91,7 @@ This stabilizes Cypher generation across models and query types — especially c
 Validated on **106 real-world business questions** across 9 configurations (3 models × 3 values of k).
 
 <p align="center">
-  <img src="assets/results_accuracy.png" alt="Strict Accuracy by model and k" width="80%"/>
+  <img src="assets/accuracy_comparison.png" alt="Strict Accuracy by model and k" width="80%"/>
 </p>
 
 | Model | k=0 | k=2 | k=5 |
